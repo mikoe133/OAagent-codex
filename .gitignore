@@ -4,6 +4,7 @@
 # dependencies / build
 node_modules/
 dist/
+.next/
 
 # misc
 *.log

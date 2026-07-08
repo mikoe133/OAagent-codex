@@ -1,5 +1,9 @@
 # Agent Demo 项目实现规划
 
+> 当前仓库已迁移为前后端分离的 npm workspaces 结构。后端实现位于
+> `agent/`,接口事实来源位于 `agent/openapi/openapi.json`,提示词位于
+> `agent/prompts/`。本文档中保留的早期根目录路径用于记录原始实现规划。
+
 ## 1. 项目目标
 
 本项目要实现一个最小可运行的 agent demo，核心组合固定为：
@@ -490,4 +494,3 @@ path: /files/delete/{file_id}
 - agent 不编造接口或执行结果。
 - agent 对删除、修改、上传、权限、密码等敏感操作先请求确认。
 - 项目中没有额外 Skill、MCP、function tool registry 或多 agent 编排。
-
