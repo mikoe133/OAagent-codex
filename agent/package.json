@@ -1,0 +1,27 @@
+{
+  "name": "agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OA agent backend service.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "tsx src/runtime/cli.ts",
+    "dev:server": "tsx src/runtime/server.ts",
+    "build": "tsc",
+    "start": "node dist/runtime/cli.js",
+    "start:server": "node dist/runtime/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "^0.142.5",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.18",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.2"
+  }
+}

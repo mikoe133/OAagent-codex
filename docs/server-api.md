@@ -1,6 +1,6 @@
 # 服务端接口文档
 
-本文档描述本项目自带的后台服务接口,也就是 `npm run dev:server` 启动的 TypeScript HTTP 服务。它不是 `openapi.json` 中记录的 OA 业务后端接口;`openapi.json` 是 agent 回答 OA 接口问题时读取的事实来源。
+本文档描述本项目自带的后台服务接口,也就是 `npm run dev:server` 启动的 TypeScript HTTP 服务。它不是 `agent/openapi/openapi.json` 中记录的 OA 业务后端接口;`agent/openapi/openapi.json` 是 agent 回答 OA 接口问题时读取的事实来源。
 
 ## 基本信息
 
@@ -21,7 +21,7 @@
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter OpenAI-compatible API 地址。兼容旧变量名 `OPENROUTER_API_BASE_URL` |
 | `CODEX_MODEL_PROVIDER` | `openrouter` | Codex SDK model provider 标识 |
 | `CODEX_MODEL` | `gpt-5.5` | Codex SDK 使用的模型 slug。兼容旧变量名 `OPENROUTER_MODEL`;`gpt5.5` 会自动规范化为 `gpt-5.5` |
-| `OA_API_BASE_URL` | 空 | 可选。配置后 agent 可通过受控 `callOaApi` 工具调用 openapi.json 中声明的 OA 接口 |
+| `OA_API_BASE_URL` | 空 | 可选。配置后 agent 可通过受控 `callOaApi` 工具调用 `agent/openapi/openapi.json` 中声明的 OA 接口 |
 | `OA_API_TOKEN` | 空 | 可选 fallback。OA 后端服务级登录态,只由服务端注入受控工具请求。前端请求 header 中的用户 OA token 优先。旧变量名 `OA_SERVICE_SESSIONID` 会作为兼容别名读取 |
 | `OA_API_TOKEN_HEADER` | `Authorization` | OA 后端 token header 名称 |
 | `OA_API_TOKEN_PREFIX` | `Bearer` | OA 后端 token header 值前缀。设为空时直接发送 token |
@@ -363,9 +363,9 @@ curl -s http://127.0.0.1:3000/v1/sessions
 POST /v1/sessions/{sessionId}/messages
 ```
 
-用途:向指定 session 发送用户消息。服务会调用 Codex agent,由 agent 基于仓库内 `openapi.json` 回答 OA 接口问题;首次进入 Codex agent 时会创建或初始化 Codex thread,后续请求会复用同一个 `threadId` 并带上服务端摘要继续对话。
+用途:向指定 session 发送用户消息。服务会调用 Codex agent,由 agent 基于 `agent/openapi/openapi.json` 回答 OA 接口问题;首次进入 Codex agent 时会创建或初始化 Codex thread,后续请求会复用同一个 `threadId` 并带上服务端摘要继续对话。
 
-服务端不包含按关键词硬编码的 OA 直连分支。配置 `OA_API_BASE_URL` 后,agent 可以通过受控 `callOaApi` 工具调用 openapi.json 中声明的 OA 接口;OA 登录态优先来自当前 session 绑定的用户 token,否则使用 `.env` 中的 `OA_API_TOKEN` fallback。没有可用 OA 登录态时只能做接口分析。
+服务端不包含按关键词硬编码的 OA 直连分支。配置 `OA_API_BASE_URL` 后,agent 可以通过受控 `callOaApi` 工具调用 `agent/openapi/openapi.json` 中声明的 OA 接口;OA 登录态优先来自当前 session 绑定的用户 token,否则使用 `.env` 中的 `OA_API_TOKEN` fallback。没有可用 OA 登录态时只能做接口分析。
 
 鉴权:受 `AGENT_API_TOKEN` 控制。
 
@@ -507,7 +507,7 @@ for (;;) {
 当 `OA_API_BASE_URL` 已配置,且当前 session 已绑定用户 OA token 或服务端已配置 `OA_API_TOKEN` 时,Codex agent 可以通过仓库内的 CLI 调用受控工具:
 
 ```bash
-node scripts/callOaApi.mjs \
+node agent/scripts/callOaApi.mjs \
   --sessionId demo \
   --operationId weekly_report_days_by_month_weekly_report_days_by_month_get \
   --query '{"month":"2026-07","alias":"default"}'
@@ -528,10 +528,10 @@ CLI 参数:
 
 工具行为:
 
-- 只允许调用 `openapi.json` 中存在的 operation。
+- 只允许调用 `agent/openapi/openapi.json` 中存在的 operation。
 - 可通过 `operationId` 定位接口,也可通过 `method` + `path` 定位接口。
 - 如果同时传入 `operationId` 与 `method` 或 `path`,服务端会校验它们必须匹配。
-- agent 自动调用 CLI 时,`scripts/callOaApi.mjs` 会从 `CALL_OA_API_SESSION_ID` 自动带上当前 session;手动调试 CLI 时可显式传 `--sessionId`。
+- agent 自动调用 CLI 时,会在 `agent` 工作目录下运行 `scripts/callOaApi.mjs`,并从 `CALL_OA_API_SESSION_ID` 自动带上当前 session;手动调试 CLI 时可显式传 `--sessionId`。
 - 服务端校验 OpenAPI 中声明为必填的 query/path/body 参数。
 - 必填 header/cookie 参数不允许由 agent 自行传入;遇到这类接口会返回 `unsupported_required_parameters`。
 - 服务端注入 OA 登录态。优先使用当前 `sessionId` 绑定的用户 OA token,否则使用 `.env` 中的 `OA_API_TOKEN`;token 不进入 prompt,也不需要 agent 构造 Authorization header。
@@ -539,7 +539,7 @@ CLI 参数:
 - 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认。
 - 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作需要 agent 先取得用户确认,再传 `--confirmed true`。
 - 工具执行过程会作为 Codex 的 `command_execution` 事件出现在流式响应中。
-- 配置 `OA_API_BASE_URL` 时,Codex thread 会使用 `workspace-write` 沙箱并开启 `network_access`,用于让 `scripts/callOaApi.mjs` 访问本机内部工具端点。
+- 配置 `OA_API_BASE_URL` 时,Codex thread 会使用 `workspace-write` 沙箱并开启 `network_access`,用于让 `agent` 工作目录下的 `scripts/callOaApi.mjs` 访问本机内部工具端点。
 
 内部端点 `POST /__internal/call-oa-api` 只接受本机请求和内部 bearer token,不是对外 API。请求体与 CLI 参数一一对应:
 
@@ -566,7 +566,7 @@ CLI 参数:
 | `200` | 内部工具请求被服务接收。具体 OA 调用是否成功见响应体 `ok` |
 | `401` | 内部 bearer token 不正确 |
 | `403` | 请求不是来自 loopback 地址 |
-| `500` | 请求体不是合法 JSON object、请求体过大、读取 `openapi.json` 失败或其他服务端异常 |
+| `500` | 请求体不是合法 JSON object、请求体过大、读取 `agent/openapi/openapi.json` 失败或其他服务端异常 |
 
 常见工具错误码:
 
@@ -575,7 +575,7 @@ CLI 参数:
 | `oa_not_configured` | 缺少 `OA_API_BASE_URL`,且当前 session 没有用户 OA token、服务端也没有 `OA_API_TOKEN` fallback |
 | `invalid_session_id` | 内部工具请求携带的 `sessionId` 格式非法 |
 | `missing_operation` | 未提供 `operationId`,也未同时提供 `method` 和 `path` |
-| `operation_not_found` | `openapi.json` 中不存在指定 operation |
+| `operation_not_found` | `agent/openapi/openapi.json` 中不存在指定 operation |
 | `operation_mismatch` | `operationId` 与传入的 `method` 或 `path` 不匹配 |
 | `missing_required_parameters` | 缺少 OpenAPI 声明的必填 query/path 参数 |
 | `unsupported_required_parameters` | 接口存在必填 header/cookie 参数,受控工具不支持 agent 传入 |
@@ -618,4 +618,4 @@ CLI 参数:
 - `sessionId` 不符合格式规则。
 - session 存储文件读取或写入失败。
 - agent 未返回最终回答、模型调用失败或 Codex SDK 运行失败。
-- 内部 OA 工具读取 `openapi.json` 或请求 OA 后端失败。
+- 内部 OA 工具读取 `agent/openapi/openapi.json` 或请求 OA 后端失败。
