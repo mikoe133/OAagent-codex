@@ -1,0 +1,10 @@
+# secrets
+.env
+
+# dependencies / build
+node_modules/
+dist/
+
+# misc
+*.log
+.DS_Store
