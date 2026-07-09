@@ -5,6 +5,7 @@ import { MessageSquareDashed } from "lucide-react"
 import { MessageList } from "./message-list"
 import { Composer, type AIModel } from "./composer"
 import { Button } from "@/components/ui/button"
+import LineSidebar from "./siderbar"
 
 // Data model for messages
 export interface Message {
@@ -195,11 +196,33 @@ export function ChatShell() {
         onClick={clearChat}
         variant="ghost"
         size="icon"
-        className="absolute top-4 left-4 z-20 h-10 w-10 rounded-full bg-zinc-100 hover:bg-zinc-200 text-stone-600"
+        className="absolute top-20 left-4 z-20 h-10 w-10 rounded-full bg-zinc-100 hover:bg-zinc-200 text-stone-600"
         aria-label="Reset chat"
       >
         <MessageSquareDashed className="w-5 h-5" />
       </Button>
+      <div className="absolute left-0 top-1/2 z-30 -translate-y-1/2">
+        <LineSidebar
+          items={["Overview", "Components", "Animations", "Backgrounds", "Showcase"]}
+          accentColor="#c4dce4"
+          textColor="#c4c4c4"
+          markerColor="#6c6c6c"
+          showIndex
+          showMarker
+          proximityRadius={100}
+          maxShift={30}
+          falloff="smooth"
+          markerLength={60}
+          markerGap={0}
+          tickScale={0.5}
+          scaleTick
+          itemGap={20}
+          fontSize={1.1}
+          smoothing={100}
+          defaultActive={0}
+          onItemClick={(index, label) => console.log(index, label)}
+        />
+      </div>
 
       <MessageList messages={messages} isStreaming={isStreaming} error={error} onRetry={retry} isLoaded={isLoaded} />
 
