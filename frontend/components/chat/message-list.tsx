@@ -131,7 +131,7 @@ export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }:
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="absolute inset-0 overflow-y-auto pt-16 pb-32 space-y-4 border-none px-6"
+      className="absolute inset-0 overflow-y-auto pt-24 pb-32 space-y-4 border-none px-6"
       role="log"
       aria-label="Chat messages"
       aria-live="polite"
@@ -143,7 +143,7 @@ export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }:
             <AnimatedOrb size={128} />
           </div>
           <p className={`text-lg font-medium text-gray-500 ${hasAnimated ? "text-blur-intro" : ""}`}>
-            Hi, my name is Jarvis
+            Hi, my name is RWKVOS
           </p>
           <p className={`text-sm mt-1 text-gray-400 ${hasAnimated ? "text-blur-intro-delay" : ""}`}>
             Send a message to begin chatting with the AI assistant

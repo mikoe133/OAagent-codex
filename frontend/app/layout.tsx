@@ -12,20 +12,8 @@ export const metadata: Metadata = {
   description: "Chat with our AI assistant powered by Gemini",
   generator: "v0.app",
   icons: {
-    icon: [
-      {
-        url: "/icon-light-32x32.png",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        url: "/icon-dark-32x32.png",
-        media: "(prefers-color-scheme: dark)",
-      },
-      {
-        url: "/icon.svg",
-        type: "image/svg+xml",
-      },
-    ],
+    icon: "/logo/logo.png",
+    shortcut: "/logo/logo.png",
     apple: "/apple-icon.png",
   },
 }
