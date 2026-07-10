@@ -1,5 +1,4 @@
 import { useRef, useState, useCallback, useEffect, CSSProperties } from 'react';
-import './siderbar.css';
 
 type Falloff = 'linear' | 'smooth' | 'sharp';
 

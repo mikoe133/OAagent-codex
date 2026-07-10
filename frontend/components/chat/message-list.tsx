@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react"
 import { MessageBubble } from "./message-bubble"
 import type { Message } from "./chat-shell"
 import { TypingIndicator } from "./typing-indicator"
-import { AlertCircle, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AnimatedOrb } from "./animated-orb"
+import { Alert } from "@/components/ui/hero-alert"
 
 interface MessageListProps {
   messages: Message[]
@@ -146,7 +147,7 @@ export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }:
             Hi, my name is RWKVOS
           </p>
           <p className={`text-sm mt-1 text-gray-400 ${hasAnimated ? "text-blur-intro-delay" : ""}`}>
-            Send a message to begin chatting with the AI assistant
+            Send a message to begin chatting with OA Agent
           </p>
         </div>
       )}
@@ -172,19 +173,16 @@ export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }:
 
       {/* Error state */}
       {error && (
-        <div
-          className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl"
+        <Alert
+          status="danger"
           role="alert"
-          style={{
-            boxShadow:
-              "rgba(14, 63, 126, 0.04) 0px 0px 0px 1px, rgba(42, 51, 69, 0.04) 0px 1px 1px -0.5px, rgba(42, 51, 70, 0.04) 0px 3px 3px -1.5px, rgba(42, 51, 70, 0.04) 0px 6px 6px -3px, rgba(14, 63, 126, 0.04) 0px 12px 12px -6px, rgba(14, 63, 126, 0.04) 0px 24px 24px -12px",
-          }}
+          className="items-center border border-red-200/80 bg-red-50/90 shadow-[rgba(14,63,126,0.04)_0px_0px_0px_1px,rgba(42,51,69,0.04)_0px_1px_1px_-0.5px,rgba(42,51,70,0.04)_0px_3px_3px_-1.5px,rgba(42,51,70,0.04)_0px_6px_6px_-3px,rgba(14,63,126,0.04)_0px_12px_12px_-6px,rgba(14,63,126,0.04)_0px_24px_24px_-12px]"
         >
-          <AlertCircle className="w-5 h-5 text-red-500 shrink-0" aria-hidden="true" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-red-800">Something went wrong</p>
-            <p className="text-xs text-red-600 mt-0.5">{error}</p>
-          </div>
+          <Alert.Indicator />
+          <Alert.Content className="min-w-0 flex-1">
+            <Alert.Title className="text-red-800">Something went wrong</Alert.Title>
+            <Alert.Description className="break-words text-red-600">{error}</Alert.Description>
+          </Alert.Content>
           <Button
             variant="ghost"
             size="sm"
@@ -195,7 +193,7 @@ export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }:
             <RefreshCw className="w-4 h-4 mr-1" aria-hidden="true" />
             Retry
           </Button>
-        </div>
+        </Alert>
       )}
 
       {/* Scroll anchor */}

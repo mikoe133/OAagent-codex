@@ -13926,6 +13926,63 @@
                     }
                 }
             },
+            "patch": {
+                "tags": [
+                    "copilot"
+                ],
+                "summary": "Copilot Record Update",
+                "operationId": "copilot_record_update_copilot_record_patch",
+                "parameters": [
+                    {
+                        "name": "record_id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Record Id"
+                        }
+                    },
+                    {
+                        "name": "alias",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "default": "default",
+                            "title": "Alias"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CopilotRecordCreateInModel"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             "delete": {
                 "tags": [
                     "copilot"
@@ -15760,6 +15817,60 @@
                 "title": "ChatRoomUserInModel"
             },
             "CopilotRecordCreateInModel": {
+                "properties": {
+                    "schema": {
+                        "type": "string",
+                        "default": "oa-agent-chat/v1",
+                        "title": "Schema"
+                    },
+                    "agentSessionId": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Agent Session Id"
+                    },
+                    "threadId": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Thread Id"
+                    },
+                    "summary": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Summary"
+                    },
+                    "title": {
+                        "type": "string",
+                        "title": "Title"
+                    },
+                    "messages": {
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
+                        "type": "array",
+                        "title": "Messages"
+                    }
+                },
+                "type": "object",
+                "additionalProperties": true,
                 "title": "CopilotRecordCreateInModel"
             },
             "CreateDocsInModel": {

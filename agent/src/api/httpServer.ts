@@ -359,6 +359,7 @@ async function streamAgentMessage(
 ): Promise<void> {
   const abortController = new AbortController();
   let closed = false;
+  response.socket?.setNoDelay(true);
   const heartbeat = setInterval(() => {
     if (!response.writableEnded) {
       response.write(": keep-alive\n\n");
@@ -376,6 +377,7 @@ async function streamAgentMessage(
     connection: "keep-alive",
     "x-accel-buffering": "no",
   });
+  response.flushHeaders();
   response.write(": connected\n\n");
 
   try {
@@ -405,8 +407,7 @@ function writeSseEvent(
   response: ServerResponse,
   event: AgentStreamEvent,
 ): void {
-  response.write(`event: ${event.type}\n`);
-  response.write(`data: ${JSON.stringify(event)}\n\n`);
+  response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
 }
 
 function writeJson(

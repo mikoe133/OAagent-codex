@@ -2,25 +2,55 @@
 
 import type React from "react"
 
-import { ArrowRight, LockKeyhole, Mail } from "lucide-react"
+import { ArrowRight, Loader2, LockKeyhole, Mail } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
+import { Alert } from "@/components/ui/hero-alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import TextType from "@/components/text/TextType"
+import { LoginError, loginWithPassword, persistLoginSession } from "@/lib/auth"
 
 export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [remember, setRemember] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+
+    if (isSubmitting) {
+      return
+    }
+
+    const validationMessage = validateLoginForm(email, password)
+    if (validationMessage) {
+      setErrorMessage(validationMessage)
+      return
+    }
+
     setIsSubmitting(true)
-    await new Promise((resolve) => setTimeout(resolve, 350))
-    router.push("/chat")
+    setErrorMessage(null)
+
+    try {
+      const session = await loginWithPassword({
+        email,
+        password,
+        remember,
+      })
+
+      persistLoginSession(session, remember)
+      router.replace(getSafeNextPath())
+    } catch (error) {
+      setErrorMessage(error instanceof LoginError ? error.message : "Sign in failed. Please try again.")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -44,9 +74,16 @@ export default function LoginPage() {
             <h1 className="break-words text-3xl font-semibold leading-tight sm:text-4xl md:text-6xl">
               Sign in to continue.
             </h1>
-            <p className="mt-5 max-w-md text-base leading-7 text-white/78 md:text-lg">
-              Access the workspace and continue your conversation with the AI assistant.
-            </p>
+            <TextType
+              className="mt-5 max-w-md text-base leading-7 text-white/78 md:text-lg"
+              text={["Welcome to RWKVOS!", "Continue your conversation with the AI assistant."]}
+              typingSpeed={75}
+              pauseDuration={1500}
+              showCursor
+              cursorCharacter="_"
+              deletingSpeed={50}
+              cursorBlinkDuration={0.5}
+            />
           </div>
         </div>
 
@@ -57,7 +94,19 @@ export default function LoginPage() {
               <h2 className="mt-2 text-3xl font-semibold text-slate-950">Welcome back</h2>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+              {errorMessage ? (
+                <Alert
+                  status="danger"
+                  className="border border-red-200/70 bg-red-50/85 shadow-sm backdrop-blur-xl"
+                >
+                  <Alert.Indicator />
+                  <Alert.Content>
+                    <Alert.Description className="text-red-900">{errorMessage}</Alert.Description>
+                  </Alert.Content>
+                </Alert>
+              ) : null}
+
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-slate-800">
                   Email
@@ -68,11 +117,18 @@ export default function LoginPage() {
                     id="email"
                     type="email"
                     autoComplete="email"
+                    autoFocus
                     value={email}
-                    onChange={(event) => setEmail(event.target.value)}
+                    onChange={(event) => {
+                      setEmail(event.target.value)
+                      setErrorMessage(null)
+                    }}
                     placeholder="you@example.com"
                     required
-                    className="h-12 rounded-lg border-white/45 bg-white/45 pl-10 text-slate-950 placeholder:text-slate-600/70 shadow-sm backdrop-blur-xl focus-visible:border-white/70 focus-visible:ring-white/55"
+                    aria-invalid={Boolean(errorMessage)}
+                    className="h-12 rounded-lg  bg-white/45 pl-10 text-slate-950
+                     placeholder:text-slate-600/70
+                     focus-visible:border-white/70 focus-visible:ring-white/55"
                   />
                 </div>
               </div>
@@ -88,11 +144,17 @@ export default function LoginPage() {
                     type="password"
                     autoComplete="current-password"
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => {
+                      setPassword(event.target.value)
+                      setErrorMessage(null)
+                    }}
                     placeholder="Enter password"
                     required
-                    className="h-12 rounded-lg border-white/45 bg-white/45 pl-10 text-slate-950 placeholder:text-slate-600/70 shadow-sm backdrop-blur-xl focus-visible:border-white/70 focus-visible:ring-white/55"
-                  />
+                    aria-invalid={Boolean(errorMessage)}
+                    className="h-12 rounded-lg  bg-white/45 pl-10 text-slate-950
+                    placeholder:text-slate-600/70
+                    focus-visible:border-white/70 focus-visible:ring-white/55"
+                    />
                 </div>
               </div>
 
@@ -100,23 +162,32 @@ export default function LoginPage() {
                 <label className="flex items-center gap-2 text-slate-800">
                   <input
                     type="checkbox"
+                    checked={remember}
+                    onChange={(event) => setRemember(event.target.checked)}
                     className="size-4 rounded border-white/60 bg-white/45 accent-slate-950"
                   />
                   Remember me
                 </label>
-                <a href="#" className="font-medium text-slate-900 underline-offset-4 hover:underline">
-                  Forgot password?
-                </a>
+                {/* <span className="font-medium text-slate-700/80">Use your OA account</span> */}
               </div>
 
               <Button
                 type="submit"
                 size="lg"
                 disabled={isSubmitting}
-                className="h-12 w-full rounded-lg bg-slate-950 text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] hover:bg-slate-800"
+                className="h-12 w-full rounded-lg bg-slate-950 text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] hover:bg-slate-950 active:bg-slate-950 disabled:bg-slate-950 disabled:text-white disabled:opacity-100"
               >
-                {isSubmitting ? "Signing in" : "Sign in"}
-                <ArrowRight className="size-4" />
+                {isSubmitting ? (
+                  <>
+                    Signing in...
+                    <Loader2 className="size-4 animate-spin" />
+                  </>
+                ) : (
+                  <>
+                    Sign in
+                    <ArrowRight className="size-4" />
+                  </>
+                )}
               </Button>
             </form>
           </div>
@@ -124,4 +195,40 @@ export default function LoginPage() {
       </section>
     </main>
   )
+}
+
+function validateLoginForm(email: string, password: string): string | null {
+  const trimmedEmail = email.trim()
+
+  if (!trimmedEmail || !password) {
+    return "Please enter your email and password."
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return "Please enter a valid email address."
+  }
+
+  return null
+}
+
+function getSafeNextPath(): string {
+  if (typeof window === "undefined") {
+    return "/chat"
+  }
+
+  const nextPath = new URLSearchParams(window.location.search).get("next")
+  if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/chat"
+  }
+
+  try {
+    const url = new URL(nextPath, window.location.origin)
+    if (url.origin !== window.location.origin || url.pathname === "/login") {
+      return "/chat"
+    }
+
+    return `${url.pathname}${url.search}${url.hash}` || "/chat"
+  } catch {
+    return "/chat"
+  }
 }
