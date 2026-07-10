@@ -5,7 +5,7 @@
 - Tag：`copilot`
 - Prefix：`/copilot`
 - 默认登录：已登录用户
-- 接口数量：4
+- 接口数量：5
 - 源码：`fast/apps/routers/copilot.py`
 
 ## 通用响应
@@ -89,7 +89,7 @@
 
 | 字段 | 类型 | 必填 | 说明 | 默认值 |
 | --- | --- | --- | --- | --- |
-| body | CopilotRecordCreateInModel | 是 | CopilotRecordCreateInModel | - |
+| body | object | 是 | Copilot record JSON 对象 | - |
 
 #### 出参
 
@@ -99,12 +99,44 @@
 - 常见错误：
   - `422: FastAPI 参数校验失败`
 
-### 4. `DELETE /copilot/record`
+### 4. `PATCH /copilot/record`
+
+- 路由：`PATCH /copilot/record`
+- 功能：更新已有 Copilot record，整体覆盖 `record` 字段。
+- 登录：已登录用户（session/token）
+- 源码：`fast/apps/routers/copilot.py:62`
+
+#### 入参
+
+**Query 参数**
+
+| 字段 | 类型 | 必填 | 说明 | 默认值 |
+| --- | --- | --- | --- | --- |
+| record_id | integer | 是 | Record Id | - |
+| alias | Alias | 否 | Alias | default |
+
+**body（application/json，整体必填：是）**
+
+| 字段 | 类型 | 必填 | 说明 | 默认值 |
+| --- | --- | --- | --- | --- |
+| body | object | 是 | 完整 Copilot 会话 JSON 对象，会整体覆盖原 `record` 字段 | - |
+
+#### 出参
+
+- 成功响应：
+  - 统一响应壳；data: item.detail()。
+
+- 常见错误：
+  - `401: 未登录`
+  - `404: copilot record not found: {...}`
+  - `422: FastAPI 参数校验失败`
+
+### 5. `DELETE /copilot/record`
 
 - 路由：`DELETE /copilot/record`
 - 功能：删除 record。
 - 登录：已登录用户（session/token）
-- 源码：`fast/apps/routers/copilot.py:62`
+- 源码：`fast/apps/routers/copilot.py:86`
 
 #### 入参
 

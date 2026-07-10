@@ -26,7 +26,7 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
         "flex max-w-[90%] md:max-w-[80%] gap-2",
         isUser
           ? "ml-auto flex-row-reverse user-message-enter"
-          : "mr-auto animate-in fade-in slide-in-from-bottom-2 duration-300 items-end",
+          : "mr-auto animate-in fade-in slide-in-from-bottom-2 duration-300 items-start",
       )}
     >
       {/* Avatar */}
@@ -34,7 +34,8 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
         className={cn(
           "w-8 h-8 rounded-full flex items-center justify-center shrink-0",
           isUser ? "bg-white" : "bg-emerald-600",
-          !isUser && isStreaming && "sticky bottom-4 self-end transition-all duration-300",
+          !isUser && "sm:mt-2",
+          !isUser && isStreaming && "sticky bottom-4 transition-all duration-300",
         )}
         style={{
           boxShadow:
@@ -48,20 +49,18 @@ export function MessageBubble({ message, isStreaming = false }: MessageBubblePro
       {/* Message content */}
       <div className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
         {/* Role label (optional, shown on larger screens) */}
-        <span className="text-xs text-stone-400 mb-1 hidden sm:block mt-2">{isUser ? "You" : "Assistant"}</span>
+        <span className="text-xs text-stone-400 mb-1 hidden sm:block mt-2">{isUser ? "You" : "OA Agent"}</span>
 
         {/* Bubble */}
         <div
           className={cn(
             "rounded-2xl border-none overflow-hidden",
             isUser
-              ? "bg-white text-stone-800 border border-stone-200 rounded-br-md"
+              ? "bg-[#f4f4f4] text-stone-800 rounded-br-md"
               : "bg-transparent text-stone-800 rounded-bl-md",
           )}
           style={{
-            boxShadow: isUser
-              ? "rgba(14, 63, 126, 0.04) 0px 0px 0px 1px, rgba(42, 51, 69, 0.04) 0px 1px 1px -0.5px, rgba(42, 51, 70, 0.04) 0px 3px 3px -1.5px, rgba(42, 51, 70, 0.04) 0px 6px 6px -3px, rgba(14, 63, 126, 0.04) 0px 12px 12px -6px, rgba(14, 63, 126, 0.04) 0px 24px 24px -12px"
-              : "none",
+            boxShadow: "none",
             willChange: isStreaming ? "height" : "auto",
             transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
           }}
