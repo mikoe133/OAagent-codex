@@ -1,10 +1,11 @@
 "use client"
 
-import { forwardRef, useEffect, useMemo, useState, type InputHTMLAttributes, type ReactNode } from "react"
+import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
 import { ChevronsUpDown, LogOut, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,7 +49,9 @@ type SiderUser = Pick<AuthUser, "email"> & {
 
 type SiderProps = {
   activeSessionId?: string
+  activeRecordId?: string | number | null
   isCollapsed?: boolean
+  focusSessionKey?: number
   onSelectSession?: (session: ChatSessionListItem) => void
   refreshKey?: number
 }
@@ -65,6 +68,7 @@ type NavLinkProps = {
   activeClassName?: string
   active?: boolean
   onSelect?: () => void
+  title?: string
 }
 
 const DEFAULT_TITLE = "New Section"
@@ -89,9 +93,10 @@ const NavLink = ({
   activeClassName = "",
   active = false,
   onSelect,
+  title,
 }: NavLinkProps) => {
   return (
-    <a href={href} onClick={onSelect} className={cn(className, active && activeClassName)}>
+    <a href={href} onClick={onSelect} className={cn(className, active && activeClassName)} title={title}>
       {children}
     </a>
   )
@@ -164,6 +169,65 @@ const UserInfo = ({ user, onLogout }: { user: SiderUser; onLogout: () => void })
   </div>
 )
 
+const DeleteConversationButton = ({ name, onConfirm }: { name: string; onConfirm: () => void }) => {
+  const [open, setOpen] = useState(false)
+  const titleId = useId()
+  const descriptionId = useId()
+
+  function handleConfirm() {
+    setOpen(false)
+    onConfirm()
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Delete ${name}`}
+          className="ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#f5f5f5] opacity-0 transition-[opacity,background-color] duration-150 hover:bg-[#eeeeee] focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f56565]/25 group-hover:opacity-100 data-[state=open]:bg-[#eeeeee] data-[state=open]:opacity-100"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Trash2 className="size-3.5 text-[#f56565]" aria-hidden="true" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="right"
+        align="center"
+        sideOffset={10}
+        collisionPadding={12}
+        role="alertdialog"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className="z-[100] w-60 rounded-lg border-slate-200 bg-white p-3 text-slate-950 shadow-[0_12px_32px_rgba(15,23,42,0.14)]"
+      >
+        <p id={titleId} className="text-sm font-semibold">
+          删除此对话？
+        </p>
+        <p id={descriptionId} className="mt-1 text-xs leading-5 text-slate-500">
+          删除后将无法恢复。
+        </p>
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            type="button"
+            className="h-8 rounded-md px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
+            onClick={() => setOpen(false)}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="h-8 rounded-md bg-red-500 px-3 text-xs font-medium text-white transition-colors hover:bg-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
+            onClick={handleConfirm}
+          >
+            确认删除
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 const SectionsList = ({
   items,
   activeHref,
@@ -178,28 +242,23 @@ const SectionsList = ({
   <div className="px-4 text-slate-600 md:px-8">
     <ul>
       {items.map((item) => (
-        <li key={item.href} className="group flex items-center">
+        <li
+          key={item.href}
+          className="group flex items-center"
+          data-session-id={item.sessionId}
+          data-record-id={item.recordId === undefined ? undefined : String(item.recordId)}
+        >
           <NavLink
             href={item.href}
             active={activeHref === item.href}
             activeClassName="border-[#4f39f7] text-[#0f1828]"
-            className="block min-w-0 flex-1 truncate border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828]"
+            className="block min-w-0 flex-1 border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828]"
             onSelect={() => onSelect(item)}
+            title={item.name}
           >
-            {item.name}
+            <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
           </NavLink>
-          <button
-            type="button"
-            aria-label={`Delete ${item.name}`}
-            className="ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#f5f5f5] opacity-0 transition-opacity duration-150 hover:bg-[#eeeeee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f56565]/25 group-hover:opacity-100"
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              onDelete(item.href)
-            }}
-          >
-            <Trash2 className="size-3.5 text-[#f56565]" aria-hidden="true" />
-          </button>
+          <DeleteConversationButton name={item.name} onConfirm={() => onDelete(item.href)} />
         </li>
       ))}
     </ul>
@@ -207,11 +266,23 @@ const SectionsList = ({
 )
 
 const Sider = forwardRef<HTMLElement, SiderProps>(
-  ({ activeSessionId, isCollapsed = false, onSelectSession, refreshKey = 0 }, ref) => {
+  (
+    {
+      activeSessionId,
+      activeRecordId = null,
+      isCollapsed = false,
+      focusSessionKey = 0,
+      onSelectSession,
+      refreshKey = 0,
+    },
+    ref,
+  ) => {
     const [sections, setSections] = useState<Section[]>(defaultSections)
     const [activeHref, setActiveHref] = useState(defaultItem.href)
     const [query, setQuery] = useState("")
     const [user, setUser] = useState<SiderUser>(() => buildFallbackUser())
+    const sessionListRef = useRef<HTMLDivElement>(null)
+    const handledFocusSessionKeyRef = useRef(focusSessionKey)
 
     function handleDeleteItem(href: string) {
       const nextSections = sections
@@ -262,9 +333,9 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
 
     useEffect(() => {
       if (activeSessionId) {
-        setActiveHref(buildSessionHref(activeSessionId))
+        setActiveHref(buildSessionHref(activeSessionId, activeRecordId))
       }
-    }, [activeSessionId])
+    }, [activeRecordId, activeSessionId])
 
     useEffect(() => {
       const abortController = new AbortController()
@@ -279,35 +350,37 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
           })
 
           if (!response.ok) {
-            const fallbackItems = resolveSessionItems(undefined, activeSessionId)
+            const fallbackItems = resolveSessionItems(undefined, activeSessionId, activeRecordId)
             setSections(buildConversationSections(fallbackItems))
-            setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId))
+            setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId, activeRecordId))
             return
           }
 
           const payload = (await response.json()) as SessionsResponse
-          const nextItems = resolveSessionItems(payload.sessions, activeSessionId)
+          const nextItems = resolveSessionItems(payload.sessions, activeSessionId, activeRecordId)
 
           setSections(buildConversationSections(nextItems))
           setActiveHref((current) => {
-            const preferredHref = resolvePreferredHref(nextItems, activeSessionId)
-            return nextItems.some((item) => item.href === current) && !activeSessionId ? current : preferredHref
+            const preferredHref = resolvePreferredHref(nextItems, activeSessionId, activeRecordId)
+            return nextItems.some((item) => item.href === current) && !activeSessionId && activeRecordId === null
+              ? current
+              : preferredHref
           })
         } catch (error) {
           if (error instanceof Error && error.name === "AbortError") {
             return
           }
 
-          const fallbackItems = resolveSessionItems(undefined, activeSessionId)
+          const fallbackItems = resolveSessionItems(undefined, activeSessionId, activeRecordId)
           setSections(buildConversationSections(fallbackItems))
-          setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId))
+          setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId, activeRecordId))
         }
       }
 
       void loadSessions()
 
       return () => abortController.abort()
-    }, [activeSessionId, refreshKey])
+    }, [activeRecordId, activeSessionId, refreshKey])
 
     const filteredSections = useMemo(() => {
       const normalizedQuery = normalizeSearchText(query)
@@ -324,6 +397,38 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         }))
         .filter((section) => section.items.length > 0)
     }, [query, sections])
+
+    useEffect(() => {
+      if (handledFocusSessionKeyRef.current === focusSessionKey || !activeSessionId) {
+        return
+      }
+
+      if (query) {
+        setQuery("")
+        return
+      }
+
+      const sessionItems = sessionListRef.current?.querySelectorAll<HTMLElement>("[data-session-id]")
+      const targetRecordId = activeRecordId === null ? null : String(activeRecordId)
+      const activeItem = Array.from(sessionItems || []).find((item) => {
+        if (item.dataset.sessionId !== activeSessionId) {
+          return false
+        }
+
+        return targetRecordId === null || item.dataset.recordId === targetRecordId
+      })
+
+      if (!activeItem) {
+        return
+      }
+
+      handledFocusSessionKeyRef.current = focusSessionKey
+      activeItem.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "center",
+        inline: "nearest",
+      })
+    }, [activeRecordId, activeSessionId, filteredSections, focusSessionKey, query])
 
     return (
       <nav
@@ -344,24 +449,49 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-7 overflow-y-auto py-7">
-          {filteredSections.length > 0 ? (
-            filteredSections.map((section) => (
-              <div key={section.title}>
-                {/* <Title>{section.title}</Title> */}
-                <SectionsList
-                  items={section.items}
-                  activeHref={activeHref}
-                  onSelect={handleSelectItem}
-                  onDelete={handleDeleteItem}
-                />
-              </div>
-            ))
-          ) : (
-            <p className="px-8 text-sm text-slate-400">
-              {query.trim() ? `No conversations matching "${query.trim()}"` : "No conversations"}
-            </p>
-          )}
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div
+            ref={sessionListRef}
+            className="min-h-0 h-full space-y-7 overflow-y-auto py-14 scroll-py-14 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {filteredSections.length > 0 ? (
+              filteredSections.map((section) => (
+                <div key={section.title}>
+                  {/* <Title>{section.title}</Title> */}
+                  <SectionsList
+                    items={section.items}
+                    activeHref={activeHref}
+                    onSelect={handleSelectItem}
+                    onDelete={handleDeleteItem}
+                  />
+                </div>
+              ))
+            ) : (
+              <p className="px-8 text-sm text-slate-400">
+                {query.trim() ? `No conversations matching "${query.trim()}"` : "No conversations"}
+              </p>
+            )}
+          </div>
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-white/95 backdrop-blur-[2px]"
+            style={{
+              WebkitMaskImage:
+                "linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.995) 10%, rgba(0,0,0,0.975) 20%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.82) 42%, rgba(0,0,0,0.66) 54%, rgba(0,0,0,0.46) 66%, rgba(0,0,0,0.27) 77%, rgba(0,0,0,0.12) 87%, rgba(0,0,0,0.03) 95%, transparent 100%)",
+              maskImage:
+                "linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.995) 10%, rgba(0,0,0,0.975) 20%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.82) 42%, rgba(0,0,0,0.66) 54%, rgba(0,0,0,0.46) 66%, rgba(0,0,0,0.27) 77%, rgba(0,0,0,0.12) 87%, rgba(0,0,0,0.03) 95%, transparent 100%)",
+            }}
+            aria-hidden="true"
+          />
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-white/95 backdrop-blur-[2px]"
+            style={{
+              WebkitMaskImage:
+                "linear-gradient(to top, #000 0%, rgba(0,0,0,0.995) 10%, rgba(0,0,0,0.975) 20%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.82) 42%, rgba(0,0,0,0.66) 54%, rgba(0,0,0,0.46) 66%, rgba(0,0,0,0.27) 77%, rgba(0,0,0,0.12) 87%, rgba(0,0,0,0.03) 95%, transparent 100%)",
+              maskImage:
+                "linear-gradient(to top, #000 0%, rgba(0,0,0,0.995) 10%, rgba(0,0,0,0.975) 20%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.82) 42%, rgba(0,0,0,0.66) 54%, rgba(0,0,0,0.46) 66%, rgba(0,0,0,0.27) 77%, rgba(0,0,0,0.12) 87%, rgba(0,0,0,0.03) 95%, transparent 100%)",
+            }}
+            aria-hidden="true"
+          />
         </div>
         <div className="shrink-0 border-t border-slate-100 bg-white/95">
           <UserInfo user={user} onLogout={handleLogout} />
@@ -375,21 +505,21 @@ Sider.displayName = "Sider"
 
 export default Sider
 
-function resolveSessionItems(value: unknown, activeSessionId?: string): NavItem[] {
+function resolveSessionItems(value: unknown, activeSessionId?: string, activeRecordId?: string | number | null): NavItem[] {
   if (!Array.isArray(value)) {
-    return activeSessionId ? [buildSessionItem(activeSessionId)] : [defaultItem]
+    return activeSessionId ? [buildSessionItem(activeSessionId, activeRecordId)] : [defaultItem]
   }
 
   const items: NavItem[] = value.filter(isAgentSession).map((session) => ({
     name: resolveSessionTitle(session.summary),
-    href: buildSessionHref(session.sessionId),
+    href: buildSessionHref(session.sessionId, session.recordId),
     sessionId: session.sessionId,
     ...(session.recordId ? { recordId: session.recordId } : {}),
     searchText: buildSessionSearchText(session),
   }))
 
   if (activeSessionId && !items.some((item) => item.sessionId === activeSessionId)) {
-    items.unshift(buildSessionItem(activeSessionId))
+    items.unshift(buildSessionItem(activeSessionId, activeRecordId))
   }
 
   return items.length > 0 ? items : [defaultItem]
@@ -404,24 +534,34 @@ function buildConversationSections(items: NavItem[]): Section[] {
   ]
 }
 
-function buildSessionItem(sessionId: string): NavItem {
+function buildSessionItem(sessionId: string, recordId?: string | number | null): NavItem {
   return {
     name: DEFAULT_TITLE,
-    href: buildSessionHref(sessionId),
+    href: buildSessionHref(sessionId, recordId),
     sessionId,
+    ...(recordId ? { recordId } : {}),
     searchText: normalizeSearchText([DEFAULT_TITLE, sessionId].join(" ")),
   }
 }
 
-function buildSessionHref(sessionId: string): string {
+function buildSessionHref(sessionId: string, recordId?: string | number | null): string {
+  if (recordId !== null && recordId !== undefined && String(recordId).trim()) {
+    return `#record-${encodeURIComponent(String(recordId))}`
+  }
+
   return `#session-${encodeURIComponent(sessionId)}`
 }
 
-function resolvePreferredHref(items: NavItem[], activeSessionId?: string): string {
+function resolvePreferredHref(items: NavItem[], activeSessionId?: string, activeRecordId?: string | number | null): string {
   if (activeSessionId) {
-    const activeHref = buildSessionHref(activeSessionId)
+    const activeHref = buildSessionHref(activeSessionId, activeRecordId)
     if (items.some((item) => item.href === activeHref)) {
       return activeHref
+    }
+
+    const sessionItem = items.find((item) => item.sessionId === activeSessionId)
+    if (sessionItem) {
+      return sessionItem.href
     }
   }
 

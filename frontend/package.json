@@ -6,7 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "test:chat": "tsx --test components/chat/chat-stream.test.ts components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts"
   },
   "dependencies": {
     "@heroui/react": "^3.2.2",
@@ -56,8 +57,10 @@
     "react-day-picker": "9.8.0",
     "react-dom": "19.2.0",
     "react-hook-form": "^7.60.0",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.4",
+    "remark-gfm": "^4.0.1",
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
@@ -71,6 +74,7 @@
     "@types/react-dom": "^19",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
+    "tsx": "^4.23.0",
     "tw-animate-css": "1.3.3",
     "typescript": "^5"
   }
