@@ -7,16 +7,32 @@ import { MessageList } from "./message-list"
 import { Composer, type AIModel } from "./composer"
 import { Button } from "@/components/ui/button"
 import Sider, { type ChatSessionListItem } from "@/components/siderbar/Sider"
+import {
+  drainChatSseBuffer,
+  isToolTimelineEvent,
+  mergeToolTimelineEvent,
+  type ChatStreamEvent,
+  type ToolStep,
+} from "./chat-stream"
 // import LineSidebar from "./siderbar"
 
 // Data model for messages
+export type MessageStatus = "streaming" | "completed" | "stopped" | "failed"
+export type MessageFeedback = "like" | "dislike" | null
+
 export interface Message {
   id: string
   role: "user" | "assistant"
   content: string
   createdAt: Date
   imageData?: string
+  toolSteps?: ToolStep[]
+  status?: MessageStatus
+  error?: string
+  feedback?: MessageFeedback
 }
+
+export type { ToolStep, ToolStepStatus } from "./chat-stream"
 
 // localStorage key for persisting messages
 const STORAGE_KEY = "chat-messages"
@@ -43,19 +59,14 @@ type StoredMessage = {
   content?: unknown
   createdAt?: unknown
   imageData?: unknown
+  toolSteps?: unknown
+  status?: unknown
+  error?: unknown
+  feedback?: unknown
 }
 
 type ChatSessionResponse = {
   session?: ChatSessionRecord
-}
-
-type ChatStreamEvent = {
-  type?: unknown
-  delta?: unknown
-  error?: unknown
-  result?: {
-    finalResponse?: unknown
-  }
 }
 
 // Generates a unique ID for messages
@@ -114,32 +125,12 @@ function nextTypewriterEndIndex(text: string, startIndex: number, maxChars: numb
   return index
 }
 
-function drainChatSseBuffer(buffer: string, onEvent: (event: ChatStreamEvent) => void): string {
-  const chunks = buffer.replace(/\r\n/g, "\n").split("\n\n")
-  const remainder = chunks.pop() || ""
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
 
-  for (const chunk of chunks) {
-    const data = chunk
-      .split("\n")
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trimStart())
-      .join("\n")
-
-    if (!data) {
-      continue
-    }
-
-    try {
-      onEvent(JSON.parse(data) as ChatStreamEvent)
-    } catch (error) {
-      if (error instanceof SyntaxError) {
-        continue
-      }
-      throw error
-    }
-  }
-
-  return remainder
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
 async function createChatSession(sessionId: string): Promise<ChatSessionRecord | null> {
@@ -223,6 +214,21 @@ async function saveChatSession(input: {
   return payload.session || null
 }
 
+async function readResponseError(response: Response): Promise<string> {
+  const fallback = `Request failed with status ${response.status}`
+  const text = await response.text()
+  if (!text.trim()) {
+    return fallback
+  }
+
+  try {
+    const payload = JSON.parse(text) as { error?: unknown; message?: unknown }
+    return stringValue(payload.error) || stringValue(payload.message) || fallback
+  } catch {
+    return text.trim()
+  }
+}
+
 function serializeMessage(message: Message): StoredMessage {
   return {
     ...message,
@@ -248,13 +254,78 @@ function normalizeStoredMessage(value: unknown): Message | null {
     return null
   }
 
+  const createdAt = typeof message.createdAt === "string" ? new Date(message.createdAt) : new Date()
+  const status = normalizeStoredMessageStatus(message.status, message.role)
+  const feedback = message.feedback === "like" || message.feedback === "dislike" ? message.feedback : null
+  const messageError = stringValue(message.error)
+
   return {
     id: typeof message.id === "string" && message.id ? message.id : generateId(),
     role: message.role,
     content: message.content,
-    createdAt: typeof message.createdAt === "string" ? new Date(message.createdAt) : new Date(),
+    createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
     ...(typeof message.imageData === "string" ? { imageData: message.imageData } : {}),
+    ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
+    ...(status ? { status } : {}),
+    ...(messageError ? { error: messageError } : {}),
+    ...(feedback ? { feedback } : {}),
   }
+}
+
+function normalizeStoredMessageStatus(value: unknown, role: "user" | "assistant"): MessageStatus | undefined {
+  if (role === "user") {
+    return undefined
+  }
+  if (value === "streaming") {
+    return "stopped"
+  }
+  if (value === "completed" || value === "stopped" || value === "failed") {
+    return value
+  }
+  return "completed"
+}
+
+function normalizeStoredToolSteps(value: unknown[]): ToolStep[] {
+  return value.map(normalizeStoredToolStep).filter((step): step is ToolStep => Boolean(step))
+}
+
+function normalizeStoredToolStep(value: unknown): ToolStep | null {
+  const step = toRecord(value)
+  if (!step) {
+    return null
+  }
+
+  const id = stringValue(step.id)
+  const type = stringValue(step.type)
+  const title = stringValue(step.title)
+  const description = stringValue(step.description)
+  const status = normalizeStoredToolStatus(step.status)
+  const input = typeof step.input === "string" && step.input.trim() ? step.input : null
+  const output = typeof step.output === "string" && step.output.trim() ? step.output : null
+
+  if (!id || !type || !title || !description) {
+    return null
+  }
+
+  return {
+    id,
+    type,
+    title,
+    description,
+    status,
+    ...(input ? { input } : {}),
+    ...(output ? { output } : {}),
+  }
+}
+
+function normalizeStoredToolStatus(value: unknown): ToolStep["status"] {
+  if (value === "running") {
+    return "info"
+  }
+  if (value === "completed" || value === "failed" || value === "info") {
+    return value
+  }
+  return "info"
 }
 
 export function ChatShell() {
@@ -266,6 +337,7 @@ export function ChatShell() {
   const [agentSessionId, setAgentSessionId] = useState("")
   const [activeRecordId, setActiveRecordId] = useState<string | number | null>(null)
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
+  const [sessionListFocusKey, setSessionListFocusKey] = useState(0)
   const [isSiderCollapsed, setIsSiderCollapsed] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const siderRef = useRef<HTMLElement | null>(null)
@@ -274,7 +346,9 @@ export function ChatShell() {
   const composerLayoutRef = useRef<HTMLDivElement | null>(null)
   const hasAppliedSiderLayoutRef = useRef(false)
   const activeSessionIdRef = useRef("")
+  const activeRequestIdRef = useRef<string | null>(null)
   const messagesRef = useRef<Message[]>([])
+  const sessionSaveQueuesRef = useRef(new Map<string, Promise<void>>())
 
   // Load messages from localStorage on mount
   useEffect(() => {
@@ -413,12 +487,43 @@ export function ChatShell() {
     localStorage.setItem(MODEL_STORAGE_KEY, model)
   }, [])
 
+  const persistMessages = useCallback(
+    (sessionId: string, recordId: string | number | null, nextMessages: Message[]) => {
+      const previousSave = sessionSaveQueuesRef.current.get(sessionId) || Promise.resolve()
+      const currentSave = previousSave
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            const session = await saveChatSession({ sessionId, recordId, messages: nextMessages })
+            if (session?.recordId && activeSessionIdRef.current === sessionId) {
+              setActiveRecordId(session.recordId)
+            }
+          } catch (saveError) {
+            console.error("Failed to save chat session:", saveError)
+          } finally {
+            setSessionListRefreshKey((value) => value + 1)
+          }
+        })
+
+      sessionSaveQueuesRef.current.set(sessionId, currentSave)
+      void currentSave.finally(() => {
+        if (sessionSaveQueuesRef.current.get(sessionId) === currentSave) {
+          sessionSaveQueuesRef.current.delete(sessionId)
+        }
+      })
+
+      return currentSave
+    },
+    [],
+  )
+
   // Send a message to the AI
   const sendMessage = useCallback(
     async (content: string, imageData?: string) => {
       if ((!content.trim() && !imageData) || isStreaming) return
 
       setError(null)
+      const conversationMessages = messagesRef.current
 
       const userMessage: Message = {
         id: generateId(),
@@ -433,9 +538,19 @@ export function ChatShell() {
         role: "assistant",
         content: "",
         createdAt: new Date(),
+        status: "streaming",
       }
 
-      const newMessages = [...messages, userMessage, assistantMessage]
+      const currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
+      if (!agentSessionId) {
+        activeSessionIdRef.current = currentAgentSessionId
+        setAgentSessionId(currentAgentSessionId)
+      }
+
+      const requestId = generateId()
+      activeRequestIdRef.current = requestId
+
+      const newMessages = [...conversationMessages, userMessage, assistantMessage]
       messagesRef.current = newMessages
       setMessages(newMessages)
       setIsStreaming(true)
@@ -443,14 +558,14 @@ export function ChatShell() {
       const controller = new AbortController()
       setAbortController(controller)
       let cancelPendingTypewriter = () => {}
+      let accumulatedContent = ""
+      let visibleContent = ""
+      let currentToolSteps: ToolStep[] = []
+
+      const isCurrentRequest = () =>
+        activeRequestIdRef.current === requestId && activeSessionIdRef.current === currentAgentSessionId
 
       try {
-        const currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
-        if (!agentSessionId) {
-          activeSessionIdRef.current = currentAgentSessionId
-          setAgentSessionId(currentAgentSessionId)
-        }
-
         const response = await fetch("/api/chat", {
           method: "POST",
           credentials: "same-origin",
@@ -460,7 +575,7 @@ export function ChatShell() {
           },
           body: JSON.stringify({
             sessionId: currentAgentSessionId,
-            messages: [...messages, userMessage].map((m) => ({
+            messages: [...conversationMessages, userMessage].map((m) => ({
               role: m.role,
               content: m.content,
               imageData: m.imageData,
@@ -476,7 +591,7 @@ export function ChatShell() {
         }
 
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
+          throw new Error(await readResponseError(response))
         }
 
         const reader = response.body?.getReader()
@@ -486,17 +601,49 @@ export function ChatShell() {
           throw new Error("No response body")
         }
 
-        let accumulatedContent = ""
-        let visibleContent = ""
         let typewriterTimer: ReturnType<typeof setTimeout> | null = null
         let typewriterCancelled = false
         let typewriterFlushPromise: Promise<void> | null = null
         let resolveTypewriterFlush: (() => void) | null = null
 
         const updateAssistantMessage = (content: string) => {
-          setMessages((prev) =>
-            prev.map((msg) => (msg.id === assistantMessage.id ? { ...msg, content } : msg)),
-          )
+          if (!isCurrentRequest()) {
+            return
+          }
+
+          setMessages((previousMessages) => {
+            if (!isCurrentRequest()) {
+              return previousMessages
+            }
+            const nextMessages = previousMessages.map((message) =>
+              message.id === assistantMessage.id ? { ...message, content, status: "streaming" as const } : message,
+            )
+            messagesRef.current = nextMessages
+            return nextMessages
+          })
+        }
+
+        const updateAssistantToolSteps = (nextSteps: ToolStep[]) => {
+          currentToolSteps = nextSteps
+          if (!isCurrentRequest()) {
+            return
+          }
+
+          setMessages((previousMessages) => {
+            if (!isCurrentRequest()) {
+              return previousMessages
+            }
+            const nextMessages = previousMessages.map((message) =>
+              message.id === assistantMessage.id
+                ? {
+                    ...message,
+                    toolSteps: nextSteps.length > 0 ? nextSteps : undefined,
+                  }
+                : message,
+            )
+            messagesRef.current = nextMessages
+            return nextMessages
+          })
         }
 
         const resolveFlushIfIdle = () => {
@@ -596,19 +743,27 @@ export function ChatShell() {
           }
 
           accumulatedContent = finalContent
-          visibleContent = ""
-          updateAssistantMessage("")
-          scheduleTypewriter()
+          if (finalContent.startsWith(visibleContent)) {
+            scheduleTypewriter()
+          } else {
+            visibleContent = finalContent
+            updateAssistantMessage(finalContent)
+          }
         }
 
         const handleChatStreamEvent = (event: ChatStreamEvent) => {
+          if (isToolTimelineEvent(stringValue(event.type))) {
+            updateAssistantToolSteps(mergeToolTimelineEvent(currentToolSteps, event))
+            return
+          }
+
           if (event.type === "message.delta" && typeof event.delta === "string") {
             appendAssistantContent(event.delta)
             return
           }
 
           if (event.type === "run.completed") {
-            const finalResponse = event.result?.finalResponse
+            const finalResponse = toRecord(event.result)?.finalResponse
             if (typeof finalResponse === "string") {
               applyFinalContent(finalResponse)
             }
@@ -649,60 +804,69 @@ export function ChatShell() {
 
         await waitForTypewriterFlush()
         cancelTypewriter()
-        updateAssistantMessage(accumulatedContent)
+        currentToolSteps = currentToolSteps.map((step) =>
+          step.status === "running" ? { ...step, status: "completed" as const } : step,
+        )
 
-        const completedMessages = [
-          ...messages,
+        const completedMessages: Message[] = [
+          ...conversationMessages,
           userMessage,
           {
             ...assistantMessage,
             content: accumulatedContent,
+            status: "completed",
+            ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
           },
         ]
-        messagesRef.current = completedMessages
 
-        void saveChatSession({
-          sessionId: currentAgentSessionId,
-          recordId: activeRecordId,
-          messages: completedMessages,
-        })
-          .then((session) => {
-            if (session?.recordId && activeSessionIdRef.current === currentAgentSessionId) {
-              setActiveRecordId(session.recordId)
-            }
-          })
-          .catch((error) => {
-            console.error("Failed to save chat session:", error)
-          })
-          .finally(() => {
-            setSessionListRefreshKey((value) => value + 1)
-          })
+        if (isCurrentRequest()) {
+          messagesRef.current = completedMessages
+          setMessages(completedMessages)
+        }
 
-        setSessionListRefreshKey((value) => value + 1)
+        void persistMessages(currentAgentSessionId, activeRecordId, completedMessages)
       } catch (e) {
         cancelPendingTypewriter()
 
-        if (e instanceof Error && e.name === "AbortError") {
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMessage.id ? { ...msg, content: msg.content || "[Cancelled]" } : msg,
-            ),
-          )
-        } else {
-          console.error("Error sending message:", e)
-          setError(e instanceof Error ? e.message : "An error occurred")
-          setMessages((prev) => {
-            const nextMessages = prev.filter((msg) => msg.id !== assistantMessage.id)
-            messagesRef.current = nextMessages
-            return nextMessages
-          })
+        const wasStopped = e instanceof Error && e.name === "AbortError"
+        const errorMessage = e instanceof Error ? e.message : "An error occurred"
+        currentToolSteps = currentToolSteps.map((step) =>
+          step.status === "running"
+            ? { ...step, status: wasStopped ? ("info" as const) : ("failed" as const) }
+            : step,
+        )
+
+        const terminalMessages: Message[] = [
+          ...conversationMessages,
+          userMessage,
+          {
+            ...assistantMessage,
+            content: accumulatedContent || visibleContent,
+            status: wasStopped ? "stopped" : "failed",
+            ...(!wasStopped ? { error: errorMessage } : {}),
+            ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
+          },
+        ]
+
+        if (isCurrentRequest()) {
+          messagesRef.current = terminalMessages
+          setMessages(terminalMessages)
+          if (!wasStopped) {
+            console.error("Error sending message:", e)
+            setError(errorMessage)
+          }
         }
+
+        void persistMessages(currentAgentSessionId, activeRecordId, terminalMessages)
       } finally {
-        setIsStreaming(false)
-        setAbortController(null)
+        if (activeRequestIdRef.current === requestId) {
+          activeRequestIdRef.current = null
+          setIsStreaming(false)
+          setAbortController(null)
+        }
       }
     },
-    [messages, isStreaming, selectedModel, agentSessionId, activeRecordId],
+    [isStreaming, selectedModel, agentSessionId, activeRecordId, persistMessages],
   )
 
   const retry = useCallback(() => {
@@ -710,7 +874,9 @@ export function ChatShell() {
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user")
     if (lastUserMessage) {
       const index = messages.findIndex((m) => m.id === lastUserMessage.id)
-      setMessages(messages.slice(0, index))
+      const retryMessages = messages.slice(0, index)
+      messagesRef.current = retryMessages
+      setMessages(retryMessages)
       setError(null)
       setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.imageData), 100)
     }
@@ -722,15 +888,36 @@ export function ChatShell() {
     }
   }, [abortController])
 
+  const handleMessageFeedback = useCallback(
+    (messageId: string, feedback: Message["feedback"]) => {
+      const nextMessages = messagesRef.current.map((message) =>
+        message.id === messageId ? { ...message, feedback: feedback ?? null } : message,
+      )
+      messagesRef.current = nextMessages
+      setMessages(nextMessages)
+
+      const currentSessionId = activeSessionIdRef.current
+      if (currentSessionId) {
+        void persistMessages(currentSessionId, activeRecordId, nextMessages)
+      }
+    },
+    [activeRecordId, persistMessages],
+  )
+
   const startNewSession = useCallback(() => {
+    setSessionListFocusKey((value) => value + 1)
+
     if (!isStreaming && messagesRef.current.length === 0) {
       setError(null)
       return
     }
 
+    activeRequestIdRef.current = null
     if (abortController) {
       abortController.abort()
     }
+    setAbortController(null)
+    setIsStreaming(false)
 
     const nextAgentSessionId = createAgentSessionId()
 
@@ -760,9 +947,12 @@ export function ChatShell() {
 
   const handleSelectSession = useCallback(
     async (session: ChatSessionListItem) => {
+      activeRequestIdRef.current = null
       if (abortController) {
         abortController.abort()
       }
+      setAbortController(null)
+      setIsStreaming(false)
 
       setError(null)
       setIsLoaded(false)
@@ -841,7 +1031,9 @@ export function ChatShell() {
       <Sider
         ref={siderRef}
         activeSessionId={agentSessionId}
+        activeRecordId={activeRecordId}
         isCollapsed={isSiderCollapsed}
+        focusSessionKey={sessionListFocusKey}
         onSelectSession={handleSelectSession}
         refreshKey={sessionListRefreshKey}
       />
@@ -889,7 +1081,14 @@ export function ChatShell() {
       */}
 
       <div ref={messageLayoutRef} className="absolute inset-0 sm:left-80">
-        <MessageList messages={messages} isStreaming={isStreaming} error={error} onRetry={retry} isLoaded={isLoaded} />
+        <MessageList
+          messages={messages}
+          isStreaming={isStreaming}
+          error={error}
+          onRetry={retry}
+          onFeedback={handleMessageFeedback}
+          isLoaded={isLoaded}
+        />
       </div>
 
       <Composer
@@ -897,7 +1096,6 @@ export function ChatShell() {
         onSend={sendMessage}
         onStop={stopStreaming}
         isStreaming={isStreaming}
-        disabled={!!error}
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
       />

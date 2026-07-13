@@ -6,6 +6,9 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth"
 const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
 const COPILOT_RECORD_SCHEMA = "oa-agent-chat/v1"
 const DEFAULT_TITLE = "New Section"
+const COPILOT_LIST_PAGE_SIZE = 100
+const MAX_COPILOT_LIST_PAGES = 50
+const DEFAULT_AGENT_API_BASE_URL = "http://127.0.0.1:3000"
 
 type CreateSessionBody = {
   sessionId?: unknown
@@ -19,11 +22,18 @@ type CreateSessionBody = {
 type CopilotListEnvelope = {
   data?: {
     items?: unknown
+    page?: unknown
+    size?: unknown
+    total?: unknown
   } | null
 }
 
 type CopilotRecordEnvelope = {
   data?: unknown
+}
+
+type AgentListEnvelope = {
+  sessions?: unknown
 }
 
 type NormalizedSession = {
@@ -42,6 +52,29 @@ type NormalizedMessage = {
   content: string
   createdAt: string
   imageData?: string
+  toolSteps?: NormalizedToolStep[]
+  status?: "streaming" | "completed" | "stopped" | "failed"
+  error?: string
+  feedback?: "like" | "dislike"
+}
+
+type NormalizedToolStep = {
+  id: string
+  type: string
+  status: string
+  title: string
+  description: string
+  input?: string
+  output?: string
+}
+
+class UpstreamResponseError extends Error {
+  constructor(
+    readonly response: Response,
+    readonly text: string,
+  ) {
+    super(text || response.statusText || "Upstream request failed")
+  }
 }
 
 export const runtime = "nodejs"
@@ -59,29 +92,15 @@ export async function GET(request: Request) {
     return getSingleSession(sessionToken, request.signal, { recordId, sessionId })
   }
 
-  const url = buildOaApiUrl("/copilot/list")
-  if (!url) {
-    return jsonResponse({ error: "OA API service is not configured" }, 500)
-  }
-  url.searchParams.set("page", "1")
-  url.searchParams.set("size", "100")
-
   try {
-    const upstreamResponse = await fetch(url, {
-      method: "GET",
-      headers: buildOaHeaders(sessionToken),
-      cache: "no-store",
-      signal: request.signal,
-    })
-
-    const text = await upstreamResponse.text()
-    if (!upstreamResponse.ok) {
-      return proxyTextResponse(upstreamResponse, text)
+    const copilotSessions = await fetchSessionList(sessionToken, request.signal)
+    const agentSessions = await fetchAgentSessionListBestEffort(request.signal)
+    return jsonDataResponse({ sessions: mergeSessionSources(copilotSessions, agentSessions) }, 200)
+  } catch (error) {
+    if (error instanceof UpstreamResponseError) {
+      return proxyTextResponse(error.response, error.text)
     }
 
-    const payload = parseJson<CopilotListEnvelope>(text)
-    return jsonDataResponse({ sessions: normalizeCopilotSessions(payload) }, upstreamResponse.status)
-  } catch (error) {
     return jsonResponse(
       {
         error: error instanceof Error ? error.message : "Copilot record service is unavailable",
@@ -203,12 +222,20 @@ async function readJsonBody(request: Request): Promise<CreateSessionBody> {
 }
 
 function normalizeCopilotSessions(payload: CopilotListEnvelope | null): NormalizedSession[] {
-  const items = payload?.data?.items
-  if (!Array.isArray(items)) {
-    return []
-  }
+  return normalizeCopilotItems(getCopilotListItems(payload))
+}
 
-  return dedupeSessionsBySessionId(items.map(normalizeCopilotRecord).filter((item): item is NormalizedSession => Boolean(item)))
+function getCopilotListItems(payload: CopilotListEnvelope | null): unknown[] {
+  const items = payload?.data?.items
+  return Array.isArray(items) ? items : []
+}
+
+function normalizeCopilotItems(items: unknown[]): NormalizedSession[] {
+  return items
+    .map(normalizeCopilotRecord)
+    .filter((item): item is NormalizedSession => Boolean(item))
+    .sort(compareUpdatedAt)
+    .reverse()
 }
 
 function normalizeCopilotRecord(value: unknown): NormalizedSession | null {
@@ -254,7 +281,9 @@ async function getSingleSession(
     }
 
     if (input.sessionId) {
-      const session = await fetchRecordBySessionId(sessionToken, signal, input.sessionId)
+      const session =
+        (await fetchRecordBySessionId(sessionToken, signal, input.sessionId)) ||
+        (await fetchAgentSessionBySessionId(signal, input.sessionId))
       if (!session) {
         return jsonResponse({ error: "Copilot record not found" }, 404)
       }
@@ -264,6 +293,10 @@ async function getSingleSession(
 
     return jsonResponse({ error: "Invalid session request" }, 400)
   } catch (error) {
+    if (error instanceof UpstreamResponseError) {
+      return proxyTextResponse(error.response, error.text)
+    }
+
     return jsonResponse(
       {
         error: error instanceof Error ? error.message : "Copilot record service is unavailable",
@@ -310,12 +343,87 @@ async function resolveRecordId(sessionToken: string, signal: AbortSignal, sessio
 }
 
 async function fetchSessionList(sessionToken: string, signal: AbortSignal): Promise<NormalizedSession[]> {
+  const sessions: NormalizedSession[] = []
+  let fetchedCount = 0
+  let totalCount: number | null = null
+
+  for (let page = 1; page <= MAX_COPILOT_LIST_PAGES; page += 1) {
+    const payload = await fetchCopilotListPage(sessionToken, signal, page, COPILOT_LIST_PAGE_SIZE)
+    const items = getCopilotListItems(payload)
+    const pageTotal = numberField(toRecord(payload?.data) || {}, "total")
+
+    sessions.push(...normalizeCopilotItems(items))
+    fetchedCount += items.length
+    totalCount = pageTotal ?? totalCount
+
+    if (items.length === 0) {
+      break
+    }
+
+    if (totalCount !== null && fetchedCount >= totalCount) {
+      break
+    }
+
+    if (items.length < COPILOT_LIST_PAGE_SIZE) {
+      break
+    }
+  }
+
+  return sessions.sort(compareUpdatedAt).reverse()
+}
+
+async function fetchAgentSessionListBestEffort(signal: AbortSignal): Promise<NormalizedSession[]> {
+  try {
+    return await fetchAgentSessionList(signal)
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error
+    }
+    console.error("Failed to load agent sessions:", error)
+    return []
+  }
+}
+
+async function fetchAgentSessionBySessionId(signal: AbortSignal, sessionId: string): Promise<NormalizedSession | null> {
+  try {
+    const sessions = await fetchAgentSessionList(signal)
+    return sessions.find((session) => session.sessionId === sessionId) || null
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error
+    }
+    console.error("Failed to load agent session:", error)
+    return null
+  }
+}
+
+async function fetchAgentSessionList(signal: AbortSignal): Promise<NormalizedSession[]> {
+  const response = await fetch(buildAgentSessionsUrl(), {
+    method: "GET",
+    headers: buildAgentHeaders(),
+    cache: "no-store",
+    signal,
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(text || response.statusText || "Failed to load agent sessions")
+  }
+
+  return normalizeAgentSessions(parseJson<AgentListEnvelope>(text))
+}
+
+async function fetchCopilotListPage(
+  sessionToken: string,
+  signal: AbortSignal,
+  page: number,
+  size: number,
+): Promise<CopilotListEnvelope | null> {
   const url = buildOaApiUrl("/copilot/list")
   if (!url) {
     throw new Error("OA API service is not configured")
   }
-  url.searchParams.set("page", "1")
-  url.searchParams.set("size", "100")
+  url.searchParams.set("page", String(page))
+  url.searchParams.set("size", String(size))
 
   const response = await fetch(url, {
     method: "GET",
@@ -325,10 +433,10 @@ async function fetchSessionList(sessionToken: string, signal: AbortSignal): Prom
   })
   const text = await response.text()
   if (!response.ok) {
-    throw new Error(text || response.statusText || "Failed to load copilot records")
+    throw new UpstreamResponseError(response, text)
   }
 
-  return normalizeCopilotSessions(parseJson<CopilotListEnvelope>(text))
+  return parseJson<CopilotListEnvelope>(text)
 }
 
 async function saveCopilotRecord(input: {
@@ -431,21 +539,53 @@ function buildFallbackSession(sessionId: string, messages: NormalizedMessage[] =
   }
 }
 
-function dedupeSessionsBySessionId(sessions: NormalizedSession[]): NormalizedSession[] {
-  const bySessionId = new Map<string, NormalizedSession>()
-
-  for (const session of sessions) {
-    const existing = bySessionId.get(session.sessionId)
-    if (!existing || compareUpdatedAt(session, existing) > 0) {
-      bySessionId.set(session.sessionId, session)
-    }
-  }
-
-  return [...bySessionId.values()].sort(compareUpdatedAt).reverse()
+function mergeSessionSources(copilotSessions: NormalizedSession[], agentSessions: NormalizedSession[]): NormalizedSession[] {
+  const copilotSessionIds = new Set(copilotSessions.map((session) => session.sessionId))
+  return [
+    ...copilotSessions,
+    ...agentSessions.filter((session) => !copilotSessionIds.has(session.sessionId)),
+  ].sort(compareUpdatedAt).reverse()
 }
 
 function compareUpdatedAt(left: NormalizedSession, right: NormalizedSession): number {
   return Date.parse(left.updatedAt) - Date.parse(right.updatedAt)
+}
+
+function normalizeAgentSessions(payload: AgentListEnvelope | null): NormalizedSession[] {
+  const sessions = payload?.sessions
+  if (!Array.isArray(sessions)) {
+    return []
+  }
+
+  return sessions
+    .map(normalizeAgentSession)
+    .filter((session): session is NormalizedSession => Boolean(session))
+    .sort(compareUpdatedAt)
+    .reverse()
+}
+
+function normalizeAgentSession(value: unknown): NormalizedSession | null {
+  const item = toRecord(value)
+  if (!item) {
+    return null
+  }
+
+  const sessionId = normalizeSessionId(item.sessionId)
+  if (!sessionId) {
+    return null
+  }
+
+  const createdAt = stringField(item, "createdAt") || new Date().toISOString()
+  const updatedAt = stringField(item, "updatedAt") || createdAt
+
+  return {
+    sessionId,
+    threadId: stringField(item, "threadId"),
+    summary: stringField(item, "summary"),
+    createdAt,
+    updatedAt,
+    messages: [],
+  }
 }
 
 function normalizeMessages(value: unknown): NormalizedMessage[] {
@@ -463,13 +603,17 @@ function normalizeMessage(value: unknown): NormalizedMessage | null {
   }
 
   const role = item.role === "user" || item.role === "assistant" ? item.role : null
-  const content = stringField(item, "content")
-  if (!role || !content) {
+  const content = stringField(item, "content") || ""
+  const toolSteps = normalizeToolSteps(item.toolSteps)
+  if (!role || (!content && toolSteps.length === 0)) {
     return null
   }
 
   const createdAt = stringField(item, "createdAt") || stringField(item, "created_at") || new Date().toISOString()
   const imageData = stringField(item, "imageData")
+  const status = normalizeMessageStatus(item.status)
+  const messageError = stringField(item, "error")
+  const feedback = item.feedback === "like" || item.feedback === "dislike" ? item.feedback : null
 
   return {
     id: stringField(item, "id") || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -477,6 +621,54 @@ function normalizeMessage(value: unknown): NormalizedMessage | null {
     content,
     createdAt,
     ...(imageData ? { imageData } : {}),
+    ...(toolSteps.length > 0 ? { toolSteps } : {}),
+    ...(status ? { status } : {}),
+    ...(messageError ? { error: messageError } : {}),
+    ...(feedback ? { feedback } : {}),
+  }
+}
+
+function normalizeMessageStatus(value: unknown): NormalizedMessage["status"] {
+  if (value === "streaming" || value === "completed" || value === "stopped" || value === "failed") {
+    return value
+  }
+  return undefined
+}
+
+function normalizeToolSteps(value: unknown): NormalizedToolStep[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map(normalizeToolStep).filter((step): step is NormalizedToolStep => Boolean(step))
+}
+
+function normalizeToolStep(value: unknown): NormalizedToolStep | null {
+  const item = toRecord(value)
+  if (!item) {
+    return null
+  }
+
+  const id = stringField(item, "id")
+  const type = stringField(item, "type")
+  const status = stringField(item, "status")
+  const title = stringField(item, "title")
+  const description = stringField(item, "description")
+  const input = stringField(item, "input")
+  const output = stringField(item, "output")
+
+  if (!id || !type || !status || !title || !description) {
+    return null
+  }
+
+  return {
+    id,
+    type,
+    status,
+    title,
+    description,
+    ...(input ? { input } : {}),
+    ...(output ? { output } : {}),
   }
 }
 
@@ -513,6 +705,23 @@ function buildOaApiUrl(path: string): URL | null {
   return url
 }
 
+function buildAgentSessionsUrl(): URL {
+  return new URL("/v1/sessions", getAgentApiBaseUrl())
+}
+
+function buildAgentHeaders(): Headers {
+  const headers = new Headers({
+    Accept: "application/json",
+  })
+
+  const agentApiToken = readEnvValue("AGENT_API_TOKEN")
+  if (agentApiToken) {
+    headers.set("Authorization", toBearerToken(agentApiToken))
+  }
+
+  return headers
+}
+
 function getOaApiBaseUrl(): string | null {
   return (
     readEnvValue("OA_API_BASE_URL") ||
@@ -520,6 +729,10 @@ function getOaApiBaseUrl(): string | null {
     readEnvValue("NEXT_PUBLIC_OA_API_BASE_URL") ||
     null
   )
+}
+
+function getAgentApiBaseUrl(): string {
+  return readEnvValue("AGENT_API_BASE_URL") || DEFAULT_AGENT_API_BASE_URL
 }
 
 function getOaApiAlias(): string {
@@ -592,6 +805,18 @@ function stringOrNumberField(record: Record<string, unknown>, key: string): stri
   }
   if (typeof value === "number" && Number.isFinite(value)) {
     return value
+  }
+  return null
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key]
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
   }
   return null
 }

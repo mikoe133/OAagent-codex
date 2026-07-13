@@ -4,22 +4,25 @@ import { useEffect, useRef, useState } from "react"
 import { MessageBubble } from "./message-bubble"
 import type { Message } from "./chat-shell"
 import { TypingIndicator } from "./typing-indicator"
-import { RefreshCw } from "lucide-react"
+import { ArrowDown, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AnimatedOrb } from "./animated-orb"
 import { Alert } from "@/components/ui/hero-alert"
+import { cn } from "@/lib/utils"
+import { resolveMessageListOverflow } from "./message-list-layout"
 
 interface MessageListProps {
   messages: Message[]
   isStreaming: boolean
   error: string | null
   onRetry: () => void
+  onFeedback: (messageId: string, feedback: Message["feedback"]) => void
   isLoaded: boolean // Added isLoaded prop to know when localStorage is loaded
 }
 
 const LAUNCH_SOUND_URL = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/launch-SUi0itAGHr1wtvdDYYG5bzFLsIYHtP.mp3"
 
-export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }: MessageListProps) {
+export function MessageList({ messages, isStreaming, error, onRetry, onFeedback, isLoaded }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -113,12 +116,21 @@ export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }:
     setAutoScroll(isAtBottom)
   }
 
+  const scrollToLatest = () => {
+    const container = containerRef.current
+    if (!container) return
+    setAutoScroll(true)
+    lastScrollRef.current = container.scrollHeight - container.clientHeight
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" })
+  }
+
   const lastMessage = messages[messages.length - 1]
+  const lastMessageHasToolSteps = Boolean(lastMessage?.toolSteps?.length)
   const showTypingIndicator =
     isStreaming &&
     (messages.length === 0 ||
       lastMessage?.role === "user" ||
-      (lastMessage?.role === "assistant" && lastMessage?.content === ""))
+      (lastMessage?.role === "assistant" && lastMessage?.content === "" && !lastMessageHasToolSteps))
 
   if (!isLoaded) {
     return (
@@ -132,72 +144,103 @@ export function MessageList({ messages, isStreaming, error, onRetry, isLoaded }:
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="absolute inset-0 overflow-y-auto pt-24 pb-32 space-y-4 border-none px-6"
+      onWheel={(event) => {
+        if (event.deltaY < 0) setAutoScroll(false)
+      }}
+      onTouchMove={() => setAutoScroll(false)}
+      className={cn(
+        "absolute inset-0 border-none",
+        resolveMessageListOverflow({
+          messageCount: messages.length,
+          isStreaming,
+          hasError: Boolean(error),
+        }),
+      )}
       role="log"
       aria-label="Chat messages"
       aria-live="polite"
     >
-      {/* Empty state */}
-      {messages.length === 0 && !error && !isStreaming && (
-        <div className="flex flex-col items-center justify-center h-full text-center text-stone-400">
-          <div className={`mb-4 ${hasAnimated ? "orb-intro" : ""}`}>
-            <AnimatedOrb size={128} />
+      <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-7 px-4 pb-40 pt-24 sm:px-8 lg:px-12">
+        {messages.length === 0 && !error && !isStreaming && (
+          <div className="flex min-h-[calc(100dvh-16rem)] flex-col items-center justify-center text-center text-stone-400">
+            <div className={`mb-4 ${hasAnimated ? "orb-intro" : ""}`}>
+              <AnimatedOrb size={128} />
+            </div>
+            <p className={`text-lg font-medium text-gray-500 ${hasAnimated ? "text-blur-intro" : ""}`}>
+              Hi, my name is RWKVOS
+            </p>
+            <p className={`mt-1 text-sm text-gray-400 ${hasAnimated ? "text-blur-intro-delay" : ""}`}>
+              Send a message to begin chatting with OA Agent
+            </p>
           </div>
-          <p className={`text-lg font-medium text-gray-500 ${hasAnimated ? "text-blur-intro" : ""}`}>
-            Hi, my name is RWKVOS
-          </p>
-          <p className={`text-sm mt-1 text-gray-400 ${hasAnimated ? "text-blur-intro-delay" : ""}`}>
-            Send a message to begin chatting with OA Agent
-          </p>
+        )}
+
+        {messages
+          .filter((message) => {
+            if (
+              isStreaming &&
+              message.role === "assistant" &&
+              message === lastMessage &&
+              message.content === "" &&
+              !message.toolSteps?.length
+            ) {
+              return false
+            }
+            return true
+          })
+          .map((message) => (
+            <MessageBubble
+              key={message.id}
+              message={message}
+              isStreaming={isStreaming && message.role === "assistant" && message === lastMessage}
+              onFeedback={onFeedback}
+            />
+          ))}
+
+        {showTypingIndicator && <TypingIndicator />}
+
+        {error && (
+          <Alert
+            status="danger"
+            role="alert"
+            className="items-center border border-red-200/80 bg-red-50/90 shadow-[0_4px_18px_rgba(127,29,29,0.06)]"
+          >
+            <Alert.Indicator />
+            <Alert.Content className="min-w-0 flex-1">
+              <Alert.Title className="text-red-800">Something went wrong</Alert.Title>
+              <Alert.Description className="break-words text-red-600">{error}</Alert.Description>
+            </Alert.Content>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onRetry}
+              className="text-red-600 transition-colors hover:bg-red-100 hover:text-red-700"
+              aria-label="Retry sending message"
+            >
+              <RefreshCw className="mr-1 h-4 w-4" aria-hidden="true" />
+              Retry
+            </Button>
+          </Alert>
+        )}
+
+        <div ref={bottomRef} aria-hidden="true" className="h-8" />
+      </div>
+
+      {!autoScroll && messages.length > 0 && (
+        <div className="pointer-events-none sticky bottom-36 z-20 -mt-24 flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={scrollToLatest}
+            aria-label="Scroll to latest message"
+            title="Scroll to latest"
+            className="pointer-events-auto h-9 w-9 rounded-full border-stone-200 bg-white text-stone-600 shadow-md hover:bg-stone-50"
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
         </div>
       )}
-
-      {/* Messages */}
-      {messages
-        .filter((message) => {
-          // Hide empty assistant messages during streaming - they'll be shown as typing indicator instead
-          if (isStreaming && message.role === "assistant" && message === lastMessage && message.content === "") {
-            return false
-          }
-          return true
-        })
-        .map((message) => (
-          <MessageBubble
-            key={message.id}
-            message={message}
-            isStreaming={isStreaming && message.role === "assistant" && message === lastMessage}
-          />
-        ))}
-
-      {showTypingIndicator && <TypingIndicator />}
-
-      {/* Error state */}
-      {error && (
-        <Alert
-          status="danger"
-          role="alert"
-          className="items-center border border-red-200/80 bg-red-50/90 shadow-[rgba(14,63,126,0.04)_0px_0px_0px_1px,rgba(42,51,69,0.04)_0px_1px_1px_-0.5px,rgba(42,51,70,0.04)_0px_3px_3px_-1.5px,rgba(42,51,70,0.04)_0px_6px_6px_-3px,rgba(14,63,126,0.04)_0px_12px_12px_-6px,rgba(14,63,126,0.04)_0px_24px_24px_-12px]"
-        >
-          <Alert.Indicator />
-          <Alert.Content className="min-w-0 flex-1">
-            <Alert.Title className="text-red-800">Something went wrong</Alert.Title>
-            <Alert.Description className="break-words text-red-600">{error}</Alert.Description>
-          </Alert.Content>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onRetry}
-            className="text-red-600 hover:text-red-700 hover:bg-red-100 transition-colors"
-            aria-label="Retry sending message"
-          >
-            <RefreshCw className="w-4 h-4 mr-1" aria-hidden="true" />
-            Retry
-          </Button>
-        </Alert>
-      )}
-
-      {/* Scroll anchor */}
-      <div ref={bottomRef} aria-hidden="true" className="h-20" />
     </div>
   )
 }
