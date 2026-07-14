@@ -7,7 +7,7 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
-    "test:chat": "tsx --test components/chat/chat-stream.test.ts components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts"
+    "test:chat": "tsx --test app/api/chat/route.test.ts components/chat/chat-stream.test.ts components/chat/composer.test.tsx components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts components/siderbar/session-list-order.test.ts"
   },
   "dependencies": {
     "@heroui/react": "^3.2.2",

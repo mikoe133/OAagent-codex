@@ -6,6 +6,7 @@ import { ChevronsUpDown, LogOut, Search, Trash2, UserRound, X } from "lucide-rea
 import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { matchesSessionIdentity, prioritizeSessionItem } from "./session-list-order"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +53,7 @@ type SiderProps = {
   activeRecordId?: string | number | null
   isCollapsed?: boolean
   focusSessionKey?: number
+  prioritizedSessionId?: string | null
   onSelectSession?: (session: ChatSessionListItem) => void
   refreshKey?: number
 }
@@ -96,7 +98,13 @@ const NavLink = ({
   title,
 }: NavLinkProps) => {
   return (
-    <a href={href} onClick={onSelect} className={cn(className, active && activeClassName)} title={title}>
+    <a
+      href={href}
+      onClick={onSelect}
+      className={cn(className, active && activeClassName)}
+      title={title}
+      aria-current={active ? "page" : undefined}
+    >
       {children}
     </a>
   )
@@ -272,6 +280,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       activeRecordId = null,
       isCollapsed = false,
       focusSessionKey = 0,
+      prioritizedSessionId = null,
       onSelectSession,
       refreshKey = 0,
     },
@@ -334,8 +343,34 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
     useEffect(() => {
       if (activeSessionId) {
         setActiveHref(buildSessionHref(activeSessionId, activeRecordId))
+
+        if (prioritizedSessionId === activeSessionId) {
+          setSections((currentSections) => {
+            const activeIdentity = {
+              sessionId: activeSessionId,
+              recordId: activeRecordId,
+            }
+            const currentItems = currentSections
+              .flatMap((section) => section.items)
+              .filter((item) => item.sessionId)
+              .filter(
+                (item) =>
+                  !(
+                    activeRecordId !== null &&
+                    activeRecordId !== undefined &&
+                    item.sessionId === activeSessionId &&
+                    item.recordId === undefined
+                  ),
+              )
+            const nextItems = currentItems.some((item) => matchesSessionIdentity(item, activeIdentity))
+              ? currentItems
+              : [buildSessionItem(activeSessionId, activeRecordId), ...currentItems]
+
+            return buildConversationSections(prioritizeSessionItem(nextItems, activeIdentity))
+          })
+        }
       }
-    }, [activeRecordId, activeSessionId])
+    }, [activeRecordId, activeSessionId, prioritizedSessionId])
 
     useEffect(() => {
       const abortController = new AbortController()
@@ -350,14 +385,24 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
           })
 
           if (!response.ok) {
-            const fallbackItems = resolveSessionItems(undefined, activeSessionId, activeRecordId)
+            const fallbackItems = resolveSessionItems(
+              undefined,
+              activeSessionId,
+              activeRecordId,
+              prioritizedSessionId,
+            )
             setSections(buildConversationSections(fallbackItems))
             setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId, activeRecordId))
             return
           }
 
           const payload = (await response.json()) as SessionsResponse
-          const nextItems = resolveSessionItems(payload.sessions, activeSessionId, activeRecordId)
+          const nextItems = resolveSessionItems(
+            payload.sessions,
+            activeSessionId,
+            activeRecordId,
+            prioritizedSessionId,
+          )
 
           setSections(buildConversationSections(nextItems))
           setActiveHref((current) => {
@@ -371,7 +416,12 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             return
           }
 
-          const fallbackItems = resolveSessionItems(undefined, activeSessionId, activeRecordId)
+          const fallbackItems = resolveSessionItems(
+            undefined,
+            activeSessionId,
+            activeRecordId,
+            prioritizedSessionId,
+          )
           setSections(buildConversationSections(fallbackItems))
           setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId, activeRecordId))
         }
@@ -380,7 +430,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       void loadSessions()
 
       return () => abortController.abort()
-    }, [activeRecordId, activeSessionId, refreshKey])
+    }, [activeRecordId, activeSessionId, prioritizedSessionId, refreshKey])
 
     const filteredSections = useMemo(() => {
       const normalizedQuery = normalizeSearchText(query)
@@ -423,10 +473,9 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       }
 
       handledFocusSessionKeyRef.current = focusSessionKey
-      activeItem.scrollIntoView({
+      sessionListRef.current?.scrollTo({
+        top: 0,
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "center",
-        inline: "nearest",
       })
     }, [activeRecordId, activeSessionId, filteredSections, focusSessionKey, query])
 
@@ -452,7 +501,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div
             ref={sessionListRef}
-            className="min-h-0 h-full space-y-7 overflow-y-auto py-14 scroll-py-14 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="min-h-0 h-full space-y-7 overflow-y-auto py-20 scroll-py-20 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {filteredSections.length > 0 ? (
               filteredSections.map((section) => (
@@ -505,24 +554,46 @@ Sider.displayName = "Sider"
 
 export default Sider
 
-function resolveSessionItems(value: unknown, activeSessionId?: string, activeRecordId?: string | number | null): NavItem[] {
-  if (!Array.isArray(value)) {
-    return activeSessionId ? [buildSessionItem(activeSessionId, activeRecordId)] : [defaultItem]
-  }
+function resolveSessionItems(
+  value: unknown,
+  activeSessionId?: string,
+  activeRecordId?: string | number | null,
+  prioritizedSessionId?: string | null,
+): NavItem[] {
+  const items: NavItem[] = Array.isArray(value)
+    ? value.filter(isAgentSession).map((session) => ({
+        name: resolveSessionTitle(session.summary),
+        href: buildSessionHref(session.sessionId, session.recordId),
+        sessionId: session.sessionId,
+        ...(session.recordId !== undefined ? { recordId: session.recordId } : {}),
+        searchText: buildSessionSearchText(session),
+      }))
+    : []
 
-  const items: NavItem[] = value.filter(isAgentSession).map((session) => ({
-    name: resolveSessionTitle(session.summary),
-    href: buildSessionHref(session.sessionId, session.recordId),
-    sessionId: session.sessionId,
-    ...(session.recordId ? { recordId: session.recordId } : {}),
-    searchText: buildSessionSearchText(session),
-  }))
-
-  if (activeSessionId && !items.some((item) => item.sessionId === activeSessionId)) {
+  if (
+    activeSessionId &&
+    !items.some((item) =>
+      matchesSessionIdentity(item, {
+        sessionId: activeSessionId,
+        recordId: activeRecordId,
+      }),
+    )
+  ) {
     items.unshift(buildSessionItem(activeSessionId, activeRecordId))
   }
 
-  return items.length > 0 ? items : [defaultItem]
+  const normalizedItems = items.length > 0 ? items : [defaultItem]
+  const priorityRecordId = prioritizedSessionId === activeSessionId ? activeRecordId : null
+
+  return prioritizeSessionItem(
+    normalizedItems,
+    prioritizedSessionId
+      ? {
+          sessionId: prioritizedSessionId,
+          recordId: priorityRecordId,
+        }
+      : null,
+  )
 }
 
 function buildConversationSections(items: NavItem[]): Section[] {
@@ -539,7 +610,7 @@ function buildSessionItem(sessionId: string, recordId?: string | number | null):
     name: DEFAULT_TITLE,
     href: buildSessionHref(sessionId, recordId),
     sessionId,
-    ...(recordId ? { recordId } : {}),
+    ...(recordId !== null && recordId !== undefined ? { recordId } : {}),
     searchText: normalizeSearchText([DEFAULT_TITLE, sessionId].join(" ")),
   }
 }

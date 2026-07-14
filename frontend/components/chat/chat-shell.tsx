@@ -4,14 +4,16 @@ import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react
 import { PanelLeftClose, PanelLeftOpen, SquarePen } from "lucide-react"
 import { gsap } from "gsap"
 import { MessageList } from "./message-list"
-import { Composer, type AIModel } from "./composer"
+import { Composer, DEFAULT_AI_MODEL, isAIModel, type AIModel } from "./composer"
 import { Button } from "@/components/ui/button"
 import Sider, { type ChatSessionListItem } from "@/components/siderbar/Sider"
 import {
   drainChatSseBuffer,
   isToolTimelineEvent,
+  mergeMessageTraceDelta,
   mergeToolTimelineEvent,
   type ChatStreamEvent,
+  type TraceMessage,
   type ToolStep,
 } from "./chat-stream"
 // import LineSidebar from "./siderbar"
@@ -27,12 +29,13 @@ export interface Message {
   createdAt: Date
   imageData?: string
   toolSteps?: ToolStep[]
+  traceMessages?: TraceMessage[]
   status?: MessageStatus
   error?: string
   feedback?: MessageFeedback
 }
 
-export type { ToolStep, ToolStepStatus } from "./chat-stream"
+export type { ToolStep, ToolStepStatus, TraceMessage } from "./chat-stream"
 
 // localStorage key for persisting messages
 const STORAGE_KEY = "chat-messages"
@@ -333,11 +336,12 @@ export function ChatShell() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
-  const [selectedModel, setSelectedModel] = useState<AIModel>("google/gemini-2.0-flash-001")
+  const [selectedModel, setSelectedModel] = useState<AIModel>(DEFAULT_AI_MODEL)
   const [agentSessionId, setAgentSessionId] = useState("")
   const [activeRecordId, setActiveRecordId] = useState<string | number | null>(null)
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
   const [sessionListFocusKey, setSessionListFocusKey] = useState(0)
+  const [newestSessionId, setNewestSessionId] = useState<string | null>(null)
   const [isSiderCollapsed, setIsSiderCollapsed] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const siderRef = useRef<HTMLElement | null>(null)
@@ -360,9 +364,11 @@ export function ChatShell() {
         messagesRef.current = storedMessages
         setMessages(storedMessages)
       }
-      const savedModel = localStorage.getItem(MODEL_STORAGE_KEY) as AIModel | null
-      if (savedModel) {
+      const savedModel = localStorage.getItem(MODEL_STORAGE_KEY)
+      if (isAIModel(savedModel)) {
         setSelectedModel(savedModel)
+      } else if (savedModel) {
+        localStorage.removeItem(MODEL_STORAGE_KEY)
       }
       setAgentSessionId(getOrCreateAgentSessionId())
     } catch (e) {
@@ -561,6 +567,7 @@ export function ChatShell() {
       let accumulatedContent = ""
       let visibleContent = ""
       let currentToolSteps: ToolStep[] = []
+      let currentTraceMessages: TraceMessage[] = []
 
       const isCurrentRequest = () =>
         activeRequestIdRef.current === requestId && activeSessionIdRef.current === currentAgentSessionId
@@ -638,6 +645,29 @@ export function ChatShell() {
                 ? {
                     ...message,
                     toolSteps: nextSteps.length > 0 ? nextSteps : undefined,
+                  }
+                : message,
+            )
+            messagesRef.current = nextMessages
+            return nextMessages
+          })
+        }
+
+        const updateAssistantTraceMessages = (nextTraceMessages: TraceMessage[]) => {
+          currentTraceMessages = nextTraceMessages
+          if (!isCurrentRequest()) {
+            return
+          }
+
+          setMessages((previousMessages) => {
+            if (!isCurrentRequest()) {
+              return previousMessages
+            }
+            const nextMessages = previousMessages.map((message) =>
+              message.id === assistantMessage.id
+                ? {
+                    ...message,
+                    traceMessages: nextTraceMessages.length > 0 ? nextTraceMessages : undefined,
                   }
                 : message,
             )
@@ -751,6 +781,8 @@ export function ChatShell() {
           }
         }
 
+        let terminalStreamError: Error | null = null
+
         const handleChatStreamEvent = (event: ChatStreamEvent) => {
           if (isToolTimelineEvent(stringValue(event.type))) {
             updateAssistantToolSteps(mergeToolTimelineEvent(currentToolSteps, event))
@@ -758,6 +790,10 @@ export function ChatShell() {
           }
 
           if (event.type === "message.delta" && typeof event.delta === "string") {
+            const latestToolStepId = currentToolSteps[currentToolSteps.length - 1]?.id ?? null
+            updateAssistantTraceMessages(
+              mergeMessageTraceDelta(currentTraceMessages, event, latestToolStepId),
+            )
             appendAssistantContent(event.delta)
             return
           }
@@ -771,7 +807,7 @@ export function ChatShell() {
           }
 
           if (event.type === "run.failed") {
-            throw new Error(typeof event.error === "string" ? event.error : "Agent run failed")
+            terminalStreamError = new Error(typeof event.error === "string" ? event.error : "Agent run failed")
           }
         }
 
@@ -786,10 +822,18 @@ export function ChatShell() {
 
             streamBuffer += decoder.decode(value, { stream: true })
             streamBuffer = drainChatSseBuffer(streamBuffer, handleChatStreamEvent)
+            if (terminalStreamError) {
+              await reader.cancel().catch(() => undefined)
+              throw terminalStreamError
+            }
           }
 
           streamBuffer += decoder.decode()
           drainChatSseBuffer(`${streamBuffer}\n\n`, handleChatStreamEvent)
+          if (terminalStreamError) {
+            await reader.cancel().catch(() => undefined)
+            throw terminalStreamError
+          }
         } else {
           while (true) {
             const { done, value } = await reader.read()
@@ -908,6 +952,9 @@ export function ChatShell() {
     setSessionListFocusKey((value) => value + 1)
 
     if (!isStreaming && messagesRef.current.length === 0) {
+      if (activeSessionIdRef.current) {
+        setNewestSessionId(activeSessionIdRef.current)
+      }
       setError(null)
       return
     }
@@ -920,6 +967,7 @@ export function ChatShell() {
     setIsStreaming(false)
 
     const nextAgentSessionId = createAgentSessionId()
+    setNewestSessionId(nextAgentSessionId)
 
     messagesRef.current = []
     setMessages([])
@@ -1034,6 +1082,7 @@ export function ChatShell() {
         activeRecordId={activeRecordId}
         isCollapsed={isSiderCollapsed}
         focusSessionKey={sessionListFocusKey}
+        prioritizedSessionId={newestSessionId}
         onSelectSession={handleSelectSession}
         refreshKey={sessionListRefreshKey}
       />
