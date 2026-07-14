@@ -3,7 +3,7 @@
 这是一个前后端分离、同仓库管理的 npm workspaces 项目。
 
 - `agent/`: 后端 agent 服务,包含 Codex SDK 调用、HTTP API、提示词、受控 OA API 工具和 `openapi/openapi.json`。
-- `frontend/`: 前端工作区,用于后续放 UI、API client、浏览器测试和静态资源。
+- `frontend/`: Next.js 前端工作区,包含登录、会话列表、流式聊天 UI 和服务端 BFF。
 - 根目录: 只负责统一安装依赖、调度 workspace 脚本、保存共享文档和 `.env`。
 
 agent 依据 `agent/openapi/openapi.json` 作为唯一事实来源回答 OA 后端接口问题,不引入额外 Skill、MCP、function tools 或多 agent 编排。详见 [docs/agent-demo-implementation-plan.md](docs/agent-demo-implementation-plan.md)。
@@ -29,8 +29,6 @@ npm run dev:server
 ```bash
 npm run dev:frontend
 ```
-
-当前前端包还没有绑定具体框架,该命令只确认 workspace 可用。后续可以在 `frontend/` 内选择 React/Vite/Next 等实现。
 
 默认监听 `http://127.0.0.1:3000`,并把 `sessionId -> Codex threadId` 映射持久化到 `.context/agent-sessions.json`。完整接口说明见 [docs/server-api.md](docs/server-api.md)。
 
@@ -84,3 +82,50 @@ docs/                    实现规划、服务 API 文档与验收记录
 ## 验收
 
 见 [docs/m4-acceptance-record.md](docs/m4-acceptance-record.md):接口定位与敏感删除确认两个样例均通过。
+
+## Docker Compose 部署
+
+现有 OA 服务端 Compose 把宿主机 `8010` 映射到 `rwkvoa` 容器的 `9010`。本项目保持 OA 服务独立运行,由 `agent` 和 `web` 通过 `host.docker.internal:8010` 访问它,因此不需要修改 OA 服务端的 Compose 文件。
+
+部署拓扑:
+
+```text
+browser -> web:3000 -> agent:3000 (Docker 内部网络)
+                    -> host.docker.internal:8010 -> rwkvoa:9010
+```
+
+准备环境变量:
+
+```bash
+cp .env.example .env
+# 必填:OPENROUTER_API_KEY
+# 必填:AGENT_API_TOKEN,agent 与 web 使用同一个随机值
+openssl rand -hex 32
+```
+
+把生成值填入 `.env` 的 `AGENT_API_TOKEN`。同机部署 OA 时保留:
+
+```dotenv
+OA_DOCKER_API_BASE_URL=http://host.docker.internal:8010
+WEB_BIND_ADDRESS=0.0.0.0
+WEB_PORT=3000
+```
+
+构建并启动:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f agent web
+```
+
+验证:
+
+```bash
+curl -fsS http://127.0.0.1:3000/login >/dev/null
+docker compose exec agent node -e "fetch('http://127.0.0.1:3000/health').then(async r=>console.log(r.status,await r.text()))"
+```
+
+Compose 只向宿主机发布 web 端口,agent 仅在内部网络暴露。`agent_sessions` 保存 session 映射,`agent_codex_home` 保存 Codex thread 状态;普通 `docker compose down` 不会删除它们。不要在有数据时执行 `docker compose down -v`。
+
+如果 OA 在另一台机器,把 `OA_DOCKER_API_BASE_URL` 改为 OA 的 HTTPS API 地址。生产环境应在 web 前配置 HTTPS 反向代理,因为登录 cookie 在 production 模式带 `Secure` 属性;直接通过服务器 IP 的 HTTP 地址访问会导致登录态不可用。
