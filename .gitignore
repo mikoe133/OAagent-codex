@@ -1,5 +1,7 @@
 # secrets
 .env
+.deploy.env
+.deploy.env.previous
 
 # dependencies / build
 node_modules/

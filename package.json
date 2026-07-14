@@ -20,6 +20,7 @@
     "build:frontend": "npm run build -w frontend --if-present",
     "start": "npm run start -w agent --",
     "start:server": "npm run start:server -w agent",
+    "test:deploy": "node --test scripts/deploy-compose.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }
 }

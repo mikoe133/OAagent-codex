@@ -129,3 +129,9 @@ docker compose exec agent node -e "fetch('http://127.0.0.1:3000/health').then(as
 Compose 只向宿主机发布 web 端口,agent 仅在内部网络暴露。`agent_sessions` 保存 session 映射,`agent_codex_home` 保存 Codex thread 状态;普通 `docker compose down` 不会删除它们。不要在有数据时执行 `docker compose down -v`。
 
 如果 OA 在另一台机器,把 `OA_DOCKER_API_BASE_URL` 改为 OA 的 HTTPS API 地址。生产环境应在 web 前配置 HTTPS 反向代理,因为登录 cookie 在 production 模式带 `Secure` 属性;直接通过服务器 IP 的 HTTP 地址访问会导致登录态不可用。
+
+## GitHub Actions CI/CD
+
+仓库提供 `.github/workflows/ci-cd.yml`:Pull Request 自动运行测试、构建并验证两个 Docker 镜像;`main` 通过后把 SHA 镜像推送到 GHCR,再通过 SSH 部署到服务器。部署失败会自动恢复上一版镜像。
+
+服务器准备、`production` Environment secrets、GHCR 权限和手动回滚方法见 [docs/cicd.md](docs/cicd.md)。
