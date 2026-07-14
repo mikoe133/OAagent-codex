@@ -1,0 +1,87 @@
+name: oa-agent
+
+services:
+  agent:
+    image: ${AGENT_IMAGE:-oa-agent:local}
+    build:
+      context: .
+      target: agent-runtime
+    init: true
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      AGENT_API_TOKEN: ${AGENT_API_TOKEN:?set AGENT_API_TOKEN in .env}
+      AGENT_SESSION_STORE: /app/.context/agent-sessions.json
+      OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    expose:
+      - "3000"
+    volumes:
+      - agent_sessions:/app/.context
+      - agent_codex_home:/home/node/.codex
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - app
+
+  web:
+    image: ${WEB_IMAGE:-oa-web:local}
+    build:
+      context: .
+      target: web-runtime
+    init: true
+    restart: unless-stopped
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      AGENT_API_BASE_URL: http://agent:3000
+      AGENT_API_TOKEN: ${AGENT_API_TOKEN:?set AGENT_API_TOKEN in .env}
+      OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
+      OA_AUTH_ALIAS: ${OA_AUTH_ALIAS:-default}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      agent:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - app
+
+volumes:
+  agent_sessions:
+  agent_codex_home:
+
+networks:
+  app:
+    driver: bridge
