@@ -1,5 +1,6 @@
 import type { ThreadEvent, ThreadItem, Usage } from "@openai/codex-sdk";
 import type { AppConfig } from "../config/config.js";
+import { resolveRequestedOpenAiModel } from "../config/modelCatalog.js";
 import {
   createCodexClient,
   startOrResumeThread,
@@ -19,12 +20,14 @@ import type {
 export type SendMessageInput = {
   sessionId: string;
   message: string;
+  model?: string | null;
   oaApiToken?: string | null;
 };
 
 export type SendMessageResult = {
   sessionId: string;
   threadId: string;
+  model: string;
   finalResponse: string;
   executedCommands: string[];
   summary: string | null;
@@ -104,6 +107,16 @@ export type AgentStreamEvent =
 
 export type AgentStreamEmit = (event: AgentStreamEvent) => void | Promise<void>;
 
+export type StreamRecoveryDecision =
+  | {
+      kind: "existing_response";
+      response: string;
+    }
+  | {
+      kind: "tool_fallback";
+      response: string;
+    };
+
 export class AgentService {
   private readonly queues = new Map<string, Promise<unknown>>();
 
@@ -128,12 +141,13 @@ export class AgentService {
   }
 
   private async runMessage(input: SendMessageInput): Promise<SendMessageResult> {
+    const runConfig = resolveRunConfig(this.config, input.model);
     const session = await this.prepareSession(input);
     const runtimeContext = this.getRuntimeContext(input.sessionId);
-    const codex = createCodexClient(this.config, input.sessionId);
-    const thread = startOrResumeThread(codex, this.config, session.threadId);
+    const codex = createCodexClient(runConfig, input.sessionId);
+    const thread = startOrResumeThread(codex, runConfig, session.threadId);
     const prompt = buildPromptForSession(
-      this.config,
+      runConfig,
       session,
       input.message,
       runtimeContext,
@@ -159,6 +173,7 @@ export class AgentService {
     return {
       sessionId: input.sessionId,
       threadId: thread.id,
+      model: runConfig.model,
       finalResponse: redactSecrets(turn.finalResponse, secrets),
       executedCommands: collectExecutedCommands(turn.items).map((command) =>
         redactSecrets(command, secrets),
@@ -175,12 +190,13 @@ export class AgentService {
     throwIfAborted(signal);
     await emit({ type: "run.started", sessionId: input.sessionId });
 
+    const runConfig = resolveRunConfig(this.config, input.model);
     const session = await this.prepareSession(input);
     const runtimeContext = this.getRuntimeContext(input.sessionId);
-    const codex = createCodexClient(this.config, input.sessionId);
-    const thread = startOrResumeThread(codex, this.config, session.threadId);
+    const codex = createCodexClient(runConfig, input.sessionId);
+    const thread = startOrResumeThread(codex, runConfig, session.threadId);
     const prompt = buildPromptForSession(
-      this.config,
+      runConfig,
       session,
       input.message,
       runtimeContext,
@@ -188,14 +204,46 @@ export class AgentService {
     const { events } = await thread.runStreamed(prompt, { signal });
     const state = createStreamState();
     const secrets = this.getSecrets(runtimeContext.sessionOaApiToken);
+    const recoverStream = async (): Promise<boolean> => {
+      const recovery = resolveStreamRecovery(
+        state.finalResponse,
+        state.items,
+        secrets,
+      );
+      if (!recovery) {
+        return false;
+      }
 
-    for await (const event of events) {
-      throwIfAborted(signal);
-      await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+      state.finalResponse = recovery.response;
+      state.turnFailure = null;
+      if (recovery.kind === "tool_fallback") {
+        await emit({
+          type: "message.delta",
+          sessionId: input.sessionId,
+          itemId: `fallback-${Date.now()}`,
+          delta: recovery.response,
+          text: recovery.response,
+        });
+      }
+      return true;
+    };
+
+    try {
+      for await (const event of events) {
+        throwIfAborted(signal);
+        await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+      }
+    } catch (error) {
+      if (!(await recoverStream())) {
+        throw error;
+      }
     }
 
     if (state.turnFailure) {
-      throw new Error(state.turnFailure);
+      const turnFailure = state.turnFailure;
+      if (!(await recoverStream())) {
+        throw new Error(turnFailure);
+      }
     }
 
     if (!state.finalResponse.trim()) {
@@ -220,6 +268,7 @@ export class AgentService {
     const result: SendMessageResult = {
       sessionId: input.sessionId,
       threadId: thread.id,
+      model: runConfig.model,
       finalResponse: state.finalResponse,
       executedCommands: collectExecutedCommands(state.items).map((command) =>
         redactSecrets(command, secrets),
@@ -243,6 +292,7 @@ export class AgentService {
     emit: AgentStreamEmit,
   ): Promise<void> {
     if (event.type === "thread.started") {
+      await this.sessions.updateThreadId(sessionId, event.thread_id);
       await emit({
         type: "thread.started",
         sessionId,
@@ -452,7 +502,7 @@ export class AgentService {
   ): Promise<T> {
     const previous = this.queues.get(sessionId) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(operation);
-    const queueTail = current.finally(() => {
+    const queueTail = current.catch(() => undefined).finally(() => {
       if (this.queues.get(sessionId) === queueTail) {
         this.queues.delete(sessionId);
       }
@@ -535,6 +585,14 @@ function buildPromptForSession(
   ].join("\n");
 }
 
+function resolveRunConfig(
+  config: AppConfig,
+  requestedModel: string | null | undefined,
+): AppConfig {
+  const model = resolveRequestedOpenAiModel(requestedModel, config.model);
+  return model === config.model ? config : { ...config, model };
+}
+
 function buildNextSummary(
   previousSummary: string | null,
   message: string,
@@ -547,6 +605,182 @@ function buildNextSummary(
   ].filter((entry): entry is string => Boolean(entry));
 
   return compactText(entries.join("\n"), 3000);
+}
+
+export function resolveStreamRecovery(
+  finalResponse: string,
+  items: ThreadItem[],
+  secrets: string[],
+): StreamRecoveryDecision | null {
+  if (finalResponse.trim()) {
+    return {
+      kind: "existing_response",
+      response: finalResponse,
+    };
+  }
+
+  const fallbackResponse = buildFallbackResponseFromToolResult(items, secrets);
+  return fallbackResponse
+    ? { kind: "tool_fallback", response: fallbackResponse }
+    : null;
+}
+
+function buildFallbackResponseFromToolResult(
+  items: ThreadItem[],
+  secrets: string[],
+): string | null {
+  for (const item of [...items].reverse()) {
+    if (
+      item.type !== "command_execution" ||
+      item.exit_code !== 0 ||
+      !item.command.includes("callOaApi.mjs")
+    ) {
+      continue;
+    }
+
+    const result = parseOaApiToolOutput(item.aggregated_output);
+    if (!result) {
+      continue;
+    }
+
+    const method = (stringValue(result.method) ?? "").toUpperCase();
+    if (
+      !isMutatingMethod(method) ||
+      !isConfirmedMutationCommand(item.command) ||
+      !isSuccessfulOaApiResult(result) ||
+      !stringValue(result.operationId) ||
+      !stringValue(result.path)
+    ) {
+      continue;
+    }
+
+    return redactSecrets(formatOaApiFallbackResponse(result), secrets);
+  }
+
+  return null;
+}
+
+type ParsedOaApiToolResult = {
+  ok?: unknown;
+  status?: unknown;
+  operationId?: unknown;
+  method?: unknown;
+  path?: unknown;
+  data?: unknown;
+  error?: unknown;
+};
+
+function parseOaApiToolOutput(output: string): ParsedOaApiToolResult | null {
+  const trimmed = output.trim();
+  const parsed = parseJsonObject(trimmed) ?? parseJsonObject(extractJson(trimmed));
+  if (!parsed || !("operationId" in parsed || "error" in parsed)) {
+    return null;
+  }
+  return parsed as ParsedOaApiToolResult;
+}
+
+function parseJsonObject(value: string | null): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractJson(value: string): string | null {
+  const start = value.indexOf("{");
+  const end = value.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    return null;
+  }
+  return value.slice(start, end + 1);
+}
+
+function formatOaApiFallbackResponse(result: ParsedOaApiToolResult): string {
+  const operationId = stringValue(result.operationId) ?? "unknown_operation";
+  const method = (stringValue(result.method) ?? "UNKNOWN").toUpperCase();
+  const path = stringValue(result.path) ?? "unknown path";
+  const payload = toRecord(result.data);
+  const data = toRecord(payload?.data);
+  const facts = summarizeOaApiData(data);
+  return [
+    "已成功执行修改操作。",
+    facts ? `结果:${facts}` : null,
+    "",
+    "接口依据:",
+    `- ${operationId}, ${method} ${path}`,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+function summarizeOaApiData(data: Record<string, unknown> | null): string | null {
+  if (!data) {
+    return null;
+  }
+
+  const facts: string[] = [];
+  const weeklyNum = numberValue(data.weekly_num);
+  const userId = numberValue(data.user_id);
+  const content = stringValue(data.content);
+  const id = numberValue(data.id);
+
+  if (weeklyNum !== null) {
+    facts.push(`系统 weekly_num=${weeklyNum}`);
+  }
+  if (content) {
+    facts.push(`content 已更新为 \`${compactText(content, 120)}\``);
+  }
+  if (id !== null) {
+    facts.push(`id=${id}`);
+  }
+  if (userId !== null) {
+    facts.push(`user_id=${userId}`);
+  }
+
+  return facts.length > 0 ? facts.join(", ") : null;
+}
+
+function isMutatingMethod(method: string): boolean {
+  return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+}
+
+function isConfirmedMutationCommand(command: string): boolean {
+  return /(?:^|\s)--confirmed(?:=|\s+)(?:true|1|yes)(?=\s|$)/i.test(command);
+}
+
+function isSuccessfulOaApiResult(result: ParsedOaApiToolResult): boolean {
+  const payload = toRecord(result.data);
+  const status = numberValue(result.status);
+  return (
+    booleanValue(result.ok) ??
+    booleanValue(payload?.success) ??
+    (status !== null ? status >= 200 && status < 300 : false)
+  );
+}
+
+function booleanValue(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function compactText(text: string, maxLength: number): string {

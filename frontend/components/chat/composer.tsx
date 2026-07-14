@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useCallback, type KeyboardEvent, useEffect } from "react"
-import { Mic, MicOff, Brain, Paperclip, X, CornerDownLeft } from "lucide-react"
+import { Mic, MicOff, Paperclip, X, CornerDownLeft, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
@@ -17,13 +17,23 @@ import Image from "next/image"
 import { AudioWaveform } from "./audio-waveform"
 import TextType from "@/components/text/TextType"
 
-export type AIModel = "google/gemini-2.0-flash-001" | "openai/gpt-4o" | "openai/gpt-5.5-max" | "anthropic/claude-sonnet-4"
+export const AI_MODELS = [
+  { id: "openai/gpt-5.5", name: "GPT-5.5", icon: "/images/gpt.png" },
+  { id: "openai/gpt-5.4", name: "GPT-5.4", icon: "/images/gpt.png" },
+  { id: "openai/gpt-5.4-mini", name: "GPT-5.4 Mini", icon: "/images/gpt.png" },
+  { id: "openai/gpt-5.4-nano", name: "GPT-5.4 Nano", icon: "/images/gpt.png" },
+] as const
 
-export const AI_MODELS: { id: AIModel; name: string; icon: string }[] = [
-  // { id: "google/gemini-2.0-flash-001", name: "Gemini", icon: "/images/google.webp" },
-  { id: "openai/gpt-5.5-max", name: "GPT-5.5-max", icon: "/images/gpt.png" },
-  // { id: "anthropic/claude-sonnet-4", name: "Claude", icon: "/images/claude.svg" },
-]
+export type AIModel = (typeof AI_MODELS)[number]["id"]
+export const DEFAULT_AI_MODEL: AIModel = AI_MODELS[0].id
+
+export function isAIModel(value: unknown): value is AIModel {
+  return typeof value === "string" && AI_MODELS.some((model) => model.id === value)
+}
+
+// Keep the existing implementations available while these composer controls are temporarily disabled.
+const SHOW_VOICE_INPUT = false
+const SHOW_FILE_UPLOAD = false
 
 interface ComposerProps {
   onSend: (content: string, imageData?: string) => void
@@ -467,62 +477,69 @@ export function Composer({
           </div>
 
           <div className="flex items-center gap-2">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileSelect}
-              className="hidden"
-              aria-label="Upload image"
-            />
+            {SHOW_VOICE_INPUT && (
+              <div className="relative">
+                <Button
+                  onClick={toggleRecording}
+                  disabled={isStreaming || disabled || !isSpeechSupported}
+                  size="icon"
+                  className={cn(
+                    "h-9 w-9 shrink-0 transition-all rounded-full relative z-10",
+                    isRecording
+                      ? "bg-red-500 hover:bg-red-600 text-white animate-bounce-subtle"
+                      : "bg-zinc-100 hover:bg-zinc-200 text-stone-700",
+                  )}
+                  aria-label={
+                    isRecording
+                      ? "Stop recording"
+                      : isSpeechSupported
+                        ? "Start voice input"
+                        : "Voice input is not supported"
+                  }
+                >
+                  {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </Button>
+              </div>
+            )}
 
-            <div className="relative">
-              <Button
-                onClick={toggleRecording}
-                disabled={isStreaming || disabled || !isSpeechSupported}
-                size="icon"
-                className={cn(
-                  "h-9 w-9 shrink-0 transition-all rounded-full relative z-10",
-                  isRecording
-                    ? "bg-red-500 hover:bg-red-600 text-white animate-bounce-subtle"
-                    : "bg-zinc-100 hover:bg-zinc-200 text-stone-700",
-                )}
-                aria-label={
-                  isRecording
-                    ? "Stop recording"
-                    : isSpeechSupported
-                      ? "Start voice input"
-                      : "Voice input is not supported"
-                }
-              >
-                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </Button>
-            </div>
-
-            <Button
-              onClick={() => {
-                playClickSound()
-                fileInputRef.current?.click()
-              }}
-              disabled={isStreaming || disabled}
-              size="icon"
-              className="h-9 w-9 shrink-0 bg-zinc-100 hover:bg-zinc-200 text-stone-700 rounded-full"
-              aria-label="Attach image"
-            >
-              <Paperclip className="w-4 h-4" />
-            </Button>
+            {SHOW_FILE_UPLOAD && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  aria-label="Upload image"
+                />
+                <Button
+                  onClick={() => {
+                    playClickSound()
+                    fileInputRef.current?.click()
+                  }}
+                  disabled={isStreaming || disabled}
+                  size="icon"
+                  className="h-9 w-9 shrink-0 bg-zinc-100 hover:bg-zinc-200 text-stone-700 rounded-full"
+                  aria-label="Attach image"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </Button>
+              </>
+            )}
 
             <DropdownMenu>
-              <DropdownMenuTrigger className="bg-zinc-100" asChild>
+              <DropdownMenuTrigger asChild>
                 <Button
+                  type="button"
                   variant="ghost"
-                  size="icon"
+                  size="sm"
                   disabled={isStreaming || disabled}
-                  className="h-9 w-9 shrink-0 bg-zinc-100 hover:bg-zinc-200 text-stone-700 rounded-full"
+                  className="h-9 max-w-full shrink-0 rounded-full bg-zinc-100 px-3 text-xs font-normal text-stone-600 hover:bg-zinc-200 hover:text-stone-800"
                   aria-label="Select AI model"
                   onClick={playClickSound}
                 >
-                  <Brain className="w-4 h-4" />
+                  <span className="truncate">{currentModel.name}</span>
+                  <ChevronDown className="h-4 w-4 text-stone-400" aria-hidden="true" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuPortal>
@@ -558,7 +575,6 @@ export function Composer({
               </DropdownMenuPortal>
             </DropdownMenu>
 
-            <span className="text-xs text-stone-400">{currentModel.name}</span>
             {speechError && <span className="min-w-0 truncate text-xs text-red-500">{speechError}</span>}
           </div>
         </div>

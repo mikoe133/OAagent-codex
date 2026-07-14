@@ -142,6 +142,7 @@ OA_USER_TOKEN_PREFIX=Bearer
 {
   "sessionId": "demo",
   "threadId": "thread_...",
+  "model": "openai/gpt-5.4-mini",
   "finalResponse": "可以使用 ...",
   "executedCommands": [
     "python3 ..."
@@ -156,6 +157,7 @@ OA_USER_TOKEN_PREFIX=Bearer
 | --- | --- | --- |
 | `sessionId` | `string` | 本次消息所属 session |
 | `threadId` | `string` | 本次运行后关联的 Codex thread ID |
+| `model` | `string` | 本轮实际使用的 OpenRouter 模型 ID |
 | `finalResponse` | `string` | agent 的最终中文回答。已对已知密钥做脱敏 |
 | `executedCommands` | `string[]` | agent 运行过程中执行过的命令记录。已对已知密钥做脱敏 |
 | `summary` | `string` | 写回 session 的紧凑摘要,用于后续续聊 |
@@ -263,6 +265,25 @@ GET /health
 | 状态码 | 说明 |
 | --- | --- |
 | `200` | 服务可用 |
+
+### 可选模型
+
+```http
+GET /v1/models
+```
+
+用途:返回允许前端选择的 OpenRouter OpenAI 模型白名单。鉴权规则与其他 `/v1/*` 接口相同。
+
+```json
+{
+  "models": [
+    "openai/gpt-5.5",
+    "openai/gpt-5.4",
+    "openai/gpt-5.4-mini",
+    "openai/gpt-5.4-nano"
+  ]
+}
+```
 
 ### 创建或获取 Session
 
@@ -379,7 +400,8 @@ POST /v1/sessions/{sessionId}/messages
 
 ```json
 {
-  "message": "我想查一下周报列表,应该调用哪个接口?"
+  "message": "我想查一下周报列表,应该调用哪个接口?",
+  "model": "openai/gpt-5.4-mini"
 }
 ```
 
@@ -388,6 +410,7 @@ POST /v1/sessions/{sessionId}/messages
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `message` | `string` | 是 | 用户输入。去掉首尾空白后不能为空 |
+| `model` | `string` | 否 | 本轮模型。省略时使用 `CODEX_MODEL`;传入时必须属于 `/v1/models` 白名单 |
 
 响应示例:
 
@@ -395,6 +418,7 @@ POST /v1/sessions/{sessionId}/messages
 {
   "sessionId": "demo",
   "threadId": "thread_...",
+  "model": "openai/gpt-5.4-mini",
   "finalResponse": "建议使用 `weekly_report_list_weekly_report_report_list_get` ...",
   "executedCommands": [
     "python3 ..."
@@ -408,7 +432,7 @@ POST /v1/sessions/{sessionId}/messages
 | 状态码 | 说明 |
 | --- | --- |
 | `200` | agent 运行成功 |
-| `400` | `message` 缺失、不是字符串或为空字符串 |
+| `400` | `message` 缺失/为空,或 `model` 不是字符串/不在白名单 |
 | `401` | 鉴权失败 |
 | `500` | 非法 JSON、非法 `sessionId`、请求体过大、agent 未返回最终回答、模型调用失败或其他服务端错误 |
 
@@ -418,7 +442,7 @@ POST /v1/sessions/{sessionId}/messages
 curl -s -X POST http://127.0.0.1:3000/v1/sessions/demo/messages \
   -H 'content-type: application/json' \
   -H "Cookie: sessionid=$OA_USER_TOKEN" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?"}'
+  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","model":"openai/gpt-5.4-mini"}'
 ```
 
 同时带服务鉴权和用户 OA token:
@@ -454,7 +478,7 @@ event: message.delta
 data: {"type":"message.delta","sessionId":"demo","itemId":"...","delta":"建议使用","text":"建议使用"}
 
 event: run.completed
-data: {"type":"run.completed","sessionId":"demo","result":{"sessionId":"demo","threadId":"thread_...","finalResponse":"建议使用 ...","executedCommands":["python3 ..."],"summary":"用户: ..."},"usage":{"input_tokens":123,"cached_input_tokens":0,"output_tokens":45,"reasoning_output_tokens":0}}
+data: {"type":"run.completed","sessionId":"demo","result":{"sessionId":"demo","threadId":"thread_...","model":"openai/gpt-5.4-mini","finalResponse":"建议使用 ...","executedCommands":["python3 ..."],"summary":"用户: ..."},"usage":{"input_tokens":123,"cached_input_tokens":0,"output_tokens":45,"reasoning_output_tokens":0}}
 
 : keep-alive
 ```
@@ -465,7 +489,7 @@ data: {"type":"run.completed","sessionId":"demo","result":{"sessionId":"demo","t
 curl -N -X POST http://127.0.0.1:3000/v1/sessions/demo/messages/stream \
   -H 'content-type: application/json' \
   -H "Cookie: sessionid=$OA_USER_TOKEN" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?"}'
+  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","model":"openai/gpt-5.4-mini"}'
 ```
 
 浏览器示例:
@@ -474,7 +498,10 @@ curl -N -X POST http://127.0.0.1:3000/v1/sessions/demo/messages/stream \
 const response = await fetch("/v1/sessions/demo/messages/stream", {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ message: "我想查一下周报列表,应该调用哪个接口?" }),
+  body: JSON.stringify({
+    message: "我想查一下周报列表,应该调用哪个接口?",
+    model: "openai/gpt-5.4-mini",
+  }),
 });
 
 const reader = response.body

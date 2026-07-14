@@ -18,6 +18,7 @@ export type OaApiToolResult = {
   operationId?: string;
   method?: string;
   path?: string;
+  warnings?: string[];
   data?: unknown;
   error?: {
     code: string;
@@ -38,6 +39,12 @@ const MUTATING_OPERATION_PATTERN =
   /delete|remove|create|add|update|edit|modify|save|submit|upload|import|approve|reject|change.?password|reset.?password|permission|role|admin|删除|移除|新增|创建|修改|更新|保存|提交|上传|导入|审批|通过|驳回|拒绝|密码|权限|角色|管理/i;
 const READ_ONLY_OPERATION_PATTERN =
   /(^|[_/ -])(get|list|query|search|find|detail|details|read|view|preview|count|stat|stats|export|download|report)([_/ -]|$)|查询|读取|查看|列表|详情|搜索|统计|报表|周报|日报|月报|导出|下载/i;
+const MAX_TOOL_PAGE_SIZE = 30;
+const MAX_TOOL_ARRAY_ITEMS = 30;
+const MAX_TOOL_OBJECT_KEYS = 80;
+const MAX_TOOL_STRING_LENGTH = 6000;
+const MAX_TOOL_OUTPUT_DEPTH = 8;
+
 export async function callOaApiTool(
   config: AppConfig,
   input: OaApiToolInput,
@@ -79,13 +86,23 @@ export async function callOaApiTool(
     return path;
   }
 
+  const normalizedQuery = normalizeQueryForTool(objectField(input.query));
   const response = await requestOa(config, {
     method: operation.method.toUpperCase(),
     path: path.value,
-    query: objectField(input.query),
+    query: normalizedQuery.value,
     body: input.body,
     oaApiToken,
   });
+  const limitedData = limitToolOutput(response.data);
+  const warnings = [
+    ...normalizedQuery.warnings,
+    ...(limitedData.truncated
+      ? [
+          `响应过大,已截断数组超过 ${MAX_TOOL_ARRAY_ITEMS} 项、对象超过 ${MAX_TOOL_OBJECT_KEYS} 个字段或字符串超过 ${MAX_TOOL_STRING_LENGTH} 字符的部分。需要更多数据时请缩小查询条件或分页继续查询。`,
+        ]
+      : []),
+  ];
 
   return {
     ok: response.ok,
@@ -93,7 +110,8 @@ export async function callOaApiTool(
     operationId: operation.operationId,
     method: operation.method.toUpperCase(),
     path: operation.pathTemplate,
-    data: response.data,
+    ...(warnings.length > 0 ? { warnings } : {}),
+    data: limitedData.value,
   };
 }
 
@@ -402,6 +420,114 @@ function formatTokenHeaderValue(prefix: string, token: string): string {
     return `${prefix}${token}`;
   }
   return `${prefix} ${token}`;
+}
+
+function normalizeQueryForTool(query: Record<string, unknown>): {
+  value: Record<string, unknown>;
+  warnings: string[];
+} {
+  const normalized = { ...query };
+  const warnings: string[] = [];
+
+  for (const [key, value] of Object.entries(query)) {
+    if (!isPaginationSizeKey(key)) {
+      continue;
+    }
+
+    const size = positiveIntegerValue(value);
+    if (size !== null && size > MAX_TOOL_PAGE_SIZE) {
+      normalized[key] = MAX_TOOL_PAGE_SIZE;
+      warnings.push(
+        `query.${key}=${size} 过大,受控工具已限制为 ${MAX_TOOL_PAGE_SIZE};如需更多数据请继续分页查询。`,
+      );
+    }
+  }
+
+  return { value: normalized, warnings };
+}
+
+function isPaginationSizeKey(key: string): boolean {
+  return /^(size|limit|pageSize|page_size|perPage|per_page)$/i.test(key);
+}
+
+function positiveIntegerValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function limitToolOutput(value: unknown, depth = 0): {
+  value: unknown;
+  truncated: boolean;
+} {
+  if (depth > MAX_TOOL_OUTPUT_DEPTH) {
+    return { value: "[TRUNCATED: max depth]", truncated: true };
+  }
+
+  if (typeof value === "string") {
+    if (value.length <= MAX_TOOL_STRING_LENGTH) {
+      return { value, truncated: false };
+    }
+    return {
+      value: `${value.slice(0, MAX_TOOL_STRING_LENGTH)}... [TRUNCATED ${value.length - MAX_TOOL_STRING_LENGTH} chars]`,
+      truncated: true,
+    };
+  }
+
+  if (
+    value === null ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return { value, truncated: false };
+  }
+
+  if (Array.isArray(value)) {
+    let truncated = value.length > MAX_TOOL_ARRAY_ITEMS;
+    const items = value
+      .slice(0, MAX_TOOL_ARRAY_ITEMS)
+      .map((item) => {
+        const limited = limitToolOutput(item, depth + 1);
+        truncated ||= limited.truncated;
+        return limited.value;
+      });
+
+    if (value.length > MAX_TOOL_ARRAY_ITEMS) {
+      items.push({
+        __truncated: true,
+        omittedItems: value.length - MAX_TOOL_ARRAY_ITEMS,
+      });
+    }
+
+    return { value: items, truncated };
+  }
+
+  if (isRecord(value)) {
+    const entries = Object.entries(value);
+    let truncated = entries.length > MAX_TOOL_OBJECT_KEYS;
+    const limitedEntries = entries
+      .slice(0, MAX_TOOL_OBJECT_KEYS)
+      .map(([key, item]) => {
+        const limited = limitToolOutput(item, depth + 1);
+        truncated ||= limited.truncated;
+        return [key, limited.value] as const;
+      });
+    const result: Record<string, unknown> = Object.fromEntries(limitedEntries);
+
+    if (entries.length > MAX_TOOL_OBJECT_KEYS) {
+      result.__truncated = true;
+      result.omittedFields = entries.length - MAX_TOOL_OBJECT_KEYS;
+    }
+
+    return { value: result, truncated };
+  }
+
+  return { value: String(value), truncated: false };
 }
 
 function redactValue(value: unknown, secrets: string[], depth = 0): unknown {

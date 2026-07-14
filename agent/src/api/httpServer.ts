@@ -1,7 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import type { AgentService, AgentStreamEvent } from "../application/agentService.js";
+import type {
+  AgentService,
+  AgentStreamEvent,
+  SendMessageInput,
+} from "../application/agentService.js";
 import type { AppConfig } from "../config/config.js";
+import {
+  SUPPORTED_OPENAI_MODELS,
+  resolveRequestedOpenAiModel,
+} from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import type { SessionStore } from "../infrastructure/persistence/sessionStore.js";
 
@@ -95,6 +103,11 @@ async function routeRequest(
     return;
   }
 
+  if (method === "GET" && url.pathname === "/v1/models") {
+    writeJson(response, 200, { models: [...SUPPORTED_OPENAI_MODELS] });
+    return;
+  }
+
   if (method === "POST" && url.pathname === "/v1/sessions") {
     const body = await readJsonBody(request);
     const sessionId = stringField(body, "sessionId") || randomUUID();
@@ -125,10 +138,15 @@ async function routeRequest(
       writeJson(response, 400, { error: "message 必须是非空字符串" });
       return;
     }
+    const model = resolveMessageModel(config, body, response);
+    if (!model) {
+      return;
+    }
 
     const result = await agentService.sendMessage({
       sessionId,
       message,
+      model,
       oaApiToken: readOaApiTokenFromRequest(config, request),
     });
     writeJson(response, 200, result);
@@ -147,10 +165,15 @@ async function routeRequest(
       writeJson(response, 400, { error: "message 必须是非空字符串" });
       return;
     }
+    const model = resolveMessageModel(config, body, response);
+    if (!model) {
+      return;
+    }
 
     await streamAgentMessage(agentService, request, response, {
       sessionId,
       message,
+      model,
       oaApiToken: readOaApiTokenFromRequest(config, request),
     });
     return;
@@ -339,6 +362,27 @@ function stringField(body: JsonObject, field: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function resolveMessageModel(
+  config: AppConfig,
+  body: JsonObject,
+  response: ServerResponse,
+): string | null {
+  const rawModel = body.model;
+  if (rawModel !== undefined && typeof rawModel !== "string") {
+    writeJson(response, 400, { error: "model 必须是字符串" });
+    return null;
+  }
+
+  try {
+    return resolveRequestedOpenAiModel(rawModel, config.model);
+  } catch (error) {
+    writeJson(response, 400, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 function validateSessionId(sessionId: string): void {
   if (!isValidSessionId(sessionId)) {
     throw new Error(
@@ -355,7 +399,7 @@ async function streamAgentMessage(
   agentService: AgentService,
   request: IncomingMessage,
   response: ServerResponse,
-  input: { sessionId: string; message: string; oaApiToken: string | null },
+  input: SendMessageInput,
 ): Promise<void> {
   const abortController = new AbortController();
   let closed = false;

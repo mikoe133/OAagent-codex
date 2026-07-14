@@ -10,6 +10,12 @@ export type ToolStep = {
   output?: string
 }
 
+export type TraceMessage = {
+  id: string
+  content: string
+  afterStepId?: string
+}
+
 export type ChatStreamEvent = {
   type?: unknown
   delta?: unknown
@@ -76,6 +82,44 @@ export function mergeToolTimelineEvent(steps: ToolStep[], event: ChatStreamEvent
   }
 
   return steps.map((step, index) => (index === existingIndex ? nextStep : step))
+}
+
+export function mergeMessageTraceDelta(
+  messages: TraceMessage[],
+  event: ChatStreamEvent,
+  afterStepId: string | null = null,
+): TraceMessage[] {
+  if (event.type !== "message.delta") {
+    return messages
+  }
+
+  const delta = typeof event.delta === "string" ? event.delta : ""
+  const cumulativeText = typeof event.text === "string" ? event.text : null
+  if (!delta && cumulativeText === null) {
+    return messages
+  }
+
+  const itemId = typeof event.itemId === "string" && event.itemId.trim()
+    ? event.itemId.trim()
+    : "message-current"
+  const existingIndex = messages.findIndex((message) => message.id === itemId)
+  const previous = existingIndex >= 0 ? messages[existingIndex] : null
+  const content = cumulativeText ?? appendDelta(previous?.content ?? "", delta)
+  const nextMessage: TraceMessage = {
+    id: itemId,
+    content,
+    ...(previous?.afterStepId
+      ? { afterStepId: previous.afterStepId }
+      : afterStepId
+        ? { afterStepId }
+        : {}),
+  }
+
+  if (existingIndex < 0) {
+    return [...messages, nextMessage]
+  }
+
+  return messages.map((message, index) => (index === existingIndex ? nextMessage : message))
 }
 
 function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | null): ToolStep {

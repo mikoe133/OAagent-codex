@@ -51,10 +51,13 @@ export function createCodexClient(
   });
 }
 
-export function createThreadOptions(config: AppConfig): ThreadOptions {
+export function createThreadOptions(
+  config: AppConfig,
+  model: string = config.model,
+): ThreadOptions {
   const oaToolEnabled = Boolean(config.oaApiBaseUrl);
   return {
-    model: config.model,
+    model,
     sandboxMode: oaToolEnabled ? "workspace-write" : "read-only",
     workingDirectory: config.projectRoot,
     skipGitRepoCheck: true,
@@ -67,8 +70,9 @@ export function startOrResumeThread(
   codex: Codex,
   config: AppConfig,
   threadId: string | null,
+  model: string = config.model,
 ): Thread {
-  const options = createThreadOptions(config);
+  const options = createThreadOptions(config, model);
   return threadId
     ? codex.resumeThread(threadId, options)
     : codex.startThread(options);

@@ -7,6 +7,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth"
 type ChatRequestBody = {
   messages?: unknown
   sessionId?: unknown
+  model?: unknown
 }
 
 type ChatMessage = {
@@ -50,10 +51,14 @@ export async function POST(req: Request) {
     }
 
     const sessionId = resolveAgentSessionId(body.sessionId)
+    const model = resolveRequestedModel(body.model)
+    if (body.model !== undefined && !model) {
+      return jsonResponse({ error: "Invalid model" }, 400)
+    }
     const agentResponse = await fetch(buildAgentStreamUrl(sessionId), {
       method: "POST",
       headers: buildAgentHeaders(sessionToken),
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, ...(model ? { model } : {}) }),
       signal: req.signal,
       cache: "no-store",
     })
@@ -126,6 +131,14 @@ function resolveAgentSessionId(input: unknown): string {
   }
 
   return `web-${randomUUID()}`
+}
+
+function resolveRequestedModel(input: unknown): string | null {
+  if (typeof input !== "string") {
+    return null
+  }
+  const model = input.trim()
+  return model || null
 }
 
 function buildAgentStreamUrl(sessionId: string): URL {

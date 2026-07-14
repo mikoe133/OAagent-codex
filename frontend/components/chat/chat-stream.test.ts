@@ -3,8 +3,10 @@ import test from "node:test"
 
 import {
   drainChatSseBuffer,
+  mergeMessageTraceDelta,
   mergeToolTimelineEvent,
   type ChatStreamEvent,
+  type TraceMessage,
   type ToolStep,
 } from "./chat-stream"
 
@@ -80,4 +82,43 @@ test("mergeToolTimelineEvent keeps structured MCP input and result", () => {
 
   assert.equal(steps[0]?.input, '{\n  "userId": 42\n}')
   assert.equal(steps[0]?.output, '{\n  "name": "Ada"\n}')
+})
+
+test("mergeMessageTraceDelta keeps separate agent messages and associates them with trace steps", () => {
+  let messages: TraceMessage[] = []
+
+  messages = mergeMessageTraceDelta(messages, {
+    type: "message.delta",
+    itemId: "message-1",
+    delta: "I will inspect ",
+    text: "I will inspect ",
+  })
+  messages = mergeMessageTraceDelta(messages, {
+    type: "message.delta",
+    itemId: "message-1",
+    delta: "the records.",
+    text: "I will inspect the records.",
+  })
+  messages = mergeMessageTraceDelta(
+    messages,
+    {
+      type: "message.delta",
+      itemId: "message-2",
+      delta: "Now I will summarize the result.",
+      text: "Now I will summarize the result.",
+    },
+    "command-1",
+  )
+
+  assert.deepEqual(messages, [
+    {
+      id: "message-1",
+      content: "I will inspect the records.",
+    },
+    {
+      id: "message-2",
+      content: "Now I will summarize the result.",
+      afterStepId: "command-1",
+    },
+  ])
 })
