@@ -7,7 +7,7 @@ code, prompts, controlled OA API helper script, and OpenAPI contract.
 
 ```text
 agent/
-  openapi/openapi.json     OA OpenAPI contract and generated metadata
+  openapi/openapi.json     Local fallback for the OA OpenAPI contract
   prompts/                 Agent prompt files loaded in deterministic order
   scripts/                 Backend maintenance and controlled tool scripts
   src/
@@ -47,3 +47,9 @@ npm run typecheck
 
 The backend loads environment variables from the repository root `.env`, then
 from `agent/.env` if present. Values in `agent/.env` override root values.
+
+For each agent task and controlled OA API call, the backend first requests
+`OA_OPENAPI_URL` (default: `https://api-oa.rwkvos.com/openapi_json`). A valid
+remote OpenAPI document is materialized under `agent/.context/openapi/` for the
+Codex subprocess. Network errors, non-2xx responses, and invalid OpenAPI JSON
+fall back to `agent/openapi/openapi.json`.

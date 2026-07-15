@@ -1,26 +1,50 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { prioritizeSessionItem } from "./session-list-order"
+import { resolveStableSessionOrder, sortSessionItemsByCreatedAt } from "./session-list-order"
 
-test("prioritizes the exact newly created session record without reordering the remaining items", () => {
+test("keeps creation-time order unchanged when the active session changes", () => {
   const items = [
-    { sessionId: "new-session", recordId: "older-record" },
-    { sessionId: "other-session", recordId: "other-record" },
-    { sessionId: "new-session", recordId: "current-record" },
+    { sessionId: "newest", createdAt: "2026-07-15T08:00:00.000Z" },
+    { sessionId: "middle", createdAt: "2026-07-14T08:00:00.000Z" },
+    { sessionId: "oldest", createdAt: "2026-07-13T08:00:00.000Z" },
   ]
 
-  const prioritized = prioritizeSessionItem(items, {
-    sessionId: "new-session",
-    recordId: "current-record",
-  })
+  const whenOldestIsActive = resolveStableSessionOrder(items, "oldest")
+  const whenMiddleIsActive = resolveStableSessionOrder(items, "middle")
 
   assert.deepEqual(
-    prioritized.map((item) => item.recordId),
-    ["current-record", "older-record", "other-record"],
+    whenOldestIsActive.map((item) => item.sessionId),
+    ["newest", "middle", "oldest"],
   )
   assert.deepEqual(
-    items.map((item) => item.recordId),
-    ["older-record", "other-record", "current-record"],
+    whenMiddleIsActive.map((item) => item.sessionId),
+    ["newest", "middle", "oldest"],
+  )
+})
+
+test("sorts sessions from newest to oldest creation time without using update time", () => {
+  const items = [
+    {
+      sessionId: "older-created",
+      createdAt: "2026-07-10T08:00:00.000Z",
+      updatedAt: "2026-07-14T08:00:00.000Z",
+    },
+    {
+      sessionId: "newer-created",
+      createdAt: "2026-07-13T08:00:00.000Z",
+      updatedAt: "2026-07-13T08:00:00.000Z",
+    },
+  ]
+
+  const sorted = sortSessionItemsByCreatedAt(items)
+
+  assert.deepEqual(
+    sorted.map((item) => item.sessionId),
+    ["newer-created", "older-created"],
+  )
+  assert.deepEqual(
+    items.map((item) => item.sessionId),
+    ["older-created", "newer-created"],
   )
 })

@@ -6,7 +6,7 @@ import { ChevronsUpDown, LogOut, Search, Trash2, UserRound, X } from "lucide-rea
 import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { matchesSessionIdentity, prioritizeSessionItem } from "./session-list-order"
+import { matchesSessionIdentity, resolveStableSessionOrder } from "./session-list-order"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,7 @@ type NavItem = {
   sessionId?: string
   recordId?: string | number
   searchText?: string
+  createdAt?: string
 }
 
 type Section = {
@@ -30,6 +31,7 @@ type Section = {
 type AgentSession = {
   sessionId: string
   summary: string | null
+  createdAt: string
   updatedAt: string
   recordId?: string | number
   messages?: AgentSessionMessage[]
@@ -53,8 +55,8 @@ type SiderProps = {
   activeRecordId?: string | number | null
   isCollapsed?: boolean
   focusSessionKey?: number
-  prioritizedSessionId?: string | null
   onSelectSession?: (session: ChatSessionListItem) => void
+  onDeleteSession: (session: ChatSessionListItem) => Promise<void>
   refreshKey?: number
 }
 
@@ -245,7 +247,7 @@ const SectionsList = ({
   items: NavItem[]
   activeHref: string
   onSelect: (item: NavItem) => void
-  onDelete: (href: string) => void
+  onDelete: (item: NavItem) => void
 }) => (
   <div className="px-4 text-slate-600 md:px-8">
     <ul>
@@ -266,7 +268,7 @@ const SectionsList = ({
           >
             <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
           </NavLink>
-          <DeleteConversationButton name={item.name} onConfirm={() => onDelete(item.href)} />
+          <DeleteConversationButton name={item.name} onConfirm={() => onDelete(item)} />
         </li>
       ))}
     </ul>
@@ -280,8 +282,8 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       activeRecordId = null,
       isCollapsed = false,
       focusSessionKey = 0,
-      prioritizedSessionId = null,
       onSelectSession,
+      onDeleteSession,
       refreshKey = 0,
     },
     ref,
@@ -292,22 +294,38 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
     const [user, setUser] = useState<SiderUser>(() => buildFallbackUser())
     const sessionListRef = useRef<HTMLDivElement>(null)
     const handledFocusSessionKeyRef = useRef(focusSessionKey)
+    const deletedSessionIdsRef = useRef(new Set<string>())
 
-    function handleDeleteItem(href: string) {
-      const nextSections = sections
-        .map((section) => ({
-          ...section,
-          items: section.items.filter((item) => item.href !== href),
-        }))
-        .filter((section) => section.items.length > 0)
-      const normalizedSections = nextSections.length > 0 ? nextSections : defaultSections
-      const fallbackHref = normalizedSections[0]?.items[0]?.href || defaultItem.href
+    async function handleDeleteItem(item: NavItem) {
+      if (!item.sessionId) {
+        removeSessionItem(item.href)
+        return
+      }
 
-      setSections(normalizedSections)
-      setActiveHref((current) => {
-        const stillExists = normalizedSections.some((section) => section.items.some((item) => item.href === current))
-        return stillExists ? current : fallbackHref
+      deletedSessionIdsRef.current.add(item.sessionId)
+      try {
+        await onDeleteSession({
+          sessionId: item.sessionId,
+          ...(item.recordId !== undefined ? { recordId: item.recordId } : {}),
+        })
+        removeSessionItem(item.href)
+      } catch (error) {
+        deletedSessionIdsRef.current.delete(item.sessionId)
+        console.error("Failed to delete chat session:", error)
+      }
+    }
+
+    function removeSessionItem(href: string) {
+      setSections((currentSections) => {
+        const nextSections = currentSections
+          .map((section) => ({
+            ...section,
+            items: section.items.filter((item) => item.href !== href),
+          }))
+          .filter((section) => section.items.length > 0)
+        return nextSections.length > 0 ? nextSections : defaultSections
       })
+      setActiveHref((current) => (current === href ? defaultItem.href : current))
     }
 
     function handleSelectItem(item: NavItem) {
@@ -341,36 +359,13 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
     }, [])
 
     useEffect(() => {
-      if (activeSessionId) {
+      if (activeSessionId && !deletedSessionIdsRef.current.has(activeSessionId)) {
         setActiveHref(buildSessionHref(activeSessionId, activeRecordId))
-
-        if (prioritizedSessionId === activeSessionId) {
-          setSections((currentSections) => {
-            const activeIdentity = {
-              sessionId: activeSessionId,
-              recordId: activeRecordId,
-            }
-            const currentItems = currentSections
-              .flatMap((section) => section.items)
-              .filter((item) => item.sessionId)
-              .filter(
-                (item) =>
-                  !(
-                    activeRecordId !== null &&
-                    activeRecordId !== undefined &&
-                    item.sessionId === activeSessionId &&
-                    item.recordId === undefined
-                  ),
-              )
-            const nextItems = currentItems.some((item) => matchesSessionIdentity(item, activeIdentity))
-              ? currentItems
-              : [buildSessionItem(activeSessionId, activeRecordId), ...currentItems]
-
-            return buildConversationSections(prioritizeSessionItem(nextItems, activeIdentity))
-          })
-        }
+        setSections((currentSections) =>
+          reconcileActiveSession(currentSections, activeSessionId, activeRecordId),
+        )
       }
-    }, [activeRecordId, activeSessionId, prioritizedSessionId])
+    }, [activeRecordId, activeSessionId])
 
     useEffect(() => {
       const abortController = new AbortController()
@@ -385,52 +380,25 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
           })
 
           if (!response.ok) {
-            const fallbackItems = resolveSessionItems(
-              undefined,
-              activeSessionId,
-              activeRecordId,
-              prioritizedSessionId,
-            )
-            setSections(buildConversationSections(fallbackItems))
-            setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId, activeRecordId))
             return
           }
 
           const payload = (await response.json()) as SessionsResponse
-          const nextItems = resolveSessionItems(
-            payload.sessions,
-            activeSessionId,
-            activeRecordId,
-            prioritizedSessionId,
-          )
+          const nextItems = resolveSessionItems(payload.sessions, deletedSessionIdsRef.current)
 
           setSections(buildConversationSections(nextItems))
-          setActiveHref((current) => {
-            const preferredHref = resolvePreferredHref(nextItems, activeSessionId, activeRecordId)
-            return nextItems.some((item) => item.href === current) && !activeSessionId && activeRecordId === null
-              ? current
-              : preferredHref
-          })
         } catch (error) {
           if (error instanceof Error && error.name === "AbortError") {
             return
           }
-
-          const fallbackItems = resolveSessionItems(
-            undefined,
-            activeSessionId,
-            activeRecordId,
-            prioritizedSessionId,
-          )
-          setSections(buildConversationSections(fallbackItems))
-          setActiveHref(resolvePreferredHref(fallbackItems, activeSessionId, activeRecordId))
+          console.error("Failed to load chat sessions:", error)
         }
       }
 
       void loadSessions()
 
       return () => abortController.abort()
-    }, [activeRecordId, activeSessionId, prioritizedSessionId, refreshKey])
+    }, [refreshKey])
 
     const filteredSections = useMemo(() => {
       const normalizedQuery = normalizeSearchText(query)
@@ -556,44 +524,52 @@ export default Sider
 
 function resolveSessionItems(
   value: unknown,
-  activeSessionId?: string,
-  activeRecordId?: string | number | null,
-  prioritizedSessionId?: string | null,
+  deletedSessionIds: ReadonlySet<string> = new Set(),
 ): NavItem[] {
-  const items: NavItem[] = Array.isArray(value)
-    ? value.filter(isAgentSession).map((session) => ({
-        name: resolveSessionTitle(session.summary),
-        href: buildSessionHref(session.sessionId, session.recordId),
-        sessionId: session.sessionId,
-        ...(session.recordId !== undefined ? { recordId: session.recordId } : {}),
-        searchText: buildSessionSearchText(session),
-      }))
-    : []
+  const items: NavItem[] = resolveStableSessionOrder(
+    Array.isArray(value)
+      ? value
+          .filter(isAgentSession)
+          .filter((session) => !deletedSessionIds.has(session.sessionId))
+          .map((session) => ({
+            name: resolveSessionTitle(session.summary),
+            href: buildSessionHref(session.sessionId, session.recordId),
+            sessionId: session.sessionId,
+            ...(session.recordId !== undefined ? { recordId: session.recordId } : {}),
+            searchText: buildSessionSearchText(session),
+            createdAt: session.createdAt,
+          }))
+      : [],
+  )
+  return items.length > 0 ? items : [defaultItem]
+}
 
-  if (
-    activeSessionId &&
-    !items.some((item) =>
-      matchesSessionIdentity(item, {
-        sessionId: activeSessionId,
-        recordId: activeRecordId,
-      }),
-    )
-  ) {
-    items.unshift(buildSessionItem(activeSessionId, activeRecordId))
+function reconcileActiveSession(
+  sections: Section[],
+  activeSessionId: string,
+  activeRecordId?: string | number | null,
+): Section[] {
+  const activeIdentity = { sessionId: activeSessionId, recordId: activeRecordId }
+  const currentItems = sections.flatMap((section) => section.items).filter((item) => item.sessionId)
+  if (currentItems.some((item) => matchesSessionIdentity(item, activeIdentity))) {
+    return sections
   }
 
-  const normalizedItems = items.length > 0 ? items : [defaultItem]
-  const priorityRecordId = prioritizedSessionId === activeSessionId ? activeRecordId : null
+  const sessionIndex = currentItems.findIndex((item) => item.sessionId === activeSessionId)
+  if (sessionIndex < 0) {
+    return buildConversationSections([buildSessionItem(activeSessionId, activeRecordId), ...currentItems])
+  }
 
-  return prioritizeSessionItem(
-    normalizedItems,
-    prioritizedSessionId
+  const nextItems = currentItems.map((item, index) =>
+    index === sessionIndex
       ? {
-          sessionId: prioritizedSessionId,
-          recordId: priorityRecordId,
+          ...item,
+          href: buildSessionHref(activeSessionId, activeRecordId),
+          ...(activeRecordId !== null && activeRecordId !== undefined ? { recordId: activeRecordId } : {}),
         }
-      : null,
+      : item,
   )
+  return buildConversationSections(nextItems)
 }
 
 function buildConversationSections(items: NavItem[]): Section[] {
@@ -621,22 +597,6 @@ function buildSessionHref(sessionId: string, recordId?: string | number | null):
   }
 
   return `#session-${encodeURIComponent(sessionId)}`
-}
-
-function resolvePreferredHref(items: NavItem[], activeSessionId?: string, activeRecordId?: string | number | null): string {
-  if (activeSessionId) {
-    const activeHref = buildSessionHref(activeSessionId, activeRecordId)
-    if (items.some((item) => item.href === activeHref)) {
-      return activeHref
-    }
-
-    const sessionItem = items.find((item) => item.sessionId === activeSessionId)
-    if (sessionItem) {
-      return sessionItem.href
-    }
-  }
-
-  return items[0]?.href || defaultItem.href
 }
 
 function resolveSessionTitle(summary: string | null): string {
@@ -697,6 +657,7 @@ function isAgentSession(value: unknown): value is AgentSession {
   return (
     typeof session.sessionId === "string" &&
     (typeof session.summary === "string" || session.summary === null) &&
+    typeof session.createdAt === "string" &&
     typeof session.updatedAt === "string"
   )
 }

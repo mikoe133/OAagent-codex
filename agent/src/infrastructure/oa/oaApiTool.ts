@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
 import type { AppConfig } from "../../config/config.js";
+import { resolveOpenApiContract } from "./openApiContract.js";
 
 export type OaApiToolInput = {
   sessionId?: unknown;
@@ -50,15 +50,14 @@ export async function callOaApiTool(
   input: OaApiToolInput,
   sessionOaApiToken: string | null = null,
 ): Promise<OaApiToolResult> {
-  const oaApiToken = sessionOaApiToken || config.oaApiToken;
-  if (!config.oaApiBaseUrl || !oaApiToken) {
+  if (!config.oaApiBaseUrl || !sessionOaApiToken) {
     return toolError(
       "oa_not_configured",
       "缺少 OA_API_BASE_URL 或 OA 登录态,无法调用 OA 后端。",
     );
   }
 
-  const openapi = await loadOpenApi(config.openapiPath);
+  const { document: openapi } = await resolveOpenApiContract(config);
   const operation = resolveOperation(openapi, input);
   if (isToolResult(operation)) {
     return operation;
@@ -92,7 +91,7 @@ export async function callOaApiTool(
     path: path.value,
     query: normalizedQuery.value,
     body: input.body,
-    oaApiToken,
+    oaApiToken: sessionOaApiToken,
   });
   const limitedData = limitToolOutput(response.data);
   const warnings = [
@@ -128,7 +127,7 @@ function resolveOperation(
     if (!operation) {
       return toolError(
         "operation_not_found",
-        `openapi/openapi.json 中不存在 operationId=${operationId}。`,
+        `当前 OpenAPI 契约中不存在 operationId=${operationId}。`,
       );
     }
     if (method && method !== operation.method) {
@@ -157,7 +156,7 @@ function resolveOperation(
   if (!operation) {
     return toolError(
       "operation_not_found",
-      `openapi/openapi.json 中不存在 ${method.toUpperCase()} ${path}。`,
+      `当前 OpenAPI 契约中不存在 ${method.toUpperCase()} ${path}。`,
     );
   }
   return operation;
@@ -343,14 +342,9 @@ async function requestOa(
     status: response.status,
     data: redactValue(parseResponseBody(text), [
       request.oaApiToken,
-      config.oaApiToken ?? "",
       config.oaApiToolToken,
     ]),
   };
-}
-
-async function loadOpenApi(openapiPath: string): Promise<unknown> {
-  return JSON.parse(await readFile(openapiPath, "utf8")) as unknown;
 }
 
 function toolError(

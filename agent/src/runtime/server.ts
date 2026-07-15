@@ -12,7 +12,7 @@ function main(): void {
   console.error(`[agent] session_store=${config.sessionStorePath}`);
   console.error(
     config.oaApiBaseUrl
-      ? "[agent] 受控 OA API 调用工具已启用;OA 登录态可来自请求 header 或服务端环境变量。"
+      ? "[agent] 受控 OA API 调用工具已启用;OA 登录态来自已验证的请求 token。"
       : "[agent] 未配置 OA_API_BASE_URL;本次只做接口分析,不执行真实 OA 请求。",
   );
 

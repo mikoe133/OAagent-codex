@@ -1,4 +1,5 @@
 import type { ThreadItem } from "@openai/codex-sdk";
+import path from "node:path";
 import type { AppConfig } from "../config/config.js";
 import {
   createCodexClient,
@@ -8,7 +9,7 @@ import { loadSystemPrompt } from "../infrastructure/prompts/promptLoader.js";
 
 export type AgentRunResult = {
   finalResponse: string;
-  /** 过程中执行的命令,用于人工验收 agent 是否真的读取了 openapi/openapi.json。 */
+  /** 过程中执行的命令,用于人工验收 agent 是否真的读取了所选 OpenAPI 契约。 */
   executedCommands: string[];
 };
 
@@ -48,8 +49,8 @@ export function buildRuntimeContext(
   config: AppConfig,
   runtime: AgentRuntimeContext = {},
 ): string {
-  const hasAnyOaApiToken =
-    config.hasOaApiToken || Boolean(runtime.hasSessionOaApiToken);
+  const hasAnyOaApiToken = Boolean(runtime.hasSessionOaApiToken);
+  const openapiPath = displayOpenApiPath(config);
   const commandSessionArg = runtime.sessionId
     ? ` --sessionId ${runtime.sessionId}`
     : "";
@@ -58,28 +59,38 @@ export function buildRuntimeContext(
     `- 模型 provider: ${config.modelProvider}`,
     `- 模型: ${config.model}`,
     runtime.sessionId ? `- 当前 sessionId: ${runtime.sessionId}` : null,
-    "- 接口文档: ./openapi/openapi.json",
+    `- 接口文档: ${openapiPath}`,
     "- 不使用额外 Skill、MCP 或自定义 function tools",
     config.oaApiBaseUrl && hasAnyOaApiToken
       ? [
           "- 受控 OA API 调用工具: 可用",
-          runtime.hasSessionOaApiToken
-            ? "- OA 登录态: 已从当前请求 header 绑定到 session;不要读取、输出或转述该 token"
-            : "- OA 登录态: 使用服务端环境变量中的登录态;不要读取、输出或转述该 token",
-          "- 需要真实调用 OA 后端时,先用 openapi/openapi.json 确认 operationId/method/path/参数,再运行:",
+          "- OA 登录态: 已从当前请求 header 绑定到 session;不要读取、输出或转述该 token",
+          `- 需要真实调用 OA 后端时,先用 ${openapiPath} 确认 operationId/method/path/参数,再运行:`,
           `  node scripts/callOaApi.mjs${commandSessionArg} --operationId <operationId> --query '<JSON对象>'`,
           "- 有 path parameters 时加 --pathParams '<JSON对象>';有 request body 时加 --body '<JSON值>'",
           "- 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认",
           "- 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作必须先取得用户确认,再加 --confirmed true",
-          "- 处理 OA 查询时不要修改工作区文件;只允许读取 openapi/openapi.json 并运行 scripts/callOaApi.mjs",
-          "- 不要读取或输出 CALL_OA_API_URL、CALL_OA_API_TOKEN、OA_API_TOKEN、请求 token 或 Authorization header",
+          `- 处理 OA 查询时不要修改工作区文件;只允许读取 ${openapiPath} 并运行 scripts/callOaApi.mjs`,
+          "- 不要读取或输出 CALL_OA_API_URL、CALL_OA_API_TOKEN、请求 token 或 Authorization header",
         ].join("\n")
-      : "- 受控 OA API 调用工具: 不可用;只能基于 openapi/openapi.json 做接口分析,不能声称已执行真实后端操作",
+      : `- 受控 OA API 调用工具: 不可用;只能基于 ${openapiPath} 做接口分析,不能声称已执行真实后端操作`,
     `- OA_API_BASE_URL: ${config.oaApiBaseUrl ? "已配置" : "未配置"}`,
     `- OA 登录态: ${hasAnyOaApiToken ? "已配置" : "未配置"}`,
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");
+}
+
+function displayOpenApiPath(config: AppConfig): string {
+  const relativePath = path.relative(config.projectRoot, config.openapiPath);
+  if (
+    relativePath &&
+    !relativePath.startsWith("..") &&
+    !path.isAbsolute(relativePath)
+  ) {
+    return `./${relativePath.split(path.sep).join("/")}`;
+  }
+  return config.openapiPath;
 }
 
 /** 把已知密钥值从将要打印的文本中移除,防止密钥进入 stdout/日志。 */
@@ -95,8 +106,8 @@ export function redactSecrets(text: string, secrets: string[]): string {
 /**
  * 创建 Codex SDK 会话并执行一次任务:
  * - 通过 --config 覆盖将 provider 指向 OpenRouter,API key 只经 env_key 机制传递。
- * - 沙箱为 read-only:agent 只需要读取仓库内的 openapi/openapi.json。
- * - 禁用 web search:openapi/openapi.json 是唯一事实来源(规划 §9.1)。
+ * - 沙箱为 read-only:agent 只需要读取运行时选中的 OpenAPI 契约。
+ * - 禁用 web search:运行时选中的 OpenAPI 契约是唯一事实来源(规划 §9.1)。
  * - 不注册额外 function tools,不加载额外 skills。
  */
 export async function runCodexAgent(
@@ -115,11 +126,7 @@ export async function runCodexAgent(
     );
   }
 
-  const secrets = [
-    config.openrouterApiKey,
-    config.oaApiToken ?? "",
-    config.oaApiToolToken,
-  ];
+  const secrets = [config.openrouterApiKey, config.oaApiToolToken];
   return {
     finalResponse: redactSecrets(turn.finalResponse, secrets),
     executedCommands: collectExecutedCommands(turn.items).map((command) =>

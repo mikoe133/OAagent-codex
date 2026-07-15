@@ -11,6 +11,7 @@ import {
   resolveRequestedOpenAiModel,
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
+import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
 import type { SessionStore } from "../infrastructure/persistence/sessionStore.js";
 
 const MAX_BODY_BYTES = 128 * 1024;
@@ -22,14 +23,7 @@ export function startHttpServer(
   agentService: AgentService,
   sessionStore: SessionStore,
 ): void {
-  const server = createServer(async (request, response) => {
-    try {
-      await routeRequest(config, agentService, sessionStore, request, response);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      writeJson(response, 500, { error: message });
-    }
-  });
+  const server = createAgentHttpServer(config, agentService, sessionStore);
 
   server.listen(config.serverPort, config.serverHost, () => {
     console.error(
@@ -46,6 +40,21 @@ export function startHttpServer(
       return;
     }
     throw error;
+  });
+}
+
+export function createAgentHttpServer(
+  config: AppConfig,
+  agentService: AgentService,
+  sessionStore: SessionStore,
+) {
+  return createServer(async (request, response) => {
+    try {
+      await routeRequest(config, agentService, sessionStore, request, response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      writeJson(response, 500, { error: message });
+    }
   });
 }
 
@@ -98,8 +107,23 @@ async function routeRequest(
     return;
   }
 
-  if (!isAuthorized(config, request)) {
+  if (!url.pathname.startsWith("/v1/")) {
+    writeJson(response, 404, { error: "not found" });
+    return;
+  }
+
+  const oaApiToken = readOaApiTokenFromRequest(config, request);
+  if (!oaApiToken) {
     writeJson(response, 401, { error: "unauthorized" });
+    return;
+  }
+  const tokenValidation = await validateOaToken(config, oaApiToken);
+  if (tokenValidation.status === "invalid") {
+    writeJson(response, 401, { error: "unauthorized" });
+    return;
+  }
+  if (tokenValidation.status === "unavailable") {
+    writeJson(response, 503, { error: "OA authentication service unavailable" });
     return;
   }
 
@@ -112,9 +136,15 @@ async function routeRequest(
     const body = await readJsonBody(request);
     const sessionId = stringField(body, "sessionId") || randomUUID();
     validateSessionId(sessionId);
-    const oaApiToken = readOaApiTokenFromRequest(config, request);
-    if (oaApiToken) {
-      await sessionStore.bindOaToken(sessionId, oaApiToken);
+    if (
+      !(await sessionStore.bindOaToken(
+        sessionId,
+        oaApiToken,
+        tokenValidation.principalId,
+      ))
+    ) {
+      writeJson(response, 403, { error: "forbidden" });
+      return;
     }
     const session = await sessionStore.getOrCreate(sessionId);
     writeJson(response, 201, session);
@@ -122,7 +152,23 @@ async function routeRequest(
   }
 
   if (method === "GET" && url.pathname === "/v1/sessions") {
-    writeJson(response, 200, { sessions: await sessionStore.list() });
+    writeJson(response, 200, {
+      sessions: await sessionStore.listForOwner(tokenValidation.principalId),
+    });
+    return;
+  }
+
+  const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/);
+  if (method === "DELETE" && sessionMatch) {
+    const sessionId = decodeURIComponent(sessionMatch[1] ?? "");
+    validateSessionId(sessionId);
+    writeJson(response, 200, {
+      deleted: await sessionStore.removeForOwner(
+        sessionId,
+        tokenValidation.principalId,
+      ),
+      sessionId,
+    });
     return;
   }
 
@@ -132,6 +178,16 @@ async function routeRequest(
   if (method === "POST" && messageMatch) {
     const sessionId = decodeURIComponent(messageMatch[1] ?? "");
     validateSessionId(sessionId);
+    if (
+      !(await sessionStore.bindOaToken(
+        sessionId,
+        oaApiToken,
+        tokenValidation.principalId,
+      ))
+    ) {
+      writeJson(response, 403, { error: "forbidden" });
+      return;
+    }
     const body = await readJsonBody(request);
     const message = stringField(body, "message");
     if (!message) {
@@ -147,7 +203,7 @@ async function routeRequest(
       sessionId,
       message,
       model,
-      oaApiToken: readOaApiTokenFromRequest(config, request),
+      oaApiToken,
     });
     writeJson(response, 200, result);
     return;
@@ -159,6 +215,16 @@ async function routeRequest(
   if (method === "POST" && streamMessageMatch) {
     const sessionId = decodeURIComponent(streamMessageMatch[1] ?? "");
     validateSessionId(sessionId);
+    if (
+      !(await sessionStore.bindOaToken(
+        sessionId,
+        oaApiToken,
+        tokenValidation.principalId,
+      ))
+    ) {
+      writeJson(response, 403, { error: "forbidden" });
+      return;
+    }
     const body = await readJsonBody(request);
     const message = stringField(body, "message");
     if (!message) {
@@ -174,19 +240,12 @@ async function routeRequest(
       sessionId,
       message,
       model,
-      oaApiToken: readOaApiTokenFromRequest(config, request),
+      oaApiToken,
     });
     return;
   }
 
   writeJson(response, 404, { error: "not found" });
-}
-
-function isAuthorized(config: AppConfig, request: IncomingMessage): boolean {
-  if (!config.agentApiToken) {
-    return true;
-  }
-  return request.headers.authorization === `Bearer ${config.agentApiToken}`;
 }
 
 function readOaApiTokenFromRequest(
@@ -205,10 +264,6 @@ function readOaApiTokenFromRequest(
     if (!raw) {
       continue;
     }
-    if (isAgentAuthorizationHeader(config, headerName, raw)) {
-      continue;
-    }
-
     const prefixes =
       headerName.toLowerCase() === "cookie"
         ? uniqueStrings([config.oaUserTokenPrefix, "sessionid="])
@@ -250,18 +305,6 @@ function headerValue(
     return value.find((item) => item.trim())?.trim() ?? null;
   }
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function isAgentAuthorizationHeader(
-  config: AppConfig,
-  headerName: string,
-  value: string,
-): boolean {
-  return (
-    headerName.toLowerCase() === "authorization" &&
-    Boolean(config.agentApiToken) &&
-    value === `Bearer ${config.agentApiToken}`
-  );
 }
 
 function parseIncomingOaToken(

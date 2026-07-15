@@ -10,11 +10,15 @@ export type AgentSession = {
 };
 
 type SessionStoreFile = {
-  sessions: AgentSession[];
+  sessions: StoredAgentSession[];
+};
+
+type StoredAgentSession = AgentSession & {
+  ownerId: string | null;
 };
 
 export class SessionStore {
-  private readonly sessions = new Map<string, AgentSession>();
+  private readonly sessions = new Map<string, StoredAgentSession>();
   private readonly oaTokens = new Map<string, string>();
   private loaded = false;
   private writeQueue: Promise<void> = Promise.resolve();
@@ -25,20 +29,21 @@ export class SessionStore {
     await this.load();
     const existing = this.sessions.get(sessionId);
     if (existing) {
-      return existing;
+      return publicSession(existing);
     }
 
     const now = new Date().toISOString();
-    const created: AgentSession = {
+    const created: StoredAgentSession = {
       sessionId,
       threadId: null,
       summary: null,
       createdAt: now,
       updatedAt: now,
+      ownerId: null,
     };
     this.sessions.set(sessionId, created);
     await this.persist();
-    return created;
+    return publicSession(created);
   }
 
   async updateThreadId(sessionId: string, threadId: string): Promise<void> {
@@ -63,9 +68,22 @@ export class SessionStore {
     await this.persist();
   }
 
-  async bindOaToken(sessionId: string, token: string): Promise<void> {
+  async bindOaToken(
+    sessionId: string,
+    token: string,
+    ownerId?: string,
+  ): Promise<boolean> {
     await this.getOrCreate(sessionId);
+    const session = this.sessions.get(sessionId)!;
+    if (ownerId && session.ownerId && session.ownerId !== ownerId) {
+      return false;
+    }
+    if (ownerId && !session.ownerId) {
+      session.ownerId = ownerId;
+      await this.persist();
+    }
     this.oaTokens.set(sessionId, token);
+    return true;
   }
 
   getOaToken(sessionId: string): string | null {
@@ -74,9 +92,32 @@ export class SessionStore {
 
   async list(): Promise<AgentSession[]> {
     await this.load();
-    return [...this.sessions.values()].sort((a, b) =>
-      b.updatedAt.localeCompare(a.updatedAt),
-    );
+    return sortSessions([...this.sessions.values()]).map(publicSession);
+  }
+
+  async listForOwner(ownerId: string): Promise<AgentSession[]> {
+    await this.load();
+    return sortSessions(
+      [...this.sessions.values()].filter((session) => session.ownerId === ownerId),
+    ).map(publicSession);
+  }
+
+  async remove(sessionId: string): Promise<boolean> {
+    await this.load();
+    const removed = this.sessions.delete(sessionId);
+    this.oaTokens.delete(sessionId);
+    if (removed) {
+      await this.persist();
+    }
+    return removed;
+  }
+
+  async removeForOwner(sessionId: string, ownerId: string): Promise<boolean> {
+    await this.load();
+    if (this.sessions.get(sessionId)?.ownerId !== ownerId) {
+      return false;
+    }
+    return this.remove(sessionId);
   }
 
   private async load(): Promise<void> {
@@ -87,8 +128,9 @@ export class SessionStore {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<SessionStoreFile>;
-      for (const session of parsed.sessions ?? []) {
-        if (isAgentSession(session)) {
+      for (const value of parsed.sessions ?? []) {
+        const session = normalizeStoredSession(value);
+        if (session) {
           this.sessions.set(session.sessionId, session);
         }
       }
@@ -117,18 +159,42 @@ export class SessionStore {
   }
 }
 
-function isAgentSession(value: unknown): value is AgentSession {
+function normalizeStoredSession(value: unknown): StoredAgentSession | null {
   if (!value || typeof value !== "object") {
-    return false;
+    return null;
   }
-  const session = value as Partial<AgentSession>;
-  return (
+  const session = value as Partial<StoredAgentSession>;
+  if (!(
     typeof session.sessionId === "string" &&
     (typeof session.threadId === "string" || session.threadId === null) &&
     (typeof session.summary === "string" || session.summary === null) &&
     typeof session.createdAt === "string" &&
     typeof session.updatedAt === "string"
-  );
+  )) {
+    return null;
+  }
+  return {
+    sessionId: session.sessionId,
+    threadId: session.threadId,
+    summary: session.summary,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    ownerId: typeof session.ownerId === "string" ? session.ownerId : null,
+  };
+}
+
+function publicSession(session: StoredAgentSession): AgentSession {
+  return {
+    sessionId: session.sessionId,
+    threadId: session.threadId,
+    summary: session.summary,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function sortSessions(sessions: StoredAgentSession[]): StoredAgentSession[] {
+  return sessions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function isNotFoundError(error: unknown): boolean {

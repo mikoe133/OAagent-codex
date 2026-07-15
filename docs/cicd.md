@@ -1,83 +1,80 @@
 # GitHub Actions CI/CD
 
-`.github/workflows/ci-cd.yml` 提供三层流水线:
+完整的用户操作清单见 [双环境部署简单步骤](dual-environment-deployment.md)。
 
-1. 所有 Pull Request:运行 agent/web/部署回滚测试、类型检查、应用构建和 Compose 校验。
-2. Pull Request 与 `main`:分别构建 `agent-runtime`、`web-runtime` Docker target。
-3. `main` 推送或从 `main` 手动触发:把 commit SHA 镜像推送到 GHCR,再通过 SSH 部署到 production。
+## 自动流程
 
-生产镜像使用不可变 SHA 标签:
+Pull Request:
 
-```text
-ghcr.io/mikoe133/oaagent-codex-agent:<commit-sha>
-ghcr.io/mikoe133/oaagent-codex-web:<commit-sha>
-```
+1. Agent/Web/部署测试。
+2. TypeScript 类型检查。
+3. 应用构建和 Compose 配置校验。
+4. Agent/Web Docker 镜像构建,但不推送。
 
-`main` 标签仅用于查看最新镜像,生产 Compose 实际使用 SHA 标签。
+合并到 `test`:
 
-## GitHub production Environment
+1. 完成全部质量检查。
+2. 构建一次 Agent/Web 镜像并以 commit SHA 推送 GHCR。
+3. 自动部署到 `test` Environment。
 
-在仓库 `Settings -> Environments` 创建 `production`,并配置以下 Environment secrets:
+合并到 `main`:
 
-| Secret | 内容 |
+1. 完成全部质量检查。
+2. 构建一次 Agent/Web 镜像并以 commit SHA 推送 GHCR。
+3. 如果 production 配置了 Required reviewer,等待人工批准。
+4. 自动部署到 `production` Environment。
+
+两个环境独立发布。推荐先把功能分支合并到 `test`,验证通过后再把 `test` 合并到 `main`。
+
+## GitHub 配置
+
+Repository Secrets:
+
+| Secret | 用途 |
 | --- | --- |
-| `DEPLOY_HOST` | 部署服务器域名或 IP |
-| `DEPLOY_USER` | 有权运行 Docker 的 SSH 用户 |
-| `DEPLOY_SSH_KEY` | 对应服务器 authorized_keys 的私钥 |
-| `DEPLOY_KNOWN_HOSTS` | 服务器 SSH host key 完整记录 |
-| `GHCR_PULL_TOKEN` | GitHub PAT,至少包含 `read:packages` |
+| `DEPLOY_SSH_KEY` | GitHub Actions 登录服务器的 SSH 私钥 |
+| `DEPLOY_KNOWN_HOSTS` | 已核对的服务器 SSH Host Key |
+| `OPENROUTER_API_KEY` | Agent 模型服务凭证 |
 
-建议为 `production` 增加 required reviewers,防止合并后未经审批直接发布。
+Repository Variables:
 
-可选 Environment variables:
+| Variable | 用途 |
+| --- | --- |
+| `DEPLOY_HOST` | 服务器 IP 或域名 |
+| `DEPLOY_USER` | 可以直接运行 Docker 的 SSH 用户 |
+| `DEPLOY_PORT` | SSH 端口,默认 `22` |
+| `DEPLOY_PLATFORM` | 默认 `linux/amd64`;ARM 使用 `linux/arm64` |
 
-| Variable | 默认值 | 用途 |
+Environment Variables:
+
+| Environment | Variable | 用途 |
 | --- | --- | --- |
-| `DEPLOY_PATH` | `/opt/oa-agent` | 服务器部署目录,不要包含空格 |
-| `DEPLOY_PORT` | `22` | SSH 端口 |
+| `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
+| `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
+| 两者可选 | `OA_AUTH_ALIAS` | OA 数据源 alias,默认 `default` |
 
-可选 Repository variable:
+Workflow 使用 `${{ github.token }}` 登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
 
-| Variable | 默认值 | 用途 |
-| --- | --- | --- |
-| `DEPLOY_PLATFORM` | `linux/amd64` | Docker 目标平台;ARM 服务器改为 `linux/arm64` |
+## 固定环境参数
 
-生成 `DEPLOY_KNOWN_HOSTS` 时应在可信网络核对服务器指纹:
+| 环境 | 部署目录 | Compose 项目 | Web 监听 |
+| --- | --- | --- | --- |
+| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3001` |
+| 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3000` |
+
+Workflow 会把运行配置安全写入服务器 `.env.next`;部署脚本在发布时将其提升为 `.env`。失败时会同时恢复 `.env.previous` 和 `.deploy.env.previous`。
+
+## 手动回滚
+
+进入测试或生产目录后执行:
 
 ```bash
-ssh-keyscan -p 22 your-server.example.com
-```
-
-不要关闭 workflow 中的 host key 校验,也不要把私钥、PAT 或 `.env` 提交到仓库。
-
-## 服务器首次准备
-
-服务器需要 Docker Engine、Docker Compose v2.20+ 和可访问的现有 OA 服务。部署用户必须能够直接运行 `docker`。
-
-在 `DEPLOY_PATH` 下准备 `.env`,至少包含:
-
-```dotenv
-OPENROUTER_API_KEY=<secret>
-AGENT_API_TOKEN=<random-secret>
-OA_DOCKER_API_BASE_URL=http://host.docker.internal:8010
-WEB_BIND_ADDRESS=0.0.0.0
-WEB_PORT=3000
-OA_AUTH_ALIAS=default
-```
-
-Workflow 每次只上传 `compose.yml`;不会覆盖服务器 `.env`、`agent_sessions` 或 `agent_codex_home`。
-
-## 发布与回滚
-
-合并到 `main` 后自动执行生产发布。也可以在 Actions 页面从 `main` 手动运行 `CI/CD`。
-
-部署脚本会先保存 `.deploy.env.previous`,然后拉取并健康检查新镜像。如果拉取或健康检查失败,会自动恢复上一版镜像。手动回滚命令:
-
-```bash
-cd /opt/oa-agent
+cp .env.previous .env
 cp .deploy.env.previous .deploy.env
-docker compose --env-file .env --env-file .deploy.env pull agent web
-docker compose --env-file .env --env-file .deploy.env up -d --no-build --remove-orphans --wait --wait-timeout 180
+chmod 600 .env .deploy.env
+docker compose --env-file .env --env-file .deploy.env -f compose.yml pull agent web
+docker compose --env-file .env --env-file .deploy.env -f compose.yml \
+  up -d --no-build --remove-orphans --wait --wait-timeout 180
 ```
 
-首次部署没有上一版本可回滚;发布前应先确认 OA 服务、HTTPS 反向代理和 `.env` 配置可用。
+首次部署没有 previous 文件。不要执行 `docker compose down -v`,否则会删除 session 和 Codex thread 数据卷。

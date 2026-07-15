@@ -1,0 +1,141 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, it } from "node:test";
+import { buildRuntimeContext } from "../src/application/runCodexAgent.js";
+import type { AppConfig } from "../src/config/config.js";
+import { resolveOpenApiContract } from "../src/infrastructure/oa/openApiContract.js";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.splice(0).map((directory) =>
+      rm(directory, { recursive: true, force: true }),
+    ),
+  );
+});
+
+describe("resolveOpenApiContract", () => {
+  it("uses and materializes the remote contract when it is available", async () => {
+    const fixture = await createFixture();
+    const remoteContract = createContract("remote_operation");
+
+    const resolved = await resolveOpenApiContract(
+      fixture.config,
+      async () => Response.json(remoteContract),
+    );
+
+    assert.equal(resolved.source, "remote");
+    assert.deepEqual(resolved.document, remoteContract);
+    assert.notEqual(resolved.path, fixture.fallbackPath);
+    assert.deepEqual(
+      JSON.parse(await readFile(resolved.path, "utf8")),
+      remoteContract,
+    );
+  });
+
+  it("uses the local contract when the remote request fails", async () => {
+    const fixture = await createFixture();
+
+    const resolved = await resolveOpenApiContract(fixture.config, async () => {
+      throw new Error("network unavailable");
+    });
+
+    assert.equal(resolved.source, "local");
+    assert.equal(resolved.path, fixture.fallbackPath);
+    assert.deepEqual(resolved.document, fixture.localContract);
+  });
+
+  it("uses the local contract when the remote response is not successful", async () => {
+    const fixture = await createFixture();
+
+    const resolved = await resolveOpenApiContract(
+      fixture.config,
+      async () => new Response("unavailable", { status: 503 }),
+    );
+
+    assert.equal(resolved.source, "local");
+    assert.match(resolved.fallbackReason ?? "", /HTTP 503/);
+  });
+
+  it("uses the local contract when the remote response is not valid OpenAPI JSON", async () => {
+    const fixture = await createFixture();
+
+    const resolved = await resolveOpenApiContract(
+      fixture.config,
+      async () => new Response("{\"message\":\"not an OpenAPI document\"}"),
+    );
+
+    assert.equal(resolved.source, "local");
+    assert.deepEqual(resolved.document, fixture.localContract);
+  });
+
+  it("fails when neither the remote nor local contract is valid", async () => {
+    const fixture = await createFixture();
+    await writeFile(fixture.fallbackPath, "not json", "utf8");
+
+    await assert.rejects(
+      resolveOpenApiContract(fixture.config, async () => {
+        throw new Error("network unavailable");
+      }),
+      /本地 OpenAPI 文件 .* 不是合法 JSON/,
+    );
+  });
+});
+
+describe("buildRuntimeContext", () => {
+  it("points the agent at the resolved OpenAPI snapshot", () => {
+    const config = {
+      projectRoot: "/tmp/agent",
+      openapiPath: "/tmp/agent/.context/openapi/remote.json",
+      modelProvider: "openrouter",
+      model: "gpt-5.5",
+      oaApiBaseUrl: null,
+    } as AppConfig;
+
+    assert.match(
+      buildRuntimeContext(config),
+      /接口文档: \.\/\.context\/openapi\/remote\.json/,
+    );
+  });
+});
+
+async function createFixture(): Promise<{
+  config: AppConfig;
+  fallbackPath: string;
+  localContract: ReturnType<typeof createContract>;
+}> {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "oa-openapi-test-"));
+  temporaryDirectories.push(projectRoot);
+  const fallbackPath = path.join(projectRoot, "openapi", "openapi.json");
+  const localContract = createContract("local_operation");
+  await mkdir(path.dirname(fallbackPath), { recursive: true });
+  await writeFile(fallbackPath, JSON.stringify(localContract), "utf8");
+
+  return {
+    fallbackPath,
+    localContract,
+    config: {
+      projectRoot,
+      openapiPath: fallbackPath,
+      openapiUrl: "https://example.test/openapi_json",
+    } as AppConfig,
+  };
+}
+
+function createContract(operationId: string) {
+  return {
+    openapi: "3.1.0",
+    info: { title: "test", version: "1.0.0" },
+    paths: {
+      "/test": {
+        get: {
+          operationId,
+          responses: { "200": { description: "ok" } },
+        },
+      },
+    },
+  };
+}

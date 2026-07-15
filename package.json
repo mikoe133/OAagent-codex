@@ -4,7 +4,7 @@
   "private": true,
   "description": "Monorepo for the OA agent backend and frontend app.",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9.0"
   },
   "workspaces": [
     "agent",
@@ -20,7 +20,7 @@
     "build:frontend": "npm run build -w frontend --if-present",
     "start": "npm run start -w agent --",
     "start:server": "npm run start:server -w agent",
-    "test:deploy": "node --test scripts/deploy-compose.test.mjs",
+    "test:deploy": "node --test scripts/*.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }
 }

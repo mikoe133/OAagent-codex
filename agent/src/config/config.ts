@@ -8,14 +8,17 @@ import dotenv from "dotenv";
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_MODEL_PROVIDER = "openrouter";
+const DEFAULT_OPENAPI_URL = "https://api-oa.rwkvos.com/openapi_json";
 
 export type AppConfig = {
   /** 后端包根目录(openapi/、prompts/ 所在目录)。 */
   projectRoot: string;
   /** 仓库根目录(frontend/、agent/ 所在目录)。 */
   repoRoot: string;
-  /** openapi/openapi.json 的绝对路径。 */
+  /** 本地兜底 openapi/openapi.json 的绝对路径。 */
   openapiPath: string;
+  /** 优先读取的远程 OA OpenAPI 地址。 */
+  openapiUrl: string;
   /** OpenRouter API key。只用于模型调用,不允许写入 prompt、日志或最终回答。 */
   openrouterApiKey: string;
   /** OpenRouter OpenAI-compatible base URL。 */
@@ -26,10 +29,8 @@ export type AppConfig = {
   model: string;
   /** OA 后端地址。未配置时只做接口分析。 */
   oaApiBaseUrl: string | null;
-  /** OA 后端登录态。只用于能力状态判断和响应脱敏,不进入 prompt 或 Codex 子进程。 */
-  oaApiToken: string | null;
-  /** OA 登录态来源变量名。OA_SERVICE_SESSIONID 仅作为旧变量名兼容,不输出值。 */
-  oaApiTokenSource: "OA_API_TOKEN" | "OA_SERVICE_SESSIONID" | null;
+  /** OA 数据源别名。 */
+  oaAuthAlias: string;
   /** OA token header 名称。 */
   oaApiTokenHeader: string;
   /** OA token header 值前缀。为空时直接使用 token。 */
@@ -38,8 +39,6 @@ export type AppConfig = {
   oaUserTokenHeader: string;
   /** 前端请求用户 OA token header 的值前缀。为空时直接读取完整 header 值。 */
   oaUserTokenPrefix: string;
-  /** 是否持有 OA 登录态。值本身不进入 prompt。 */
-  hasOaApiToken: boolean;
   /** Codex 子进程调用服务端受控 OA API 工具的短期 token。 */
   oaApiToolToken: string;
   /** 后台服务监听端口。 */
@@ -48,15 +47,13 @@ export type AppConfig = {
   serverHost: string;
   /** 后台服务 session 映射持久化文件。 */
   sessionStorePath: string;
-  /** 后台服务 Bearer token。监听非本机地址时必填。 */
-  agentApiToken: string | null;
 };
 
 /**
  * 读取 .env 并做启动前校验:
  * - 缺少 OPENROUTER_API_KEY:直接失败。
- * - 缺少 openapi/openapi.json:直接失败。
- * - 缺少 OA_API_BASE_URL:允许启动,agent 仍只能基于 openapi/openapi.json 做接口分析。
+ * - 缺少本地兜底 openapi/openapi.json:直接失败。
+ * - 缺少 OA_API_BASE_URL:允许启动,agent 仍可基于所选 OpenAPI 契约做接口分析。
  */
 export function loadConfig(): AppConfig {
   const projectRoot = path.resolve(
@@ -77,7 +74,7 @@ export function loadConfig(): AppConfig {
   const openapiPath = path.join(projectRoot, "openapi", "openapi.json");
   if (!existsSync(openapiPath)) {
     throw new Error(
-      `缺少接口文档:${openapiPath} 不存在。openapi/openapi.json 是 agent 的唯一事实来源,必须放在 agent 包内。`,
+      `缺少本地兜底接口文档:${openapiPath} 不存在。远程 OpenAPI 不可用时必须使用该文件。`,
     );
   }
 
@@ -107,18 +104,12 @@ export function loadConfig(): AppConfig {
   const sessionStorePath =
     process.env.AGENT_SESSION_STORE?.trim() ||
     path.join(repoRoot, ".context", "agent-sessions.json");
-  const agentApiToken = process.env.AGENT_API_TOKEN?.trim() || null;
-  if (!isLoopbackHost(serverHost) && !agentApiToken) {
-    throw new Error(
-      "HOST 不是本机地址时必须配置 AGENT_API_TOKEN,避免把 agent 后台服务裸露到网络。",
-    );
-  }
-  const oaApiToken = getOaApiToken();
   const oaApiTokenHeader =
-    process.env.OA_API_TOKEN_HEADER?.trim() || "Authorization";
+    process.env.OA_API_TOKEN_HEADER?.trim() || "Cookie";
+  validateConfiguredHeaderName("OA_API_TOKEN_HEADER", oaApiTokenHeader);
   const oaApiTokenPrefix =
     process.env.OA_API_TOKEN_PREFIX === undefined
-      ? "Bearer"
+      ? "sessionid="
       : process.env.OA_API_TOKEN_PREFIX.trim();
   const oaUserTokenHeader =
     process.env.OA_USER_TOKEN_HEADER?.trim() || "Authorization";
@@ -132,24 +123,22 @@ export function loadConfig(): AppConfig {
     projectRoot,
     repoRoot,
     openapiPath,
+    openapiUrl: process.env.OA_OPENAPI_URL?.trim() || DEFAULT_OPENAPI_URL,
     openrouterApiKey,
     openrouterBaseUrl,
     modelProvider,
     model,
     oaApiBaseUrl: process.env.OA_API_BASE_URL?.trim() || null,
-    oaApiToken: oaApiToken.value,
-    oaApiTokenSource: oaApiToken.source,
+    oaAuthAlias: process.env.OA_AUTH_ALIAS?.trim() || "default",
     oaApiTokenHeader,
     oaApiTokenPrefix,
     oaUserTokenHeader,
     oaUserTokenPrefix,
-    hasOaApiToken: Boolean(oaApiToken.value),
     oaApiToolToken:
       process.env.AGENT_OA_TOOL_TOKEN?.trim() || randomBytes(32).toString("hex"),
     serverPort,
     serverHost,
     sessionStorePath,
-    agentApiToken,
   };
 }
 
@@ -175,26 +164,4 @@ function validateConfiguredHeaderName(name: string, value: string): void {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${name} 不是合法 HTTP header 名称:${message}`);
   }
-}
-
-function isLoopbackHost(host: string): boolean {
-  return ["localhost", "127.0.0.1", "::1"].includes(host);
-}
-
-function getOaApiToken(): {
-  value: string | null;
-  source: "OA_API_TOKEN" | "OA_SERVICE_SESSIONID" | null;
-} {
-  const oaApiToken = process.env.OA_API_TOKEN?.trim();
-  if (oaApiToken) {
-    return { value: oaApiToken, source: "OA_API_TOKEN" };
-  }
-
-  const serviceSessionId = process.env.OA_SERVICE_SESSIONID?.trim();
-  if (serviceSessionId) {
-    // 兼容旧 .env 命名;业务上它与 OA_API_TOKEN 是同一个登录态。
-    return { value: serviceSessionId, source: "OA_SERVICE_SESSIONID" };
-  }
-
-  return { value: null, source: null };
 }

@@ -7,7 +7,8 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
-    "test:chat": "tsx --test app/api/chat/route.test.ts components/chat/chat-stream.test.ts components/chat/composer.test.tsx components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts components/siderbar/session-list-order.test.ts"
+    "test:chat": "tsx --test proxy.test.ts app/api/chat/route.test.ts app/api/chat/sessions/route.test.ts components/chat/chat-stream.test.ts components/chat/composer.test.tsx components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts components/siderbar/session-list-order.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@heroui/react": "^3.2.2",
@@ -51,7 +52,7 @@
     "gsap": "^3.15.0",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
-    "next": "16.0.10",
+    "next": "16.2.10",
     "next-themes": "^0.4.6",
     "react": "19.2.0",
     "react-day-picker": "9.8.0",

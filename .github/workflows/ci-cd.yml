@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - test
   workflow_dispatch:
 
 concurrency:
@@ -47,8 +48,6 @@ jobs:
         run: npm run build
 
       - name: Validate Compose configuration
-        env:
-          AGENT_API_TOKEN: ci-only-token
         run: |
           cp .env.example .env
           docker compose -f compose.yml config --quiet
@@ -73,6 +72,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -84,7 +86,7 @@ jobs:
           echo "name=ghcr.io/${repository}-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -97,35 +99,40 @@ jobs:
           context: .
           target: ${{ matrix.target }}
           platforms: ${{ vars.DEPLOY_PLATFORM || 'linux/amd64' }}
-          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
-          tags: |
-            ${{ steps.image.outputs.name }}:${{ github.sha }}
-            ${{ steps.image.outputs.name }}:main
+          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test') }}
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  deploy:
-    name: Deploy production
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+  deploy-test:
+    name: Deploy test
+    if: github.ref == 'refs/heads/test' && github.event_name != 'pull_request'
     needs: images
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
-      name: production
+      name: test
     permissions:
       contents: read
+      packages: read
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-      GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-      DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/oa-agent' }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OA_DOCKER_API_BASE_URL: ${{ vars.OA_DOCKER_API_BASE_URL }}
+      OA_AUTH_ALIAS: ${{ vars.OA_AUTH_ALIAS || 'default' }}
+      DEPLOY_PATH: /opt/rwkv/apps/oa-agent-test
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
-      GHCR_USERNAME: ${{ github.repository_owner }}
+      COMPOSE_PROJECT_NAME: oa-agent-test
+      WEB_BIND_ADDRESS: 127.0.0.1
+      WEB_PORT: '3001'
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_PULL_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -133,9 +140,9 @@ jobs:
       - name: Validate deployment configuration
         shell: bash
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS GHCR_PULL_TOKEN; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL; do
             if [[ -z "${!name}" ]]; then
-              echo "Missing production secret: $name" >&2
+              echo "Missing test deployment configuration: $name" >&2
               exit 1
             fi
           done
@@ -156,11 +163,105 @@ jobs:
           echo "AGENT_IMAGE=ghcr.io/${repository}-agent:${GITHUB_SHA}" >> "$GITHUB_ENV"
           echo "WEB_IMAGE=ghcr.io/${repository}-web:${GITHUB_SHA}" >> "$GITHUB_ENV"
 
-      - name: Upload Compose configuration
+      - name: Upload runtime and Compose configuration
+        shell: bash
+        run: |
+          runtime_env="$RUNNER_TEMP/${COMPOSE_PROJECT_NAME}.env"
+          bash scripts/render-runtime-env.sh "$runtime_env"
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          remote_env="$DEPLOY_PATH/.env.next"
+          remote_command="$(printf 'mkdir -p -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH" "$remote_env" "$remote_env")"
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$runtime_env"
+          remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml
+
+      - name: Log deployment server in to GHCR
         shell: bash
         run: |
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          remote_command="$(printf 'mkdir -p -- %q && cat > %q' "$DEPLOY_PATH" "$DEPLOY_PATH/compose.yml")"
+          remote_command="$(printf 'docker login ghcr.io --username %q --password-stdin' "$GHCR_USERNAME")"
+          printf '%s' "$GHCR_PULL_TOKEN" | ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command"
+
+      - name: Deploy and verify health
+        shell: bash
+        run: |
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          remote_command="$(printf 'bash -s -- %q %q %q' "$DEPLOY_PATH" "$AGENT_IMAGE" "$WEB_IMAGE")"
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < scripts/deploy-compose.sh
+
+      - name: Record deployment summary
+        run: |
+          echo "### Test deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Agent: \`${AGENT_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Web: \`${WEB_IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-production:
+    name: Deploy production
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OA_DOCKER_API_BASE_URL: ${{ vars.OA_DOCKER_API_BASE_URL }}
+      OA_AUTH_ALIAS: ${{ vars.OA_AUTH_ALIAS || 'default' }}
+      DEPLOY_PATH: /opt/rwkv/apps/oa-agent-prod
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      COMPOSE_PROJECT_NAME: oa-agent-prod
+      WEB_BIND_ADDRESS: 127.0.0.1
+      WEB_PORT: '3000'
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_PULL_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing production deployment configuration: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Resolve release images
+        shell: bash
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          echo "AGENT_IMAGE=ghcr.io/${repository}-agent:${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "WEB_IMAGE=ghcr.io/${repository}-web:${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - name: Upload runtime and Compose configuration
+        shell: bash
+        run: |
+          runtime_env="$RUNNER_TEMP/${COMPOSE_PROJECT_NAME}.env"
+          bash scripts/render-runtime-env.sh "$runtime_env"
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          remote_env="$DEPLOY_PATH/.env.next"
+          remote_command="$(printf 'mkdir -p -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH" "$remote_env" "$remote_env")"
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$runtime_env"
+          remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml
 
       - name: Log deployment server in to GHCR

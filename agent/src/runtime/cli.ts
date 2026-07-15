@@ -1,5 +1,6 @@
 import { runCodexAgent } from "../application/runCodexAgent.js";
 import { loadConfig } from "../config/config.js";
+import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
 
 async function main(): Promise<void> {
   const userTask = process.argv.slice(2).join(" ").trim();
@@ -21,7 +22,16 @@ async function main(): Promise<void> {
   console.error(`[agent] provider=${config.modelProvider} model=${config.model}`);
   console.error("[agent] 当前未注册 OA 调用工具;本次只做接口分析,不执行真实 OA 请求。");
 
-  const result = await runCodexAgent(config, userTask);
+  const openapi = await resolveOpenApiContract(config);
+  console.error(
+    openapi.source === "remote"
+      ? `[agent] OpenAPI 使用远程地址:${config.openapiUrl}`
+      : `[agent] 远程 OpenAPI 不可用,使用本地文件:${config.openapiPath}`,
+  );
+  const result = await runCodexAgent(
+    { ...config, openapiPath: openapi.path },
+    userTask,
+  );
 
   if (result.executedCommands.length > 0) {
     console.error("[agent] 过程记录(执行过的命令):");
