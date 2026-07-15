@@ -40,3 +40,13 @@ test("allows the server env to isolate Compose projects", async () => {
   const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
   assert.match(compose, /^name: \$\{COMPOSE_PROJECT_NAME:-oa-agent\}$/m)
 })
+
+test("limits container resources and log growth on the shared server", async () => {
+  const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
+
+  assert.equal(compose.match(/^    cpus: /gm)?.length, 2)
+  assert.equal(compose.match(/^    mem_limit: /gm)?.length, 2)
+  assert.equal(compose.match(/^    pids_limit: /gm)?.length, 2)
+  assert.equal(compose.match(/^        max-size: 10m$/gm)?.length, 2)
+  assert.equal(compose.match(/^        max-file: "3"$/gm)?.length, 2)
+})

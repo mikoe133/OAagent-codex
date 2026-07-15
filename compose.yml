@@ -8,6 +8,14 @@ services:
       target: agent-runtime
     init: true
     restart: unless-stopped
+    cpus: 1.5
+    mem_limit: 2g
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     env_file:
       - .env
     environment:
@@ -47,6 +55,14 @@ services:
       target: web-runtime
     init: true
     restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
     environment:
       HOSTNAME: 0.0.0.0
       PORT: 3000
