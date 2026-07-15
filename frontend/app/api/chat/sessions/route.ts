@@ -94,7 +94,7 @@ export async function GET(request: Request) {
 
   try {
     const copilotSessions = await fetchSessionList(sessionToken, request.signal)
-    const agentSessions = await fetchAgentSessionListBestEffort(request.signal)
+    const agentSessions = await fetchAgentSessionListBestEffort(request.signal, sessionToken)
     return jsonDataResponse({ sessions: mergeSessionSources(copilotSessions, agentSessions) }, 200)
   } catch (error) {
     if (error instanceof UpstreamResponseError) {
@@ -212,6 +212,39 @@ export async function POST(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  const sessionToken = readCookie(request.headers.get("cookie"), SESSION_COOKIE_NAME)
+  if (!sessionToken) {
+    return jsonResponse({ error: "Authentication required" }, 401)
+  }
+
+  const body = await readJsonBody(request)
+  const sessionId = normalizeSessionId(body.sessionId)
+  if (!sessionId) {
+    return jsonResponse({ error: "Invalid sessionId" }, 400)
+  }
+
+  try {
+    const recordId = normalizeRecordId(body.recordId) || (await resolveRecordId(sessionToken, request.signal, sessionId))
+    if (recordId) {
+      await deleteCopilotRecord(sessionToken, request.signal, recordId)
+    }
+    await deleteAgentSession(request.signal, sessionId, sessionToken)
+    return jsonDataResponse({ deleted: true, sessionId, recordId }, 200)
+  } catch (error) {
+    if (error instanceof UpstreamResponseError) {
+      return proxyTextResponse(error.response, error.text)
+    }
+
+    return jsonResponse(
+      {
+        error: error instanceof Error ? error.message : "Failed to delete chat session",
+      },
+      502,
+    )
+  }
+}
+
 async function readJsonBody(request: Request): Promise<CreateSessionBody> {
   try {
     const body = (await request.json()) as unknown
@@ -234,8 +267,7 @@ function normalizeCopilotItems(items: unknown[]): NormalizedSession[] {
   return items
     .map(normalizeCopilotRecord)
     .filter((item): item is NormalizedSession => Boolean(item))
-    .sort(compareUpdatedAt)
-    .reverse()
+    .sort(compareCreatedAtDescending)
 }
 
 function normalizeCopilotRecord(value: unknown): NormalizedSession | null {
@@ -283,7 +315,7 @@ async function getSingleSession(
     if (input.sessionId) {
       const session =
         (await fetchRecordBySessionId(sessionToken, signal, input.sessionId)) ||
-        (await fetchAgentSessionBySessionId(signal, input.sessionId))
+        (await fetchAgentSessionBySessionId(signal, input.sessionId, sessionToken))
       if (!session) {
         return jsonResponse({ error: "Copilot record not found" }, 404)
       }
@@ -369,12 +401,15 @@ async function fetchSessionList(sessionToken: string, signal: AbortSignal): Prom
     }
   }
 
-  return sessions.sort(compareUpdatedAt).reverse()
+  return sessions.sort(compareCreatedAtDescending)
 }
 
-async function fetchAgentSessionListBestEffort(signal: AbortSignal): Promise<NormalizedSession[]> {
+async function fetchAgentSessionListBestEffort(
+  signal: AbortSignal,
+  sessionToken: string,
+): Promise<NormalizedSession[]> {
   try {
-    return await fetchAgentSessionList(signal)
+    return await fetchAgentSessionList(signal, sessionToken)
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw error
@@ -384,9 +419,13 @@ async function fetchAgentSessionListBestEffort(signal: AbortSignal): Promise<Nor
   }
 }
 
-async function fetchAgentSessionBySessionId(signal: AbortSignal, sessionId: string): Promise<NormalizedSession | null> {
+async function fetchAgentSessionBySessionId(
+  signal: AbortSignal,
+  sessionId: string,
+  sessionToken: string,
+): Promise<NormalizedSession | null> {
   try {
-    const sessions = await fetchAgentSessionList(signal)
+    const sessions = await fetchAgentSessionList(signal, sessionToken)
     return sessions.find((session) => session.sessionId === sessionId) || null
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
@@ -397,10 +436,13 @@ async function fetchAgentSessionBySessionId(signal: AbortSignal, sessionId: stri
   }
 }
 
-async function fetchAgentSessionList(signal: AbortSignal): Promise<NormalizedSession[]> {
+async function fetchAgentSessionList(
+  signal: AbortSignal,
+  sessionToken: string,
+): Promise<NormalizedSession[]> {
   const response = await fetch(buildAgentSessionsUrl(), {
     method: "GET",
-    headers: buildAgentHeaders(),
+    headers: buildAgentHeaders(sessionToken),
     cache: "no-store",
     signal,
   })
@@ -410,6 +452,23 @@ async function fetchAgentSessionList(signal: AbortSignal): Promise<NormalizedSes
   }
 
   return normalizeAgentSessions(parseJson<AgentListEnvelope>(text))
+}
+
+async function deleteAgentSession(
+  signal: AbortSignal,
+  sessionId: string,
+  sessionToken: string,
+): Promise<void> {
+  const response = await fetch(buildAgentSessionUrl(sessionId), {
+    method: "DELETE",
+    headers: buildAgentHeaders(sessionToken),
+    cache: "no-store",
+    signal,
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(text || response.statusText || "Failed to delete agent session")
+  }
 }
 
 async function fetchCopilotListPage(
@@ -527,6 +586,25 @@ async function deleteCopilotRecordBestEffort(sessionToken: string, signal: Abort
   }
 }
 
+async function deleteCopilotRecord(sessionToken: string, signal: AbortSignal, recordId: string): Promise<void> {
+  const deleteUrl = buildOaApiUrl("/copilot/record")
+  if (!deleteUrl) {
+    throw new Error("OA API service is not configured")
+  }
+  deleteUrl.searchParams.set("record_id", recordId)
+
+  const response = await fetch(deleteUrl, {
+    method: "DELETE",
+    headers: buildOaHeaders(sessionToken),
+    cache: "no-store",
+    signal,
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    throw new UpstreamResponseError(response, text)
+  }
+}
+
 function buildFallbackSession(sessionId: string, messages: NormalizedMessage[] = []): NormalizedSession {
   const now = new Date().toISOString()
   return {
@@ -544,11 +622,11 @@ function mergeSessionSources(copilotSessions: NormalizedSession[], agentSessions
   return [
     ...copilotSessions,
     ...agentSessions.filter((session) => !copilotSessionIds.has(session.sessionId)),
-  ].sort(compareUpdatedAt).reverse()
+  ].sort(compareCreatedAtDescending)
 }
 
-function compareUpdatedAt(left: NormalizedSession, right: NormalizedSession): number {
-  return Date.parse(left.updatedAt) - Date.parse(right.updatedAt)
+function compareCreatedAtDescending(left: NormalizedSession, right: NormalizedSession): number {
+  return Date.parse(right.createdAt) - Date.parse(left.createdAt)
 }
 
 function normalizeAgentSessions(payload: AgentListEnvelope | null): NormalizedSession[] {
@@ -560,8 +638,7 @@ function normalizeAgentSessions(payload: AgentListEnvelope | null): NormalizedSe
   return sessions
     .map(normalizeAgentSession)
     .filter((session): session is NormalizedSession => Boolean(session))
-    .sort(compareUpdatedAt)
-    .reverse()
+    .sort(compareCreatedAtDescending)
 }
 
 function normalizeAgentSession(value: unknown): NormalizedSession | null {
@@ -709,17 +786,15 @@ function buildAgentSessionsUrl(): URL {
   return new URL("/v1/sessions", getAgentApiBaseUrl())
 }
 
-function buildAgentHeaders(): Headers {
-  const headers = new Headers({
+function buildAgentSessionUrl(sessionId: string): URL {
+  return new URL(`/v1/sessions/${encodeURIComponent(sessionId)}`, getAgentApiBaseUrl())
+}
+
+function buildAgentHeaders(sessionToken: string): Headers {
+  return new Headers({
     Accept: "application/json",
+    Authorization: toBearerToken(sessionToken),
   })
-
-  const agentApiToken = readEnvValue("AGENT_API_TOKEN")
-  if (agentApiToken) {
-    headers.set("Authorization", toBearerToken(agentApiToken))
-  }
-
-  return headers
 }
 
 function getOaApiBaseUrl(): string | null {

@@ -16,6 +16,7 @@ import type {
   AgentSession,
   SessionStore,
 } from "../infrastructure/persistence/sessionStore.js";
+import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
 
 export type SendMessageInput = {
   sessionId: string;
@@ -141,7 +142,7 @@ export class AgentService {
   }
 
   private async runMessage(input: SendMessageInput): Promise<SendMessageResult> {
-    const runConfig = resolveRunConfig(this.config, input.model);
+    const runConfig = await resolveRunConfig(this.config, input.model);
     const session = await this.prepareSession(input);
     const runtimeContext = this.getRuntimeContext(input.sessionId);
     const codex = createCodexClient(runConfig, input.sessionId);
@@ -190,7 +191,7 @@ export class AgentService {
     throwIfAborted(signal);
     await emit({ type: "run.started", sessionId: input.sessionId });
 
-    const runConfig = resolveRunConfig(this.config, input.model);
+    const runConfig = await resolveRunConfig(this.config, input.model);
     const session = await this.prepareSession(input);
     const runtimeContext = this.getRuntimeContext(input.sessionId);
     const codex = createCodexClient(runConfig, input.sessionId);
@@ -533,7 +534,6 @@ export class AgentService {
   private getSecrets(sessionOaApiToken: string | null = null): string[] {
     return [
       this.config.openrouterApiKey,
-      this.config.oaApiToken ?? "",
       sessionOaApiToken ?? "",
       this.config.oaApiToolToken,
     ];
@@ -585,12 +585,13 @@ function buildPromptForSession(
   ].join("\n");
 }
 
-function resolveRunConfig(
+async function resolveRunConfig(
   config: AppConfig,
   requestedModel: string | null | undefined,
-): AppConfig {
+): Promise<AppConfig> {
   const model = resolveRequestedOpenAiModel(requestedModel, config.model);
-  return model === config.model ? config : { ...config, model };
+  const openapi = await resolveOpenApiContract(config);
+  return { ...config, model, openapiPath: openapi.path };
 }
 
 function buildNextSummary(

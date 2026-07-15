@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -21,6 +21,7 @@ test("deploys immutable agent and web image tags", async (context) => {
     await readFile(path.join(fixture.deployDir, ".deploy.env"), "utf8"),
     "AGENT_IMAGE=ghcr.io/example/oa-agent:abc123\nWEB_IMAGE=ghcr.io/example/oa-web:abc123\n",
   )
+  assert.equal((await stat(path.join(fixture.deployDir, ".deploy.env"))).mode & 0o777, 0o600)
 
   const dockerLog = await readFile(fixture.logPath, "utf8")
   assert.match(dockerLog, /pull agent web/)
@@ -45,10 +46,49 @@ test("restores the previous image tags when the new deployment fails", async (co
     await readFile(path.join(fixture.deployDir, ".deploy.env"), "utf8"),
     previous,
   )
+  assert.equal((await stat(path.join(fixture.deployDir, ".deploy.env"))).mode & 0o777, 0o600)
+  assert.equal((await stat(path.join(fixture.deployDir, ".deploy.env.previous"))).mode & 0o777, 0o600)
 
   const dockerLog = await readFile(fixture.logPath, "utf8")
   assert.equal(dockerLog.match(/ up /g)?.length, 2)
   assert.equal(dockerLog.match(/ pull /g)?.length, 2)
+})
+
+test("promotes a staged runtime env only when deployment succeeds", async (context) => {
+  const fixture = await createFixture(context)
+  const previousRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nWEB_PORT=3001\n"
+  const nextRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nWEB_PORT=3011\n"
+  await writeFile(path.join(fixture.deployDir, ".env"), previousRuntime)
+  await writeFile(path.join(fixture.deployDir, ".env.next"), nextRuntime)
+
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:next",
+    webImage: "ghcr.io/example/oa-web:next",
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(await readFile(path.join(fixture.deployDir, ".env"), "utf8"), nextRuntime)
+  assert.equal(await readFile(path.join(fixture.deployDir, ".env.previous"), "utf8"), previousRuntime)
+  assert.equal((await stat(path.join(fixture.deployDir, ".env"))).mode & 0o777, 0o600)
+  assert.equal((await stat(path.join(fixture.deployDir, ".env.previous"))).mode & 0o777, 0o600)
+})
+
+test("restores the previous runtime env when deployment fails", async (context) => {
+  const fixture = await createFixture(context)
+  const previousRuntime = "COMPOSE_PROJECT_NAME=oa-agent-prod\nWEB_PORT=3000\n"
+  const nextRuntime = "COMPOSE_PROJECT_NAME=oa-agent-prod\nWEB_PORT=3010\n"
+  await writeFile(path.join(fixture.deployDir, ".env"), previousRuntime)
+  await writeFile(path.join(fixture.deployDir, ".env.next"), nextRuntime)
+
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:broken",
+    webImage: "ghcr.io/example/oa-web:broken",
+    failFirstUp: true,
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.equal(await readFile(path.join(fixture.deployDir, ".env"), "utf8"), previousRuntime)
+  assert.equal((await stat(path.join(fixture.deployDir, ".env"))).mode & 0o777, 0o600)
 })
 
 async function createFixture(context) {
@@ -60,7 +100,7 @@ async function createFixture(context) {
   const logPath = path.join(root, "docker.log")
   const markerPath = path.join(root, "failed-once")
   await Promise.all([mkdir(binDir), mkdir(deployDir)])
-  await writeFile(path.join(deployDir, ".env"), "AGENT_API_TOKEN=test-token\n")
+  await writeFile(path.join(deployDir, ".env"), "OA_DOCKER_API_BASE_URL=http://oa.test\n")
   await writeFile(path.join(deployDir, "compose.yml"), "services: {}\n")
 
   const dockerPath = path.join(binDir, "docker")

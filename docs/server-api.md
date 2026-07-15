@@ -1,6 +1,6 @@
 # 服务端接口文档
 
-本文档描述本项目自带的后台服务接口,也就是 `npm run dev:server` 启动的 TypeScript HTTP 服务。它不是 `agent/openapi/openapi.json` 中记录的 OA 业务后端接口;`agent/openapi/openapi.json` 是 agent 回答 OA 接口问题时读取的事实来源。
+本文档描述本项目自带的后台服务接口,也就是 `npm run dev:server` 启动的 TypeScript HTTP 服务。它不是 OA 业务后端接口契约;agent 优先读取 `OA_OPENAPI_URL`,远程不可用或内容非法时回退到 `agent/openapi/openapi.json`,并把选中的契约作为回答 OA 接口问题的事实来源。
 
 ## 基本信息
 
@@ -21,17 +21,17 @@
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter OpenAI-compatible API 地址。兼容旧变量名 `OPENROUTER_API_BASE_URL` |
 | `CODEX_MODEL_PROVIDER` | `openrouter` | Codex SDK model provider 标识 |
 | `CODEX_MODEL` | `gpt-5.5` | Codex SDK 使用的模型 slug。兼容旧变量名 `OPENROUTER_MODEL`;`gpt5.5` 会自动规范化为 `gpt-5.5` |
-| `OA_API_BASE_URL` | 空 | 可选。配置后 agent 可通过受控 `callOaApi` 工具调用 `agent/openapi/openapi.json` 中声明的 OA 接口 |
-| `OA_API_TOKEN` | 空 | 可选 fallback。OA 后端服务级登录态,只由服务端注入受控工具请求。前端请求 header 中的用户 OA token 优先。旧变量名 `OA_SERVICE_SESSIONID` 会作为兼容别名读取 |
-| `OA_API_TOKEN_HEADER` | `Authorization` | OA 后端 token header 名称 |
-| `OA_API_TOKEN_PREFIX` | `Bearer` | OA 后端 token header 值前缀。设为空时直接发送 token |
+| `OA_OPENAPI_URL` | `https://api-oa.rwkvos.com/openapi_json` | 优先读取的 OA OpenAPI 地址。请求失败、非 2xx 或内容非法时回退本地契约 |
+| `OA_API_BASE_URL` | 空 | OA 后端地址。HTTP 服务用它验证用户 OA token,受控工具也通过该地址调用 OA |
+| `OA_AUTH_ALIAS` | `default` | OA 登录和 token 验证使用的数据源 alias |
+| `OA_API_TOKEN_HEADER` | `Cookie` | 受控 OA 工具调用时的 token header 名称 |
+| `OA_API_TOKEN_PREFIX` | `sessionid=` | 受控 OA 工具调用时的 token header 值前缀。设为空时直接发送 token |
 | `OA_USER_TOKEN_HEADER` | `Authorization` | 前端请求 agent 接口时,服务端从该 header 读取用户 OA token |
 | `OA_USER_TOKEN_PREFIX` | `Bearer` | 前端请求用户 OA token 的 header 值前缀。设为空时读取完整 header 值 |
 | `AGENT_OA_TOOL_TOKEN` | 随机生成 | 内部 `callOaApi` 工具 bearer token。通常不需要配置 |
 | `HOST` | `127.0.0.1` | 服务监听地址 |
 | `PORT` | `3000` | 服务监听端口 |
 | `AGENT_SESSION_STORE` | `.context/agent-sessions.json` | `sessionId -> Codex threadId` 和摘要的持久化文件 |
-| `AGENT_API_TOKEN` | 空 | 后台服务 Bearer token。`HOST` 不是本机地址时必填 |
 
 ## 鉴权
 
@@ -43,18 +43,19 @@
 Authorization: Bearer <AGENT_OA_TOOL_TOKEN>
 ```
 
-该内部端点不受 `AGENT_API_TOKEN` 控制,也不是对外 API。
+该内部端点使用独立的短期内部 token,也不是对外 API。
 
-其余接口的鉴权由 `AGENT_API_TOKEN` 控制:
-
-- 未配置 `AGENT_API_TOKEN` 时,接口不校验 `Authorization`。
-- 配置 `AGENT_API_TOKEN` 后,请求必须携带:
+其余 `/v1/*` 接口统一使用用户 OA token。请求必须携带以下任一种形式:
 
 ```http
-Authorization: Bearer <AGENT_API_TOKEN>
+Authorization: Bearer <OA_USER_TOKEN>
+Cookie: sessionid=<OA_USER_TOKEN>
+X-OA-Api-Token: Bearer <OA_USER_TOKEN>
 ```
 
-鉴权失败返回:
+Agent 会用该 token 调用 OA 的 `GET /user/user`;该 OA 路由实际依赖 `simple_authenticated_user`,因此会校验签名、有效期和登录用户。公开且无需登录的 `GET /auth/ping` 不用于 token 验证。
+
+token 缺失或 OA 返回 `4xx` 时,Agent 返回:
 
 ```json
 {
@@ -62,11 +63,11 @@ Authorization: Bearer <AGENT_API_TOKEN>
 }
 ```
 
-状态码为 `401`。
+状态码为 `401`。OA 未配置、超时、不可达或返回服务端错误时返回 `503`,不会降级放行。
 
 ## 前端用户 OA Token
 
-前端用户登录 OA 后,可以在调用 agent 接口时携带自己的 OA token。服务端会从 `OA_USER_TOKEN_HEADER` 指定的 header 读取 token,默认支持:
+前端用户登录 OA 后,Web 把 httpOnly `sessionid` cookie 中的同一枚 OA token 转为 `Authorization: Bearer <OA_USER_TOKEN>` 调用 agent。服务端会从 `OA_USER_TOKEN_HEADER` 指定的 header 读取 token,默认支持:
 
 ```http
 Authorization: Bearer <OA_USER_TOKEN>
@@ -84,25 +85,11 @@ Cookie: sessionid=<OA_USER_TOKEN>
 Cookie: foo=1; sessionid=<OA_USER_TOKEN>; bar=2
 ```
 
-读取到的用户 OA token 会绑定到当前 `sessionId` 的进程内状态,后续该 session 的受控 OA 工具调用会优先使用这个用户 token。服务不会把用户 OA token 写入 prompt、命令行、响应或 session 持久化文件。
-
-如果同时启用了 `AGENT_API_TOKEN`,则 `Authorization` header 会被本服务鉴权占用。此时前端应使用单独 header 传用户 OA token,例如:
-
-```http
-Authorization: Bearer <AGENT_API_TOKEN>
-X-OA-Api-Token: Bearer <OA_USER_TOKEN>
-```
-
-也可以通过 `.env` 显式配置:
-
-```env
-OA_USER_TOKEN_HEADER=X-OA-Api-Token
-OA_USER_TOKEN_PREFIX=Bearer
-```
+验证通过后,用户 OA token 会绑定到当前 `sessionId` 的进程内状态,后续该 session 的受控 OA 工具调用使用这个用户 token。服务不会把用户 OA token 写入 prompt、命令行、响应或 session 持久化文件;持久化文件只保存经过 SHA-256 处理的用户归属标识,用于隔离不同用户的 session。
 
 如果前端已经通过 Cookie 传入 OA 登录态,通常不需要配置 `OA_USER_TOKEN_HEADER=Cookie`;服务端会默认尝试读取 `sessionid` cookie。
 
-当请求没有携带用户 OA token 时,内部工具会 fallback 到服务端 `.env` 中的 `OA_API_TOKEN`;两者都不存在时,真实 OA 调用返回 `oa_not_configured`。
+请求没有有效用户 OA token 时不会进入 agent 或内部工具调用。
 
 ## 数据模型
 
@@ -293,7 +280,7 @@ POST /v1/sessions
 
 用途:创建一个服务侧 session,或按指定 `sessionId` 获取已有 session。不传 `sessionId` 时服务自动生成 UUID。
 
-鉴权:受 `AGENT_API_TOKEN` 控制。
+鉴权:必须携带并通过 OA 验证的用户 token。
 
 请求体:
 
@@ -344,9 +331,9 @@ curl -s -X POST http://127.0.0.1:3000/v1/sessions \
 GET /v1/sessions
 ```
 
-用途:查询当前持久化文件中的全部 session,按 `updatedAt` 倒序返回。
+用途:查询当前 OA 用户拥有的 session,按 `createdAt` 倒序返回,即最新创建的会话排在最前。
 
-鉴权:受 `AGENT_API_TOKEN` 控制。
+鉴权:必须携带并通过 OA 验证的用户 token。
 
 响应示例:
 
@@ -375,7 +362,42 @@ GET /v1/sessions
 调用示例:
 
 ```bash
-curl -s http://127.0.0.1:3000/v1/sessions
+curl -s http://127.0.0.1:3000/v1/sessions \
+  -H "Authorization: Bearer $OA_USER_TOKEN"
+```
+
+### 删除 Session
+
+```http
+DELETE /v1/sessions/{sessionId}
+```
+
+用途:删除当前 OA 用户拥有的指定 session 的持久化元数据和进程内 OA token 绑定。接口具有幂等性;session 不存在或不属于当前用户时仍返回 `200`,但 `deleted` 为 `false`。
+
+鉴权:必须携带并通过 OA 验证的用户 token。
+
+响应示例:
+
+```json
+{
+  "deleted": true,
+  "sessionId": "demo"
+}
+```
+
+状态码:
+
+| 状态码 | 说明 |
+| --- | --- |
+| `200` | 删除请求已处理 |
+| `401` | 鉴权失败 |
+| `500` | 非法 `sessionId`、写入 session 存储文件失败或其他服务端错误 |
+
+调用示例:
+
+```bash
+curl -s -X DELETE http://127.0.0.1:3000/v1/sessions/demo \
+  -H "Authorization: Bearer $OA_USER_TOKEN"
 ```
 
 ### 发送消息
@@ -384,11 +406,11 @@ curl -s http://127.0.0.1:3000/v1/sessions
 POST /v1/sessions/{sessionId}/messages
 ```
 
-用途:向指定 session 发送用户消息。服务会调用 Codex agent,由 agent 基于 `agent/openapi/openapi.json` 回答 OA 接口问题;首次进入 Codex agent 时会创建或初始化 Codex thread,后续请求会复用同一个 `threadId` 并带上服务端摘要继续对话。
+用途:向指定 session 发送用户消息。服务会调用 Codex agent,由 agent 基于远程优先、本地兜底选中的 OpenAPI 契约回答 OA 接口问题;首次进入 Codex agent 时会创建或初始化 Codex thread,后续请求会复用同一个 `threadId` 并带上服务端摘要继续对话。
 
-服务端不包含按关键词硬编码的 OA 直连分支。配置 `OA_API_BASE_URL` 后,agent 可以通过受控 `callOaApi` 工具调用 `agent/openapi/openapi.json` 中声明的 OA 接口;OA 登录态优先来自当前 session 绑定的用户 token,否则使用 `.env` 中的 `OA_API_TOKEN` fallback。没有可用 OA 登录态时只能做接口分析。
+服务端不包含按关键词硬编码的 OA 直连分支。配置 `OA_API_BASE_URL` 后,agent 可以通过受控 `callOaApi` 工具调用所选 OpenAPI 契约中声明的 OA 接口;OA 登录态来自当前请求验证并绑定到 session 的用户 token。
 
-鉴权:受 `AGENT_API_TOKEN` 控制。
+鉴权:必须携带并通过 OA 验证的用户 token。
 
 路径参数:
 
@@ -443,16 +465,6 @@ curl -s -X POST http://127.0.0.1:3000/v1/sessions/demo/messages \
   -H 'content-type: application/json' \
   -H "Cookie: sessionid=$OA_USER_TOKEN" \
   -d '{"message":"我想查一下周报列表,应该调用哪个接口?","model":"openai/gpt-5.4-mini"}'
-```
-
-同时带服务鉴权和用户 OA token:
-
-```bash
-curl -s -X POST http://127.0.0.1:3000/v1/sessions/demo/messages \
-  -H 'content-type: application/json' \
-  -H "Authorization: Bearer $AGENT_API_TOKEN" \
-  -H "X-OA-Api-Token: Bearer $OA_USER_TOKEN" \
-  -d '{"message":"有哪些和周报相关的接口?"}'
 ```
 
 ### 流式发送消息
@@ -531,7 +543,7 @@ for (;;) {
 
 ### 受控 OA API 调用工具
 
-当 `OA_API_BASE_URL` 已配置,且当前 session 已绑定用户 OA token 或服务端已配置 `OA_API_TOKEN` 时,Codex agent 可以通过仓库内的 CLI 调用受控工具:
+当 `OA_API_BASE_URL` 已配置,且当前 session 已绑定已验证的用户 OA token 时,Codex agent 可以通过仓库内的 CLI 调用受控工具:
 
 ```bash
 node agent/scripts/callOaApi.mjs \
@@ -555,13 +567,13 @@ CLI 参数:
 
 工具行为:
 
-- 只允许调用 `agent/openapi/openapi.json` 中存在的 operation。
+- 只允许调用远程优先、本地兜底选中的 OpenAPI 契约中存在的 operation。
 - 可通过 `operationId` 定位接口,也可通过 `method` + `path` 定位接口。
 - 如果同时传入 `operationId` 与 `method` 或 `path`,服务端会校验它们必须匹配。
 - agent 自动调用 CLI 时,会在 `agent` 工作目录下运行 `scripts/callOaApi.mjs`,并从 `CALL_OA_API_SESSION_ID` 自动带上当前 session;手动调试 CLI 时可显式传 `--sessionId`。
 - 服务端校验 OpenAPI 中声明为必填的 query/path/body 参数。
 - 必填 header/cookie 参数不允许由 agent 自行传入;遇到这类接口会返回 `unsupported_required_parameters`。
-- 服务端注入 OA 登录态。优先使用当前 `sessionId` 绑定的用户 OA token,否则使用 `.env` 中的 `OA_API_TOKEN`;token 不进入 prompt,也不需要 agent 构造 Authorization header。
+- 服务端注入当前 `sessionId` 绑定的用户 OA token;token 不进入 prompt,也不需要 agent 构造鉴权 header。
 - `OA_API_TOKEN_HEADER` 和 `OA_API_TOKEN_PREFIX` 控制发送给 OA 后端的鉴权 header。`OA_API_TOKEN_PREFIX` 为空时直接发送 token;前缀以 `=` 结尾时不插入空格,否则按 `<prefix> <token>` 拼接。
 - 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认。
 - 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作需要 agent 先取得用户确认,再传 `--confirmed true`。
@@ -593,16 +605,16 @@ CLI 参数:
 | `200` | 内部工具请求被服务接收。具体 OA 调用是否成功见响应体 `ok` |
 | `401` | 内部 bearer token 不正确 |
 | `403` | 请求不是来自 loopback 地址 |
-| `500` | 请求体不是合法 JSON object、请求体过大、读取 `agent/openapi/openapi.json` 失败或其他服务端异常 |
+| `500` | 请求体不是合法 JSON object、请求体过大、远程与本地 OpenAPI 都无法读取或其他服务端异常 |
 
 常见工具错误码:
 
 | code | 说明 |
 | --- | --- |
-| `oa_not_configured` | 缺少 `OA_API_BASE_URL`,且当前 session 没有用户 OA token、服务端也没有 `OA_API_TOKEN` fallback |
+| `oa_not_configured` | 缺少 `OA_API_BASE_URL` 或当前 session 没有已验证的用户 OA token |
 | `invalid_session_id` | 内部工具请求携带的 `sessionId` 格式非法 |
 | `missing_operation` | 未提供 `operationId`,也未同时提供 `method` 和 `path` |
-| `operation_not_found` | `agent/openapi/openapi.json` 中不存在指定 operation |
+| `operation_not_found` | 当前选中的 OpenAPI 契约中不存在指定 operation |
 | `operation_mismatch` | `operationId` 与传入的 `method` 或 `path` 不匹配 |
 | `missing_required_parameters` | 缺少 OpenAPI 声明的必填 query/path 参数 |
 | `unsupported_required_parameters` | 接口存在必填 header/cookie 参数,受控工具不支持 agent 传入 |
@@ -616,7 +628,7 @@ CLI 参数:
 - `summary` 是本服务本地生成的紧凑摘要,最多约 3000 字符,每轮会追加当前用户输入和 agent 最终回答的压缩版本。
 - 同一个 `sessionId` 的并发消息会排队串行执行,避免多个请求同时改写同一个 session。
 - 第一次消息使用完整任务提示词;后续消息会附带 `<conversation_memory>` 摘要和新的 `<user_task>`。
-- 服务只会对已知密钥值做脱敏,不会把 `OPENROUTER_API_KEY` 或 `OA_API_TOKEN` 写入响应。
+- 服务只会对已知密钥值做脱敏,不会把 `OPENROUTER_API_KEY` 或用户 OA token 写入响应。
 
 ## 通用错误格式
 
@@ -645,4 +657,4 @@ CLI 参数:
 - `sessionId` 不符合格式规则。
 - session 存储文件读取或写入失败。
 - agent 未返回最终回答、模型调用失败或 Codex SDK 运行失败。
-- 内部 OA 工具读取 `agent/openapi/openapi.json` 或请求 OA 后端失败。
+- 内部 OA 工具读取远程与本地 OpenAPI 都失败,或请求 OA 后端失败。

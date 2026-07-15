@@ -1,4 +1,4 @@
-name: oa-agent
+name: ${COMPOSE_PROJECT_NAME:-oa-agent}
 
 services:
   agent:
@@ -13,9 +13,9 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3000
-      AGENT_API_TOKEN: ${AGENT_API_TOKEN:?set AGENT_API_TOKEN in .env}
       AGENT_SESSION_STORE: /app/.context/agent-sessions.json
       OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
+      OA_AUTH_ALIAS: ${OA_AUTH_ALIAS:-default}
     extra_hosts:
       - host.docker.internal:host-gateway
     expose:
@@ -51,7 +51,6 @@ services:
       HOSTNAME: 0.0.0.0
       PORT: 3000
       AGENT_API_BASE_URL: http://agent:3000
-      AGENT_API_TOKEN: ${AGENT_API_TOKEN:?set AGENT_API_TOKEN in .env}
       OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
       OA_AUTH_ALIAS: ${OA_AUTH_ALIAS:-default}
     extra_hosts:

@@ -1,7 +1,7 @@
 文档读取和使用规范:
 
-1. 先根据用户意图在 openapi/openapi.json 中定位相关 tag、path、summary 或 operationId。
-2. 只使用 openapi/openapi.json 中存在的信息。
+1. 先根据用户意图在运行时上下文指定的接口文档中定位相关 tag、path、summary 或 operationId。
+2. 只使用该接口文档中存在的信息。
 3. 调用或建议调用接口前,必须确认:
    - operationId
    - HTTP method

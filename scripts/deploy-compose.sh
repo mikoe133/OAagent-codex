@@ -37,6 +37,8 @@ function compose() {
 }
 
 function rollback() {
+  restore_runtime_env
+
   if [[ "$had_previous" -ne 1 ]]; then
     rm -f "$deployment_env_file"
     echo "[deploy] no previous release is available" >&2
@@ -44,10 +46,42 @@ function rollback() {
   fi
 
   cp "$previous_env_file" "$deployment_env_file"
+  chmod 600 "$deployment_env_file"
   echo "[deploy] rolling back with $previous_env_file" >&2
   compose pull agent web || echo "[deploy] rollback image pull failed" >&2
   compose up -d --no-build --remove-orphans --wait --wait-timeout 180 \
     || echo "[deploy] rollback failed; manual intervention is required" >&2
+}
+
+function promote_runtime_env() {
+  if [[ ! -f "$staged_runtime_env_file" ]]; then
+    return
+  fi
+
+  if [[ -f "$runtime_env_file" ]]; then
+    cp "$runtime_env_file" "$previous_runtime_env_file"
+    chmod 600 "$previous_runtime_env_file"
+    had_previous_runtime=1
+  else
+    rm -f "$previous_runtime_env_file"
+  fi
+
+  chmod 600 "$staged_runtime_env_file"
+  mv "$staged_runtime_env_file" "$runtime_env_file"
+  runtime_env_changed=1
+}
+
+function restore_runtime_env() {
+  if [[ "$runtime_env_changed" -ne 1 ]]; then
+    return
+  fi
+
+  if [[ "$had_previous_runtime" -eq 1 ]]; then
+    cp "$previous_runtime_env_file" "$runtime_env_file"
+    chmod 600 "$runtime_env_file"
+  else
+    rm -f "$runtime_env_file"
+  fi
 }
 
 readonly deploy_dir="${1:?usage: deploy-compose.sh DEPLOY_DIR AGENT_IMAGE WEB_IMAGE}"
@@ -61,17 +95,24 @@ cd "$deploy_dir"
 
 readonly compose_file="compose.yml"
 readonly runtime_env_file=".env"
+readonly staged_runtime_env_file=".env.next"
+readonly previous_runtime_env_file=".env.previous"
 readonly deployment_env_file=".deploy.env"
 readonly previous_env_file=".deploy.env.previous"
 
 [[ -f "$compose_file" ]] || fail "missing $deploy_dir/$compose_file"
-[[ -f "$runtime_env_file" ]] || fail "missing $deploy_dir/$runtime_env_file"
 command -v docker >/dev/null || fail "docker is not installed"
 docker compose version >/dev/null
+
+had_previous_runtime=0
+runtime_env_changed=0
+promote_runtime_env
+[[ -f "$runtime_env_file" ]] || fail "missing $deploy_dir/$runtime_env_file"
 
 had_previous=0
 if [[ -f "$deployment_env_file" ]]; then
   cp "$deployment_env_file" "$previous_env_file"
+  chmod 600 "$previous_env_file"
   had_previous=1
 else
   rm -f "$previous_env_file"

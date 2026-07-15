@@ -148,14 +148,9 @@ function buildAgentStreamUrl(sessionId: string): URL {
 function buildAgentHeaders(sessionToken: string): Headers {
   const headers = new Headers({
     Accept: "text/event-stream",
+    Authorization: toBearerToken(sessionToken),
     "Content-Type": "application/json",
-    "X-OA-Api-Token": toBearerToken(sessionToken),
   })
-
-  const agentApiToken = readEnvValue("AGENT_API_TOKEN")
-  if (agentApiToken) {
-    headers.set("Authorization", toBearerToken(agentApiToken))
-  }
 
   return headers
 }

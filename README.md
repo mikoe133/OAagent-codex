@@ -6,7 +6,7 @@
 - `frontend/`: Next.js 前端工作区,包含登录、会话列表、流式聊天 UI 和服务端 BFF。
 - 根目录: 只负责统一安装依赖、调度 workspace 脚本、保存共享文档和 `.env`。
 
-agent 依据 `agent/openapi/openapi.json` 作为唯一事实来源回答 OA 后端接口问题,不引入额外 Skill、MCP、function tools 或多 agent 编排。详见 [docs/agent-demo-implementation-plan.md](docs/agent-demo-implementation-plan.md)。
+agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`)获取 OA 接口契约;远程请求失败、返回非 2xx 或内容不是合法 OpenAPI JSON 时,自动回退到 `agent/openapi/openapi.json`。选中的契约是回答 OA 后端接口问题的唯一事实来源,不引入额外 Skill、MCP、function tools 或多 agent 编排。详见 [docs/agent-demo-implementation-plan.md](docs/agent-demo-implementation-plan.md)。
 
 ## 运行
 
@@ -32,12 +32,13 @@ npm run dev:frontend
 
 默认监听 `http://127.0.0.1:3000`,并把 `sessionId -> Codex threadId` 映射持久化到 `.context/agent-sessions.json`。完整接口说明见 [docs/server-api.md](docs/server-api.md)。
 
-后台服务不包含按关键词硬编码的 OA 直连分支。所有消息都会进入 Codex agent,由 agent 基于 `agent/openapi/openapi.json` 分析接口能力;配置 `OA_API_BASE_URL` 后,agent 可通过受控 `callOaApi` 工具调用 OpenAPI 中声明的 OA 接口。OA 登录态优先来自前端请求 header 中的用户 token,没有用户 token 时才 fallback 到 `.env` 的 `OA_API_TOKEN`。
+后台服务不包含按关键词硬编码的 OA 直连分支。所有消息都会进入 Codex agent,由 agent 基于远程优先、本地兜底选中的 OpenAPI 契约分析接口能力;配置 `OA_API_BASE_URL` 后,agent 可通过受控 `callOaApi` 工具调用 OpenAPI 中声明的 OA 接口。Web 和 agent 使用同一枚用户 OA token,并分别通过 OA 的已登录用户接口验证。
 
 ```bash
 # 创建 session。不传 sessionId 时服务自动生成。
 curl -s -X POST http://127.0.0.1:3000/v1/sessions \
   -H 'content-type: application/json' \
+  -H "Authorization: Bearer <OA_USER_TOKEN>" \
   -d '{"sessionId":"demo"}'
 
 # 往同一个 session 继续发消息。服务会 resume 对应 Codex thread。
@@ -53,9 +54,9 @@ curl -N -X POST http://127.0.0.1:3000/v1/sessions/demo/messages/stream \
   -d '{"message":"我想查一下周报列表,应该调用哪个接口?"}'
 ```
 
-如果把 `HOST` 改成非本机地址,必须配置 `AGENT_API_TOKEN`,请求时带上 `Authorization: Bearer <AGENT_API_TOKEN>`。此时 `Authorization` 已被服务鉴权占用,前端用户 OA token 建议改用 `X-OA-Api-Token: Bearer <OA_USER_TOKEN>`。
+所有 `/v1/*` 请求都必须携带 OA token。token 缺失或被 OA 拒绝时返回 `401`;OA 验证服务不可用时返回 `503`,不会降级放行。
 
-启动前校验:缺少 `OPENROUTER_API_KEY` 或 `agent/openapi/openapi.json` 直接失败。未配置 `OA_API_BASE_URL` 时只做接口分析,不执行真实 OA 请求。配置了 `OA_API_BASE_URL` 但请求未携带用户 OA token、`.env` 也未配置 `OA_API_TOKEN` 时,agent 只能做接口分析或得到 `oa_not_configured` 工具错误。
+启动前校验:缺少 `OPENROUTER_API_KEY` 或作为兜底的 `agent/openapi/openapi.json` 直接失败。运行任务时优先读取 `OA_OPENAPI_URL`;远程不可用或内容非法时自动使用本地文件。未配置 `OA_API_BASE_URL` 时服务仍可启动,但 `/v1/*` 会因无法验证 OA token 返回 `503`,一次性 CLI 只做接口分析。
 
 ## 脚本
 
@@ -71,7 +72,7 @@ npm run typecheck        检查所有有 typecheck 脚本的 workspace
 
 ```text
 agent/                   后端 workspace
-  openapi/openapi.json   后端接口能力的唯一事实来源
+  openapi/openapi.json   远程 OpenAPI 不可用时的本地兜底契约
   prompts/               系统提示词(system / document-policy / output-policy)
   scripts/               后端受控工具脚本
   src/                   后端 TypeScript 源码
@@ -99,14 +100,14 @@ browser -> web:3000 -> agent:3000 (Docker 内部网络)
 ```bash
 cp .env.example .env
 # 必填:OPENROUTER_API_KEY
-# 必填:AGENT_API_TOKEN,agent 与 web 使用同一个随机值
-openssl rand -hex 32
 ```
 
-把生成值填入 `.env` 的 `AGENT_API_TOKEN`。同机部署 OA 时保留:
+同机部署 OA 时保留:
 
 ```dotenv
 OA_DOCKER_API_BASE_URL=http://host.docker.internal:8010
+OA_API_TOKEN_HEADER=Cookie
+OA_API_TOKEN_PREFIX=sessionid=
 WEB_BIND_ADDRESS=0.0.0.0
 WEB_PORT=3000
 ```
@@ -132,6 +133,6 @@ Compose 只向宿主机发布 web 端口,agent 仅在内部网络暴露。`agent
 
 ## GitHub Actions CI/CD
 
-仓库提供 `.github/workflows/ci-cd.yml`:Pull Request 自动运行测试、构建并验证两个 Docker 镜像;`main` 通过后把 SHA 镜像推送到 GHCR,再通过 SSH 部署到服务器。部署失败会自动恢复上一版镜像。
+仓库提供 `.github/workflows/ci-cd.yml`:Pull Request 自动运行测试、构建并验证两个 Docker 镜像;合并到 `test` 后部署测试环境,合并到 `main` 后部署生产环境。两个环境都使用各自提交的 SHA 镜像,部署失败会自动恢复上一版镜像和运行配置。
 
-服务器准备、`production` Environment secrets、GHCR 权限和手动回滚方法见 [docs/cicd.md](docs/cicd.md)。
+最简服务器准备、Secret/Variable 配置和双环境发布步骤见 [docs/dual-environment-deployment.md](docs/dual-environment-deployment.md);CI/CD 内部流程和回滚说明见 [docs/cicd.md](docs/cicd.md)。

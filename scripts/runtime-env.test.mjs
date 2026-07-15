@@ -1,0 +1,65 @@
+import assert from "node:assert/strict"
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { spawnSync } from "node:child_process"
+import test from "node:test"
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const renderScript = path.join(repoRoot, "scripts", "render-runtime-env.sh")
+
+test("renders a private runtime env for one isolated Compose environment", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
+  context.after(() => rm(directory, { recursive: true, force: true }))
+  const outputPath = path.join(directory, ".env")
+
+  const result = runRender(outputPath, {
+    COMPOSE_PROJECT_NAME: "oa-agent-test",
+    OPENROUTER_API_KEY: "test-openrouter-secret",
+    OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
+    WEB_PORT: "3001",
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const content = await readFile(outputPath, "utf8")
+  assert.match(content, /^COMPOSE_PROJECT_NAME=oa-agent-test$/m)
+  assert.match(content, /^OPENROUTER_API_KEY=test-openrouter-secret$/m)
+  assert.match(content, /^OA_DOCKER_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
+  assert.match(content, /^OA_API_TOKEN_HEADER=Cookie$/m)
+  assert.match(content, /^OA_API_TOKEN_PREFIX=sessionid=$/m)
+  assert.match(content, /^WEB_BIND_ADDRESS=127\.0\.0\.1$/m)
+  assert.match(content, /^WEB_PORT=3001$/m)
+  assert.doesNotMatch(content, /^AGENT_API_TOKEN=/m)
+  assert.doesNotMatch(content, /^OA_API_TOKEN=/m)
+
+  const metadata = await stat(outputPath)
+  assert.equal(metadata.mode & 0o777, 0o600)
+})
+
+test("rejects deployment values that could inject another env entry", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
+  context.after(() => rm(directory, { recursive: true, force: true }))
+  const outputPath = path.join(directory, ".env")
+
+  const result = runRender(outputPath, {
+    COMPOSE_PROJECT_NAME: "oa-agent-test",
+    OPENROUTER_API_KEY: "secret\nAGENT_API_TOKEN=injected",
+    OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
+    WEB_PORT: "3001",
+  })
+
+  assert.notEqual(result.status, 0)
+})
+
+function runRender(outputPath, overrides) {
+  return spawnSync("bash", [renderScript, outputPath], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      OA_AUTH_ALIAS: "default",
+      WEB_BIND_ADDRESS: "127.0.0.1",
+      ...overrides,
+    },
+  })
+}

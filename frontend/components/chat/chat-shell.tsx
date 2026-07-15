@@ -217,6 +217,26 @@ async function saveChatSession(input: {
   return payload.session || null
 }
 
+async function deleteChatSession(session: ChatSessionListItem): Promise<void> {
+  const response = await fetch("/api/chat/sessions", {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(session),
+  })
+
+  if (response.status === 401) {
+    window.location.assign(`/login?next=${encodeURIComponent("/chat")}`)
+    throw new Error("Authentication required")
+  }
+
+  if (!response.ok) {
+    throw new Error(await readResponseError(response))
+  }
+}
+
 async function readResponseError(response: Response): Promise<string> {
   const fallback = `Request failed with status ${response.status}`
   const text = await response.text()
@@ -341,7 +361,6 @@ export function ChatShell() {
   const [activeRecordId, setActiveRecordId] = useState<string | number | null>(null)
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
   const [sessionListFocusKey, setSessionListFocusKey] = useState(0)
-  const [newestSessionId, setNewestSessionId] = useState<string | null>(null)
   const [isSiderCollapsed, setIsSiderCollapsed] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const siderRef = useRef<HTMLElement | null>(null)
@@ -353,6 +372,7 @@ export function ChatShell() {
   const activeRequestIdRef = useRef<string | null>(null)
   const messagesRef = useRef<Message[]>([])
   const sessionSaveQueuesRef = useRef(new Map<string, Promise<void>>())
+  const deletedSessionIdsRef = useRef(new Set<string>())
 
   // Load messages from localStorage on mount
   useEffect(() => {
@@ -495,10 +515,18 @@ export function ChatShell() {
 
   const persistMessages = useCallback(
     (sessionId: string, recordId: string | number | null, nextMessages: Message[]) => {
+      if (deletedSessionIdsRef.current.has(sessionId)) {
+        return Promise.resolve()
+      }
+
       const previousSave = sessionSaveQueuesRef.current.get(sessionId) || Promise.resolve()
       const currentSave = previousSave
         .catch(() => undefined)
         .then(async () => {
+          if (deletedSessionIdsRef.current.has(sessionId)) {
+            return
+          }
+
           try {
             const session = await saveChatSession({ sessionId, recordId, messages: nextMessages })
             if (session?.recordId && activeSessionIdRef.current === sessionId) {
@@ -952,9 +980,6 @@ export function ChatShell() {
     setSessionListFocusKey((value) => value + 1)
 
     if (!isStreaming && messagesRef.current.length === 0) {
-      if (activeSessionIdRef.current) {
-        setNewestSessionId(activeSessionIdRef.current)
-      }
       setError(null)
       return
     }
@@ -967,7 +992,6 @@ export function ChatShell() {
     setIsStreaming(false)
 
     const nextAgentSessionId = createAgentSessionId()
-    setNewestSessionId(nextAgentSessionId)
 
     messagesRef.current = []
     setMessages([])
@@ -992,6 +1016,47 @@ export function ChatShell() {
         setSessionListRefreshKey((value) => value + 1)
       })
   }, [abortController, isStreaming])
+
+  const handleDeleteSession = useCallback(
+    async (session: ChatSessionListItem) => {
+      const { sessionId } = session
+      deletedSessionIdsRef.current.add(sessionId)
+
+      if (activeSessionIdRef.current === sessionId) {
+        activeRequestIdRef.current = null
+        abortController?.abort()
+        setAbortController(null)
+        setIsStreaming(false)
+      }
+
+      try {
+        await sessionSaveQueuesRef.current.get(sessionId)?.catch(() => undefined)
+        await deleteChatSession(session)
+        sessionSaveQueuesRef.current.delete(sessionId)
+
+        if (activeSessionIdRef.current === sessionId) {
+          activeSessionIdRef.current = ""
+          messagesRef.current = []
+          setAgentSessionId("")
+          setActiveRecordId(null)
+          setMessages([])
+          setError(null)
+          try {
+            localStorage.removeItem(STORAGE_KEY)
+            localStorage.removeItem(AGENT_SESSION_STORAGE_KEY)
+          } catch (storageError) {
+            console.error("Failed to clear deleted session state:", storageError)
+          }
+        }
+
+        setSessionListRefreshKey((value) => value + 1)
+      } catch (error) {
+        deletedSessionIdsRef.current.delete(sessionId)
+        throw error
+      }
+    },
+    [abortController],
+  )
 
   const handleSelectSession = useCallback(
     async (session: ChatSessionListItem) => {
@@ -1082,8 +1147,8 @@ export function ChatShell() {
         activeRecordId={activeRecordId}
         isCollapsed={isSiderCollapsed}
         focusSessionKey={sessionListFocusKey}
-        prioritizedSessionId={newestSessionId}
         onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
         refreshKey={sessionListRefreshKey}
       />
       {/*
