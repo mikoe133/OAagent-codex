@@ -16,7 +16,7 @@
 - 自动生成并上传两套服务器 `.env`。
 - 自动隔离两套容器、网络、session 卷和 Codex 卷。
 - 新版本失败时自动恢复上一版镜像和上一份 `.env`。
-- 使用 GitHub 自带临时 Token 拉取 GHCR,不需要 `GHCR_PULL_TOKEN`。
+- 镜像以 commit SHA 备份到 GHCR,并通过私有 Artifact 和 SSH 加载到服务器,不需要 `GHCR_PULL_TOKEN`。
 
 你只需要完成下面 6 步。
 
@@ -224,7 +224,6 @@ docker compose --env-file .env --env-file .deploy.env -f compose.yml ps
 cp .env.previous .env
 cp .deploy.env.previous .deploy.env
 chmod 600 .env .deploy.env
-docker compose --env-file .env --env-file .deploy.env -f compose.yml pull agent web
 docker compose --env-file .env --env-file .deploy.env -f compose.yml \
   up -d --no-build --remove-orphans --wait --wait-timeout 180
 ```

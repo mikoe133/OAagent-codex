@@ -28,6 +28,20 @@ test("deploys immutable agent and web image tags", async (context) => {
   assert.match(dockerLog, /up -d --no-build --remove-orphans --wait --wait-timeout 180/)
 })
 
+test("uses preloaded images without contacting the registry", async (context) => {
+  const fixture = await createFixture(context)
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:abc123",
+    webImage: "ghcr.io/example/oa-web:abc123",
+    skipImagePull: true,
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const dockerLog = await readFile(fixture.logPath, "utf8")
+  assert.doesNotMatch(dockerLog, / pull /)
+  assert.match(dockerLog, / up /)
+})
+
 test("restores the previous image tags when the new deployment fails", async (context) => {
   const fixture = await createFixture(context)
   const previous =
@@ -120,7 +134,7 @@ fi
   return { binDir, deployDir, logPath, markerPath }
 }
 
-function runDeploy(fixture, { agentImage, webImage, failFirstUp = false }) {
+function runDeploy(fixture, { agentImage, webImage, failFirstUp = false, skipImagePull = false }) {
   return spawnSync(
     "bash",
     [deployScript, fixture.deployDir, agentImage, webImage],
@@ -132,6 +146,7 @@ function runDeploy(fixture, { agentImage, webImage, failFirstUp = false }) {
         MOCK_DOCKER_LOG: fixture.logPath,
         MOCK_DOCKER_MARKER: fixture.markerPath,
         MOCK_FAIL_FIRST_UP: failFirstUp ? "1" : "0",
+        SKIP_IMAGE_PULL: skipImagePull ? "1" : "0",
       },
     },
   )

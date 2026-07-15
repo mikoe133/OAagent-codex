@@ -23,17 +23,21 @@ test("maps test and main branches to their deployment environments", async () =>
   assert.match(workflow, /WEB_IMAGE=ghcr\.io\/\$\{repository\}-web:\$\{GITHUB_SHA\}/)
 })
 
-test("uses repository configuration and the scoped GitHub token for deployment", async () => {
+test("publishes release images and transfers private deployment artifacts", async () => {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
 
   assert.match(workflow, /DEPLOY_HOST: \$\{\{ vars\.DEPLOY_HOST \}\}/)
   assert.match(workflow, /uses: docker\/setup-qemu-action@v3/)
   assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
-  assert.match(workflow, /GHCR_PULL_TOKEN: \$\{\{ github\.token \}\}/)
   assert.match(workflow, /bash scripts\/render-runtime-env\.sh/)
   assert.match(workflow, /push: \$\{\{ github\.event_name != 'pull_request' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/test'\) \}\}/)
-  assert.doesNotMatch(workflow, /secrets\.GHCR_PULL_TOKEN/)
+  assert.match(workflow, /uses: actions\/upload-artifact@v4/)
+  assert.equal(workflow.match(/uses: actions\/download-artifact@v4/g)?.length, 2)
+  assert.equal(workflow.match(/gzip -dc "\$archive" \| ssh .* docker load/g)?.length, 2)
+  assert.equal(workflow.match(/SKIP_IMAGE_PULL=1 bash -s/g)?.length, 2)
+  assert.doesNotMatch(workflow, /GHCR_PULL_TOKEN/)
+  assert.doesNotMatch(workflow, /docker login ghcr\.io/)
 })
 
 test("allows the server env to isolate Compose projects", async () => {

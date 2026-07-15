@@ -14,13 +14,13 @@ Pull Request:
 合并到 `test`:
 
 1. 完成全部质量检查。
-2. 构建一次 Agent/Web 镜像并以 commit SHA 推送 GHCR。
-3. 自动部署到 `test` Environment。
+2. 构建 Agent/Web 镜像,以 commit SHA 推送 GHCR,并生成保留 1 天的私有部署 Artifact。
+3. 部署 Job 通过 SSH 将 Artifact 加载到服务器,然后自动部署到 `test` Environment。
 
 合并到 `main`:
 
 1. 完成全部质量检查。
-2. 构建一次 Agent/Web 镜像并以 commit SHA 推送 GHCR。
+2. 构建 Agent/Web 镜像,以 commit SHA 推送 GHCR,并生成保留 1 天的私有部署 Artifact。
 3. 如果 production 配置了 Required reviewer,等待人工批准。
 4. 自动部署到 `production` Environment。
 
@@ -53,7 +53,7 @@ Environment Variables:
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
 | 两者可选 | `OA_AUTH_ALIAS` | OA 数据源 alias,默认 `default` |
 
-Workflow 使用 `${{ github.token }}` 登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
+Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份,同时通过私有 Artifact 和 SSH 把镜像加载到服务器。服务器不登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
 
 ## 固定环境参数
 
@@ -72,7 +72,6 @@ Workflow 会把运行配置安全写入服务器 `.env.next`;部署脚本在发�
 cp .env.previous .env
 cp .deploy.env.previous .deploy.env
 chmod 600 .env .deploy.env
-docker compose --env-file .env --env-file .deploy.env -f compose.yml pull agent web
 docker compose --env-file .env --env-file .deploy.env -f compose.yml \
   up -d --no-build --remove-orphans --wait --wait-timeout 180
 ```

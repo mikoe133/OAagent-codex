@@ -107,17 +107,46 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
+      - name: Export deployment image
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: ${{ vars.DEPLOY_PLATFORM || 'linux/amd64' }}
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/${{ matrix.service }}.tar
+          cache-from: type=gha,scope=${{ matrix.service }}
+
+      - name: Compress deployment image
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test')
+        shell: bash
+        run: gzip -1 "$RUNNER_TEMP/${{ matrix.service }}.tar"
+
+      - name: Upload deployment image
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test')
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-image-${{ matrix.service }}-${{ github.sha }}
+          path: ${{ runner.temp }}/${{ matrix.service }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   deploy-test:
     name: Deploy test
     if: github.ref == 'refs/heads/test' && github.event_name != 'pull_request'
     needs: images
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    concurrency:
+      group: oa-agent-shared-server-deploy
+      cancel-in-progress: false
     environment:
       name: test
     permissions:
+      actions: read
       contents: read
-      packages: read
     env:
       DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
       DEPLOY_USER: ${{ vars.DEPLOY_USER }}
@@ -131,11 +160,16 @@ jobs:
       COMPOSE_PROJECT_NAME: oa-agent-test
       WEB_BIND_ADDRESS: 127.0.0.1
       WEB_PORT: '3001'
-      GHCR_USERNAME: ${{ github.actor }}
-      GHCR_PULL_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Download deployment images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deployment-image-*-${{ github.sha }}
+          path: ${{ runner.temp }}/deployment-images
+          merge-multiple: true
 
       - name: Validate deployment configuration
         shell: bash
@@ -156,6 +190,19 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
+      - name: Load deployment images on server
+        shell: bash
+        run: |
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          for service in agent web; do
+            archive="$RUNNER_TEMP/deployment-images/${service}.tar.gz"
+            if [[ ! -f "$archive" ]]; then
+              echo "Missing deployment image archive: $archive" >&2
+              exit 1
+            fi
+            gzip -dc "$archive" | ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" docker load
+          done
+
       - name: Resolve release images
         shell: bash
         run: |
@@ -175,18 +222,11 @@ jobs:
           remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml
 
-      - name: Log deployment server in to GHCR
-        shell: bash
-        run: |
-          target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          remote_command="$(printf 'docker login ghcr.io --username %q --password-stdin' "$GHCR_USERNAME")"
-          printf '%s' "$GHCR_PULL_TOKEN" | ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command"
-
       - name: Deploy and verify health
         shell: bash
         run: |
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          remote_command="$(printf 'bash -s -- %q %q %q' "$DEPLOY_PATH" "$AGENT_IMAGE" "$WEB_IMAGE")"
+          remote_command="$(printf 'env SKIP_IMAGE_PULL=1 bash -s -- %q %q %q' "$DEPLOY_PATH" "$AGENT_IMAGE" "$WEB_IMAGE")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < scripts/deploy-compose.sh
 
       - name: Record deployment summary
@@ -201,12 +241,15 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: images
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    concurrency:
+      group: oa-agent-shared-server-deploy
+      cancel-in-progress: false
     environment:
       name: production
     permissions:
+      actions: read
       contents: read
-      packages: read
     env:
       DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
       DEPLOY_USER: ${{ vars.DEPLOY_USER }}
@@ -220,11 +263,16 @@ jobs:
       COMPOSE_PROJECT_NAME: oa-agent-prod
       WEB_BIND_ADDRESS: 127.0.0.1
       WEB_PORT: '3000'
-      GHCR_USERNAME: ${{ github.actor }}
-      GHCR_PULL_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Download deployment images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deployment-image-*-${{ github.sha }}
+          path: ${{ runner.temp }}/deployment-images
+          merge-multiple: true
 
       - name: Validate deployment configuration
         shell: bash
@@ -245,6 +293,19 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
+      - name: Load deployment images on server
+        shell: bash
+        run: |
+          target="${DEPLOY_USER}@${DEPLOY_HOST}"
+          for service in agent web; do
+            archive="$RUNNER_TEMP/deployment-images/${service}.tar.gz"
+            if [[ ! -f "$archive" ]]; then
+              echo "Missing deployment image archive: $archive" >&2
+              exit 1
+            fi
+            gzip -dc "$archive" | ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" docker load
+          done
+
       - name: Resolve release images
         shell: bash
         run: |
@@ -264,18 +325,11 @@ jobs:
           remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml
 
-      - name: Log deployment server in to GHCR
-        shell: bash
-        run: |
-          target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          remote_command="$(printf 'docker login ghcr.io --username %q --password-stdin' "$GHCR_USERNAME")"
-          printf '%s' "$GHCR_PULL_TOKEN" | ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command"
-
       - name: Deploy and verify health
         shell: bash
         run: |
           target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          remote_command="$(printf 'bash -s -- %q %q %q' "$DEPLOY_PATH" "$AGENT_IMAGE" "$WEB_IMAGE")"
+          remote_command="$(printf 'env SKIP_IMAGE_PULL=1 bash -s -- %q %q %q' "$DEPLOY_PATH" "$AGENT_IMAGE" "$WEB_IMAGE")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < scripts/deploy-compose.sh
 
       - name: Record deployment summary

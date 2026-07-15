@@ -36,6 +36,15 @@ function compose() {
     "$@"
 }
 
+function pull_images() {
+  if [[ "${SKIP_IMAGE_PULL:-0}" == "1" ]]; then
+    echo "[deploy] using preloaded images"
+    return 0
+  fi
+
+  compose pull agent web
+}
+
 function rollback() {
   restore_runtime_env
 
@@ -48,7 +57,7 @@ function rollback() {
   cp "$previous_env_file" "$deployment_env_file"
   chmod 600 "$deployment_env_file"
   echo "[deploy] rolling back with $previous_env_file" >&2
-  compose pull agent web || echo "[deploy] rollback image pull failed" >&2
+  pull_images || echo "[deploy] rollback image pull failed" >&2
   compose up -d --no-build --remove-orphans --wait --wait-timeout 180 \
     || echo "[deploy] rollback failed; manual intervention is required" >&2
 }
@@ -120,7 +129,7 @@ fi
 
 write_deployment_env "$agent_image" "$web_image"
 
-if ! compose pull agent web; then
+if ! pull_images; then
   echo "[deploy] image pull failed; restoring the previous release" >&2
   rollback
   exit 1
