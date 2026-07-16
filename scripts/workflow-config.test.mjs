@@ -19,6 +19,8 @@ test("maps test and main branches to their deployment environments", async () =>
   assert.equal(workflow.match(/^    needs: images$/gm)?.length, 2)
   assert.doesNotMatch(workflow, /^    needs: deploy-test$/m)
   assert.match(workflow, /oa-agent-test[\s\S]*oa-agent-prod/)
+  assert.match(workflow, /COMPOSE_PROJECT_NAME: oa-agent-test[\s\S]*WEB_PORT: '3001'/)
+  assert.match(workflow, /COMPOSE_PROJECT_NAME: oa-agent-prod[\s\S]*WEB_PORT: '3010'/)
   assert.match(workflow, /AGENT_IMAGE=ghcr\.io\/\$\{repository\}-agent:\$\{GITHUB_SHA\}/)
   assert.match(workflow, /WEB_IMAGE=ghcr\.io\/\$\{repository\}-web:\$\{GITHUB_SHA\}/)
 })

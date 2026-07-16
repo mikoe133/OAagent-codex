@@ -57,10 +57,10 @@ Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份
 
 ## 固定环境参数
 
-| 环境 | 部署目录 | Compose 项目 | Web 监听 |
-| --- | --- | --- | --- |
-| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3001` |
-| 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3000` |
+| 环境 | 部署目录 | Compose 项目 | Web 监听 | 公网域名 |
+| --- | --- | --- | --- | --- |
+| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
+| 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
 
 Workflow 会把运行配置安全写入服务器 `.env.next`;部署脚本在发布时将其提升为 `.env`。失败时会同时恢复 `.env.previous` 和 `.deploy.env.previous`。
 

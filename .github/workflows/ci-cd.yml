@@ -262,7 +262,7 @@ jobs:
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
       COMPOSE_PROJECT_NAME: oa-agent-prod
       WEB_BIND_ADDRESS: 127.0.0.1
-      WEB_PORT: '3000'
+      WEB_PORT: '3010'
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

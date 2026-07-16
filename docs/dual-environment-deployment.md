@@ -2,10 +2,10 @@
 
 目标是在同一台服务器运行四个容器:
 
-| 环境 | 容器 | 服务器目录 | Web 端口 |
-| --- | --- | --- | --- |
-| 测试 | `web` + `agent` | `/opt/rwkv/apps/oa-agent-test` | `127.0.0.1:3001` |
-| 生产 | `web` + `agent` | `/opt/rwkv/apps/oa-agent-prod` | `127.0.0.1:3000` |
+| 环境 | 容器 | 服务器目录 | Web 端口 | 公网域名 |
+| --- | --- | --- | --- | --- |
+| 测试 | `web` + `agent` | `/opt/rwkv/apps/oa-agent-test` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
+| 生产 | `web` + `agent` | `/opt/rwkv/apps/oa-agent-prod` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
 
 代码已经自动完成:
 
@@ -152,11 +152,11 @@ OA_AUTH_ALIAS=<实际 alias>
 
 生产模式的登录 Cookie 带 `Secure` 属性,所以测试和生产都必须通过 HTTPS 访问。
 
-准备两个域名并指向同一台服务器,例如:
+准备两个域名并指向同一台服务器:
 
 ```text
-agent-test.example.com -> 服务器 IP
-agent.example.com      -> 服务器 IP
+test.oa-agent.rwkvos.com -> 47.115.88.183
+oa-agent.rwkvos.com      -> 47.115.88.183
 ```
 
 Nginx 分别反向代理:
@@ -174,7 +174,7 @@ location / {
 
 # 生产域名
 location / {
-    proxy_pass http://127.0.0.1:3000;
+    proxy_pass http://127.0.0.1:3010;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
