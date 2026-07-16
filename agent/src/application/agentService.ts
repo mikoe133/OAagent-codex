@@ -236,7 +236,7 @@ export class AgentService {
       }
     } catch (error) {
       if (!(await recoverStream())) {
-        throw error;
+        throw resolveStreamFailure(error, state.turnFailure, secrets);
       }
     }
 
@@ -624,6 +624,17 @@ export function resolveStreamRecovery(
   return fallbackResponse
     ? { kind: "tool_fallback", response: fallbackResponse }
     : null;
+}
+
+export function resolveStreamFailure(
+  caughtError: unknown,
+  turnFailure: string | null,
+  secrets: string[],
+): Error {
+  const caughtMessage =
+    caughtError instanceof Error ? caughtError.message : String(caughtError);
+  const message = turnFailure?.trim() || caughtMessage;
+  return new Error(redactSecrets(message, secrets));
 }
 
 function buildFallbackResponseFromToolResult(

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ThreadItem } from "@openai/codex-sdk";
-import { resolveStreamRecovery } from "../src/application/agentService.js";
+import {
+  resolveStreamFailure,
+  resolveStreamRecovery,
+} from "../src/application/agentService.js";
 import type { AppConfig } from "../src/config/config.js";
 import {
   SUPPORTED_OPENAI_MODELS,
@@ -94,6 +97,43 @@ describe("resolveStreamRecovery", () => {
     const recovery = resolveStreamRecovery("", [item], []);
 
     assert.equal(recovery, null);
+  });
+});
+
+describe("resolveStreamFailure", () => {
+  it("prefers the structured Codex turn failure over the process exit error", () => {
+    const failure = resolveStreamFailure(
+      new Error(
+        "Codex Exec exited with code 1: Reading prompt from stdin...\n",
+      ),
+      "This model is not available in your region.",
+      [],
+    );
+
+    assert.equal(
+      failure.message,
+      "This model is not available in your region.",
+    );
+  });
+
+  it("redacts secrets from the structured Codex turn failure", () => {
+    const failure = resolveStreamFailure(
+      new Error("Codex Exec exited with code 1"),
+      "Provider rejected secret-openrouter-key",
+      ["secret-openrouter-key"],
+    );
+
+    assert.equal(failure.message, "Provider rejected [REDACTED]");
+  });
+
+  it("falls back to the process exit error when no turn failure exists", () => {
+    const failure = resolveStreamFailure(
+      new Error("Codex Exec exited with code 1"),
+      null,
+      [],
+    );
+
+    assert.equal(failure.message, "Codex Exec exited with code 1");
   });
 });
 
