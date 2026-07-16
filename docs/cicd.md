@@ -34,7 +34,7 @@ Repository Secrets:
 | --- | --- |
 | `DEPLOY_SSH_KEY` | GitHub Actions 登录服务器的 SSH 私钥 |
 | `DEPLOY_KNOWN_HOSTS` | 已核对的服务器 SSH Host Key |
-| `OPENROUTER_API_KEY` | Agent 模型服务凭证 |
+| `NEXTTOKEN_API_KEY` | Agent 模型服务凭证 |
 
 Repository Variables:
 
@@ -52,6 +52,7 @@ Environment Variables:
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
 | 两者可选 | `OA_AUTH_ALIAS` | OA 数据源 alias,默认 `default` |
+| 两者可选 | `NEXTTOKEN_API_BASE_URL` | Nexttoken API 地址,默认 `https://next-token.cc` |
 
 Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份,同时通过私有 Artifact 和 SSH 把镜像加载到服务器。服务器不登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
 

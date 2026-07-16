@@ -30,7 +30,7 @@ test("POST forwards the selected model to the agent service", async () => {
         },
         body: JSON.stringify({
           sessionId: "model-switch-session",
-          model: "openai/gpt-5.4-mini",
+          model: "gpt-5.6-terra",
           messages: [{ role: "user", content: "hello" }],
         }),
       }),
@@ -39,7 +39,7 @@ test("POST forwards the selected model to the agent service", async () => {
 
     assert.deepEqual(forwardedBody, {
       message: "hello",
-      model: "openai/gpt-5.4-mini",
+      model: "gpt-5.6-terra",
     })
     assert.equal(forwardedAuthorization, "Bearer test-session-token")
   } finally {

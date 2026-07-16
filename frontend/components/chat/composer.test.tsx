@@ -12,7 +12,7 @@ test("the current model name opens model selection while voice and upload contro
       onSend={() => undefined}
       onStop={() => undefined}
       isStreaming={false}
-      selectedModel="openai/gpt-5.4"
+      selectedModel="gpt-5.6-terra"
       onModelChange={() => undefined}
     />,
   )
@@ -22,10 +22,10 @@ test("the current model name opens model selection while voice and upload contro
   )
 
   assert.ok(modelTrigger, "expected an accessible model selector button")
-  assert.match(modelTrigger[1], /GPT-5\.4/)
+  assert.match(modelTrigger[1], /GPT-5\.6 Terra/)
   assert.deepEqual(
     AI_MODELS.map((model) => model.id),
-    ["openai/gpt-5.5", "openai/gpt-5.4", "openai/gpt-5.4-mini", "openai/gpt-5.4-nano"],
+    ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
   )
   assert.doesNotMatch(html, /aria-label="(?:Start|Stop) voice input"/)
   assert.doesNotMatch(html, /aria-label="Attach image"/)

@@ -1,6 +1,6 @@
 import type { ThreadEvent, ThreadItem, Usage } from "@openai/codex-sdk";
 import type { AppConfig } from "../config/config.js";
-import { resolveRequestedOpenAiModel } from "../config/modelCatalog.js";
+import { resolveRequestedModel } from "../config/modelCatalog.js";
 import {
   createCodexClient,
   startOrResumeThread,
@@ -533,7 +533,7 @@ export class AgentService {
 
   private getSecrets(sessionOaApiToken: string | null = null): string[] {
     return [
-      this.config.openrouterApiKey,
+      this.config.modelApiKey,
       sessionOaApiToken ?? "",
       this.config.oaApiToolToken,
     ];
@@ -589,7 +589,7 @@ async function resolveRunConfig(
   config: AppConfig,
   requestedModel: string | null | undefined,
 ): Promise<AppConfig> {
-  const model = resolveRequestedOpenAiModel(requestedModel, config.model);
+  const model = resolveRequestedModel(requestedModel, config.model);
   const openapi = await resolveOpenApiContract(config);
   return { ...config, model, openapiPath: openapi.path };
 }

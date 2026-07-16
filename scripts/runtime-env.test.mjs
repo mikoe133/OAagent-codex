@@ -16,7 +16,8 @@ test("renders a private runtime env for one isolated Compose environment", async
 
   const result = runRender(outputPath, {
     COMPOSE_PROJECT_NAME: "oa-agent-test",
-    OPENROUTER_API_KEY: "test-openrouter-secret",
+    NEXTTOKEN_API_KEY: "test-nexttoken-secret",
+    NEXTTOKEN_API_BASE_URL: "https://next-token.cc",
     OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
     WEB_PORT: "3001",
   })
@@ -24,7 +25,8 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.equal(result.status, 0, result.stderr)
   const content = await readFile(outputPath, "utf8")
   assert.match(content, /^COMPOSE_PROJECT_NAME=oa-agent-test$/m)
-  assert.match(content, /^OPENROUTER_API_KEY=test-openrouter-secret$/m)
+  assert.match(content, /^NEXTTOKEN_API_KEY=test-nexttoken-secret$/m)
+  assert.match(content, /^NEXTTOKEN_API_BASE_URL=https:\/\/next-token\.cc$/m)
   assert.match(content, /^OA_DOCKER_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
   assert.match(content, /^OA_API_TOKEN_HEADER=Cookie$/m)
   assert.match(content, /^OA_API_TOKEN_PREFIX=sessionid=$/m)
@@ -44,7 +46,8 @@ test("rejects deployment values that could inject another env entry", async (con
 
   const result = runRender(outputPath, {
     COMPOSE_PROJECT_NAME: "oa-agent-test",
-    OPENROUTER_API_KEY: "secret\nAGENT_API_TOKEN=injected",
+    NEXTTOKEN_API_KEY: "secret\nAGENT_API_TOKEN=injected",
+    NEXTTOKEN_API_BASE_URL: "https://next-token.cc",
     OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
     WEB_PORT: "3001",
   })

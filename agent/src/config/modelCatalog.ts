@@ -1,15 +1,17 @@
-export const SUPPORTED_OPENAI_MODELS = [
-  "openai/gpt-5.5",
-  "openai/gpt-5.4",
-  "openai/gpt-5.4-mini",
-  "openai/gpt-5.4-nano",
+export const SUPPORTED_MODELS = [
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.5",
+  "gpt-5.6-luna",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
 ] as const;
 
-export type SupportedOpenAiModel = (typeof SUPPORTED_OPENAI_MODELS)[number];
+export type SupportedModel = (typeof SUPPORTED_MODELS)[number];
 
-const supportedModelIds = new Set<string>(SUPPORTED_OPENAI_MODELS);
+const supportedModelIds = new Set<string>(SUPPORTED_MODELS);
 
-export function resolveRequestedOpenAiModel(
+export function resolveRequestedModel(
   requestedModel: string | null | undefined,
   fallbackModel: string,
 ): string {
@@ -23,7 +25,7 @@ export function resolveRequestedOpenAiModel(
   }
   if (!supportedModelIds.has(normalized)) {
     throw new Error(
-      `不支持的模型:${normalized}。可选模型:${SUPPORTED_OPENAI_MODELS.join(", ")}。`,
+      `不支持的模型:${normalized}。可选模型:${SUPPORTED_MODELS.join(", ")}。`,
     );
   }
   return normalized;

@@ -5,9 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 
-const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const DEFAULT_MODEL = "gpt-5.5";
-const DEFAULT_MODEL_PROVIDER = "openrouter";
+const DEFAULT_NEXTTOKEN_BASE_URL = "https://next-token.cc/v1";
+const DEFAULT_MODEL = "gpt-5.6-terra";
+const DEFAULT_MODEL_PROVIDER = "nexttoken";
 const DEFAULT_OPENAPI_URL = "https://api-oa.rwkvos.com/openapi_json";
 
 export type AppConfig = {
@@ -19,13 +19,13 @@ export type AppConfig = {
   openapiPath: string;
   /** 优先读取的远程 OA OpenAPI 地址。 */
   openapiUrl: string;
-  /** OpenRouter API key。只用于模型调用,不允许写入 prompt、日志或最终回答。 */
-  openrouterApiKey: string;
-  /** OpenRouter OpenAI-compatible base URL。 */
-  openrouterBaseUrl: string;
+  /** 模型服务 API key。只用于模型调用,不允许写入 prompt、日志或最终回答。 */
+  modelApiKey: string;
+  /** OpenAI-compatible 模型服务 base URL。 */
+  modelBaseUrl: string;
   /** Codex model provider 标识。 */
   modelProvider: string;
-  /** OpenRouter 上的模型 slug。 */
+  /** 模型服务上的模型 ID。 */
   model: string;
   /** OA 后端地址。未配置时只做接口分析。 */
   oaApiBaseUrl: string | null;
@@ -51,7 +51,7 @@ export type AppConfig = {
 
 /**
  * 读取 .env 并做启动前校验:
- * - 缺少 OPENROUTER_API_KEY:直接失败。
+ * - 缺少 NEXTTOKEN_API_KEY:直接失败。
  * - 缺少本地兜底 openapi/openapi.json:直接失败。
  * - 缺少 OA_API_BASE_URL:允许启动,agent 仍可基于所选 OpenAPI 契约做接口分析。
  */
@@ -64,10 +64,10 @@ export function loadConfig(): AppConfig {
   dotenv.config({ path: path.join(repoRoot, ".env") });
   dotenv.config({ path: path.join(projectRoot, ".env"), override: true });
 
-  const openrouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!openrouterApiKey) {
+  const modelApiKey = process.env.NEXTTOKEN_API_KEY?.trim();
+  if (!modelApiKey) {
     throw new Error(
-      "缺少 OPENROUTER_API_KEY。请在 .env 中配置(参考 .env.example),它只用于模型调用,不会写入 prompt 或日志。",
+      "缺少 NEXTTOKEN_API_KEY。请在 .env 中配置(参考 .env.example),它只用于模型调用,不会写入 prompt 或日志。",
     );
   }
 
@@ -78,14 +78,13 @@ export function loadConfig(): AppConfig {
     );
   }
 
-  const openrouterBaseUrl =
-    process.env.OPENROUTER_BASE_URL?.trim() ||
-    process.env.OPENROUTER_API_BASE_URL?.trim() ||
-    DEFAULT_OPENROUTER_BASE_URL;
+  const modelBaseUrl = normalizeModelBaseUrl(
+    process.env.NEXTTOKEN_API_BASE_URL?.trim() || DEFAULT_NEXTTOKEN_BASE_URL,
+  );
 
   const model = normalizeModelId(
     process.env.CODEX_MODEL?.trim() ||
-      process.env.OPENROUTER_MODEL?.trim() ||
+      process.env.NEXTTOKEN_MODEL?.trim() ||
       DEFAULT_MODEL,
   );
 
@@ -95,7 +94,7 @@ export function loadConfig(): AppConfig {
   // 非 bare key 字符会静默生成错误配置,必须在启动时拦下。
   if (!/^[A-Za-z0-9_-]+$/.test(modelProvider)) {
     throw new Error(
-      `CODEX_MODEL_PROVIDER 只能包含字母、数字、下划线和连字符,当前值:${modelProvider}。注意它是 provider 标识(如 openrouter),不是模型 slug。`,
+      `CODEX_MODEL_PROVIDER 只能包含字母、数字、下划线和连字符,当前值:${modelProvider}。注意它是 provider 标识(如 nexttoken),不是模型 ID。`,
     );
   }
 
@@ -124,8 +123,8 @@ export function loadConfig(): AppConfig {
     repoRoot,
     openapiPath,
     openapiUrl: process.env.OA_OPENAPI_URL?.trim() || DEFAULT_OPENAPI_URL,
-    openrouterApiKey,
-    openrouterBaseUrl,
+    modelApiKey,
+    modelBaseUrl,
     modelProvider,
     model,
     oaApiBaseUrl: process.env.OA_API_BASE_URL?.trim() || null,
@@ -151,10 +150,18 @@ function parsePort(value: string): number {
 }
 
 function normalizeModelId(value: string): string {
-  if (value === "gpt5.5") {
-    return "gpt-5.5";
+  if (value === "gpt5.6-terra") {
+    return "gpt-5.6-terra";
   }
   return value;
+}
+
+export function normalizeModelBaseUrl(value: string): string {
+  const normalized = value.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(normalized)) {
+    throw new Error(`NEXTTOKEN_API_BASE_URL 必须是 HTTP(S) 地址,当前值:${value}。`);
+  }
+  return /\/v1$/i.test(normalized) ? normalized : `${normalized}/v1`;
 }
 
 function validateConfiguredHeaderName(name: string, value: string): void {

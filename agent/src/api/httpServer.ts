@@ -7,8 +7,8 @@ import type {
 } from "../application/agentService.js";
 import type { AppConfig } from "../config/config.js";
 import {
-  SUPPORTED_OPENAI_MODELS,
-  resolveRequestedOpenAiModel,
+  SUPPORTED_MODELS,
+  resolveRequestedModel,
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
@@ -128,7 +128,7 @@ async function routeRequest(
   }
 
   if (method === "GET" && url.pathname === "/v1/models") {
-    writeJson(response, 200, { models: [...SUPPORTED_OPENAI_MODELS] });
+    writeJson(response, 200, { models: [...SUPPORTED_MODELS] });
     return;
   }
 
@@ -417,7 +417,7 @@ function resolveMessageModel(
   }
 
   try {
-    return resolveRequestedOpenAiModel(rawModel, config.model);
+    return resolveRequestedModel(rawModel, config.model);
   } catch (error) {
     writeJson(response, 400, {
       error: error instanceof Error ? error.message : String(error),

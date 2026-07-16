@@ -90,8 +90,8 @@ describe("buildRuntimeContext", () => {
     const config = {
       projectRoot: "/tmp/agent",
       openapiPath: "/tmp/agent/.context/openapi/remote.json",
-      modelProvider: "openrouter",
-      model: "gpt-5.5",
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
       oaApiBaseUrl: null,
     } as AppConfig;
 

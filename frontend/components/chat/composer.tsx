@@ -18,10 +18,12 @@ import { AudioWaveform } from "./audio-waveform"
 import TextType from "@/components/text/TextType"
 
 export const AI_MODELS = [
-  { id: "openai/gpt-5.5", name: "GPT-5.5", icon: "/images/gpt.png" },
-  { id: "openai/gpt-5.4", name: "GPT-5.4", icon: "/images/gpt.png" },
-  { id: "openai/gpt-5.4-mini", name: "GPT-5.4 Mini", icon: "/images/gpt.png" },
-  { id: "openai/gpt-5.4-nano", name: "GPT-5.4 Nano", icon: "/images/gpt.png" },
+  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", icon: "/images/gpt.png" },
+  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", icon: "/images/gpt.png" },
+  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", icon: "/images/gpt.png" },
+  { id: "gpt-5.5", name: "GPT-5.5", icon: "/images/gpt.png" },
+  { id: "gpt-5.4", name: "GPT-5.4", icon: "/images/gpt.png" },
+  { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", icon: "/images/gpt.png" },
 ] as const
 
 export type AIModel = (typeof AI_MODELS)[number]["id"]

@@ -152,7 +152,8 @@ jobs:
       DEPLOY_USER: ${{ vars.DEPLOY_USER }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      NEXTTOKEN_API_KEY: ${{ secrets.NEXTTOKEN_API_KEY }}
+      NEXTTOKEN_API_BASE_URL: ${{ vars.NEXTTOKEN_API_BASE_URL || 'https://next-token.cc' }}
       OA_DOCKER_API_BASE_URL: ${{ vars.OA_DOCKER_API_BASE_URL }}
       OA_AUTH_ALIAS: ${{ vars.OA_AUTH_ALIAS || 'default' }}
       DEPLOY_PATH: /opt/rwkv/apps/oa-agent-test
@@ -174,7 +175,7 @@ jobs:
       - name: Validate deployment configuration
         shell: bash
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OA_DOCKER_API_BASE_URL; do
             if [[ -z "${!name}" ]]; then
               echo "Missing test deployment configuration: $name" >&2
               exit 1
@@ -255,7 +256,8 @@ jobs:
       DEPLOY_USER: ${{ vars.DEPLOY_USER }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      NEXTTOKEN_API_KEY: ${{ secrets.NEXTTOKEN_API_KEY }}
+      NEXTTOKEN_API_BASE_URL: ${{ vars.NEXTTOKEN_API_BASE_URL || 'https://next-token.cc' }}
       OA_DOCKER_API_BASE_URL: ${{ vars.OA_DOCKER_API_BASE_URL }}
       OA_AUTH_ALIAS: ${{ vars.OA_AUTH_ALIAS || 'default' }}
       DEPLOY_PATH: /opt/rwkv/apps/oa-agent-prod
@@ -277,7 +279,7 @@ jobs:
       - name: Validate deployment configuration
         shell: bash
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OA_DOCKER_API_BASE_URL; do
             if [[ -z "${!name}" ]]; then
               echo "Missing production deployment configuration: $name" >&2
               exit 1

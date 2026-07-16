@@ -105,7 +105,7 @@ export function redactSecrets(text: string, secrets: string[]): string {
 
 /**
  * 创建 Codex SDK 会话并执行一次任务:
- * - 通过 --config 覆盖将 provider 指向 OpenRouter,API key 只经 env_key 机制传递。
+ * - 通过 --config 覆盖将 provider 指向 nexttoken,API key 只经 env_key 机制传递。
  * - 沙箱为 read-only:agent 只需要读取运行时选中的 OpenAPI 契约。
  * - 禁用 web search:运行时选中的 OpenAPI 契约是唯一事实来源(规划 §9.1)。
  * - 不注册额外 function tools,不加载额外 skills。
@@ -126,7 +126,7 @@ export async function runCodexAgent(
     );
   }
 
-  const secrets = [config.openrouterApiKey, config.oaApiToolToken];
+  const secrets = [config.modelApiKey, config.oaApiToolToken];
   return {
     finalResponse: redactSecrets(turn.finalResponse, secrets),
     executedCommands: collectExecutedCommands(turn.items).map((command) =>

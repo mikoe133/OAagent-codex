@@ -18,10 +18,7 @@ function buildChildEnv(
       env[key] = value;
     }
   }
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (apiKey) {
-    env.OPENROUTER_API_KEY = apiKey;
-  }
+  env.NEXTTOKEN_API_KEY = config.modelApiKey;
   env.CALL_OA_API_URL = `http://127.0.0.1:${config.serverPort}/__internal/call-oa-api`;
   env.CALL_OA_API_TOKEN = config.oaApiToolToken;
   if (toolSessionId) {
@@ -40,10 +37,9 @@ export function createCodexClient(
       model_provider: config.modelProvider,
       model_providers: {
         [config.modelProvider]: {
-          name: "OpenRouter",
-          base_url: config.openrouterBaseUrl,
-          env_key: "OPENROUTER_API_KEY",
-          // Codex >= 0.142 仅支持 Responses API(OpenRouter 的 /responses 端点)。
+          name: "Nexttoken",
+          base_url: config.modelBaseUrl,
+          env_key: "NEXTTOKEN_API_KEY",
           wire_api: "responses",
         },
       },

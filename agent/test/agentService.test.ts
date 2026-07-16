@@ -7,45 +7,47 @@ import {
 } from "../src/application/agentService.js";
 import type { AppConfig } from "../src/config/config.js";
 import {
-  SUPPORTED_OPENAI_MODELS,
-  resolveRequestedOpenAiModel,
+  SUPPORTED_MODELS,
+  resolveRequestedModel,
 } from "../src/config/modelCatalog.js";
 import { createThreadOptions } from "../src/infrastructure/codex/codexClient.js";
 
-describe("OpenRouter OpenAI model selection", () => {
-  it("exposes the supported OpenAI model whitelist", () => {
-    assert.deepEqual(SUPPORTED_OPENAI_MODELS, [
-      "openai/gpt-5.5",
-      "openai/gpt-5.4",
-      "openai/gpt-5.4-mini",
-      "openai/gpt-5.4-nano",
+describe("Nexttoken model selection", () => {
+  it("exposes the supported Nexttoken model whitelist", () => {
+    assert.deepEqual(SUPPORTED_MODELS, [
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.5",
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
     ]);
   });
 
   it("accepts a supported requested model", () => {
     assert.equal(
-      resolveRequestedOpenAiModel("openai/gpt-5.4-mini", "gpt-5.5"),
-      "openai/gpt-5.4-mini",
+      resolveRequestedModel("gpt-5.6-terra", "gpt-5.6-terra"),
+      "gpt-5.6-terra",
     );
   });
 
   it("rejects models outside the whitelist", () => {
     assert.throws(
-      () => resolveRequestedOpenAiModel("openai/gpt-5.5-pro", "gpt-5.5"),
+      () => resolveRequestedModel("gpt-5.6-pro", "gpt-5.6-terra"),
       /不支持的模型/,
     );
   });
 
   it("uses the selected model for the Codex thread", () => {
     const config = {
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       oaApiBaseUrl: null,
       projectRoot: "/tmp/agent",
     } as AppConfig;
 
     assert.equal(
-      createThreadOptions(config, "openai/gpt-5.4").model,
-      "openai/gpt-5.4",
+      createThreadOptions(config, "gpt-5.6-terra").model,
+      "gpt-5.6-terra",
     );
   });
 });
@@ -119,8 +121,8 @@ describe("resolveStreamFailure", () => {
   it("redacts secrets from the structured Codex turn failure", () => {
     const failure = resolveStreamFailure(
       new Error("Codex Exec exited with code 1"),
-      "Provider rejected secret-openrouter-key",
-      ["secret-openrouter-key"],
+      "Provider rejected secret-nexttoken-key",
+      ["secret-nexttoken-key"],
     );
 
     assert.equal(failure.message, "Provider rejected [REDACTED]");
