@@ -3,10 +3,27 @@ import test from "node:test"
 
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { MessageBubble } from "./message-bubble"
+import { MessageBubble, resolveTraceOpenState } from "./message-bubble"
 import type { Message } from "./chat-shell"
 
 const OA_NAVIGATION_URL = "https://rwkv-oa.vercel.app/"
+
+test("active trace updates preserve a manual collapsed state", () => {
+  assert.equal(
+    resolveTraceOpenState(false, {
+      wasActive: true,
+      isActive: true,
+    }),
+    false,
+  )
+  assert.equal(
+    resolveTraceOpenState(false, {
+      wasActive: false,
+      isActive: true,
+    }),
+    true,
+  )
+})
 
 test("user messages expose a copy action beneath the bubble", () => {
   const message = {
@@ -19,6 +36,25 @@ test("user messages expose a copy action beneath the bubble", () => {
   const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
   assert.match(html, /aria-label="Copy message"/)
+})
+
+test("user messages render without an avatar or name in a borderless gray bubble", () => {
+  const message = {
+    id: "user-minimal",
+    role: "user",
+    content: "Keep this message visually quiet.",
+    createdAt: new Date("2026-07-10T09:59:00.000Z"),
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+  const bubbleTag = html.match(/<div data-slot="user-message-bubble"[^>]*>/)?.[0]
+
+  assert.ok(bubbleTag, "expected the user message bubble")
+  assert.match(bubbleTag, /bg-\[#f5f5f5\]/)
+  assert.doesNotMatch(bubbleTag, /\bborder(?:-|\b)/)
+  assert.doesNotMatch(bubbleTag, /\bring(?:-|\b)/)
+  assert.doesNotMatch(html, /lucide-user/)
+  assert.doesNotMatch(html, />You<\/span>/)
 })
 
 test("user and assistant action controls reveal on hover or keyboard focus", () => {
@@ -88,6 +124,9 @@ test("streaming assistant replies announce live output without feedback controls
   )
 
   assert.match(html, /Generating response/)
+  assert.match(html, /data-slot="agent-trace"/)
+  assert.match(html, /data-slot="agent-trace-trigger"/)
+  assert.match(html, /data-state="open"/)
   assert.match(html, /data-slot="streaming-message-trace"/)
   assert.doesNotMatch(html, /data-slot="assistant-response"/)
   assert.doesNotMatch(html, /aria-label="Copy response"/)
@@ -110,6 +149,8 @@ test("streaming agent messages render as separate subdued trace steps in event o
         status: "completed",
         title: "Command",
         description: "Fetch records",
+        input: "fetch --all",
+        output: "Records fetched",
       },
     ],
     traceMessages: [
@@ -139,10 +180,60 @@ test("streaming agent messages render as separate subdued trace steps in event o
   assert.match(html, /data-trace-message-id="message-1"/)
   assert.match(html, /text-stone-400/)
   assert.match(html, /font-light/)
+  assert.match(html, /fetch --all/)
+  assert.match(html, /Records fetched/)
   assert.doesNotMatch(html, /data-slot="assistant-response"/)
+  assert.match(html, /lucide-git-compare-arrows/)
+  assert.doesNotMatch(html, /left-\[13px\] top-7 h-\[calc\(100%\+0\.25rem\)\] w-px bg-stone-200/)
+
+  const traceItem = html.match(/<div[^>]*data-slot="agent-trace-item"[^>]*>/)?.[0]
+  const summaryIcon = html.match(/<div data-slot="trace-summary-icon"[^>]*>/)?.[0]
+  const messageIcon = html.match(/<span data-slot="trace-message-icon"[^>]*>/)?.[0]
+  const toolIcon = html.match(/<span data-slot="trace-tool-icon"[^>]*>/)?.[0]
+  const toolStatus = html.match(/<span data-slot="trace-tool-status"[^>]*>/)?.[0]
+  assert.ok(traceItem, "expected a trace accordion item")
+  assert.ok(summaryIcon, "expected a trace summary icon")
+  assert.ok(messageIcon, "expected a trace message icon")
+  assert.ok(toolIcon, "expected a trace tool icon")
+  assert.ok(toolStatus, "expected a trace tool status")
+  assert.match(traceItem, /\bborder-0\b/)
+  assert.doesNotMatch(traceItem, /border-stone/)
+  assert.match(summaryIcon, /data-trace-state="active"/)
+  assert.match(summaryIcon, /\btext-white\b/)
+  assert.doesNotMatch(summaryIcon, /bg-emerald-50/)
+  assert.doesNotMatch(summaryIcon, /\bborder(?:-|\b)/)
+  assert.match(html, /data-slot="trace-summary-orb"/)
+  assert.doesNotMatch(messageIcon, /\bborder(?:-|\b)/)
+  assert.doesNotMatch(toolIcon, /\bborder(?:-|\b)/)
+  assert.match(toolStatus, /text-\[#c6e5ec\]/)
+  assert.match(html, /lucide-circle-check[^>]*text-\[#b4fbde\]/)
 })
 
-test("assistant replies expose completed tool activity and details", () => {
+test("running trace nodes use the mint icon color", () => {
+  const message = {
+    id: "assistant-running-trace",
+    role: "assistant",
+    content: "",
+    createdAt: new Date("2026-07-10T10:02:00.000Z"),
+    toolSteps: [
+      {
+        id: "tool-running",
+        type: "command_execution",
+        status: "running",
+        title: "Command",
+        description: "Running command",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(
+    <MessageBubble message={message} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
+
+  assert.match(html, /lucide-loader-circle[^>]*text-\[#b4fbde\]/)
+})
+
+test("completed assistant traces keep collapsed details out of the rendered page", () => {
   const message = {
     id: "assistant-3",
     role: "assistant",
@@ -165,6 +256,10 @@ test("assistant replies expose completed tool activity and details", () => {
   const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
   assert.match(html, /Trace/)
-  assert.match(html, /npm run build/)
-  assert.match(html, /Build complete/)
+  assert.match(html, /1 item completed/)
+  assert.match(html, /data-slot="agent-trace-trigger"/)
+  assert.match(html, /data-state="closed"/)
+  assert.doesNotMatch(html, /data-slot="trace-summary-orb"/)
+  assert.doesNotMatch(html, /npm run build/)
+  assert.doesNotMatch(html, /Build complete/)
 })

@@ -1,29 +1,30 @@
 "use client"
 
+import * as AccordionPrimitive from "@radix-ui/react-accordion"
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import {
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   CircleStop,
   Copy,
   ExternalLink,
+  GitCompareArrows,
   Globe2,
   LoaderCircle,
   MessageSquareText,
+  Plus,
   SearchCode,
   Terminal,
   ThumbsDown,
   ThumbsUp,
-  User,
   Wrench,
 } from "lucide-react"
 
+import { Accordion, AccordionContent, AccordionItem } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { Message } from "./chat-shell"
@@ -78,30 +79,36 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
       )}
       aria-label={isUser ? "Your message" : "OA Agent response"}
     >
-      <div
-        className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          isUser && "mt-1 border border-stone-200 bg-white shadow-sm",
-          !isUser && assistantIsStreaming && "sticky bottom-4",
-        )}
-        aria-hidden="true"
-      >
-        {isUser ? <User className="h-4 w-4 text-stone-700" /> : <AnimatedOrb className="h-8 w-8 shrink-0" />}
-      </div>
+      {!isUser && (
+        <div
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+            assistantIsStreaming && "sticky bottom-4",
+          )}
+          aria-hidden="true"
+        >
+          <AnimatedOrb className="h-8 w-8 shrink-0" />
+        </div>
+      )}
 
       <div className={cn("min-w-0", isUser ? "flex flex-col items-end" : "flex-1")}>
-        <div className={cn("mb-1.5 flex items-center gap-2 text-xs", isUser ? "text-stone-400" : "text-stone-500")}>
-          <span className="font-medium">{isUser ? "You" : "OA Agent"}</span>
-          {assistantIsStreaming && (
-            <span role="status" aria-label="Generating response" className="flex items-center gap-1.5 text-emerald-700">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
-              Working
-            </span>
-          )}
-        </div>
+        {!isUser && (
+          <div className="mb-1.5 flex items-center gap-2 text-xs text-stone-500">
+            <span className="font-medium">OA Agent</span>
+            {assistantIsStreaming && (
+              <span role="status" aria-label="Generating response" className="flex items-center gap-1.5 text-emerald-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
+                Working
+              </span>
+            )}
+          </div>
+        )}
 
         {isUser ? (
-          <div className="max-w-full rounded-2xl rounded-tr-md bg-stone-100 px-4 py-3 text-stone-800 ring-1 ring-inset ring-stone-200/70">
+          <div
+            data-slot="user-message-bubble"
+            className="max-w-full rounded-2xl rounded-tr-md bg-[#f5f5f5] px-4 py-3 text-stone-800"
+          >
             <div className="flex flex-col gap-2">
               {message.imageData && (
                 <div className="h-24 w-24 overflow-hidden rounded-lg border border-stone-200 bg-white">
@@ -324,6 +331,13 @@ function MessageCopyButton({ content, subject }: { content: string; subject: "me
   )
 }
 
+export function resolveTraceOpenState(
+  currentOpen: boolean,
+  activity: { wasActive: boolean; isActive: boolean },
+): boolean {
+  return activity.isActive && !activity.wasActive ? true : currentOpen
+}
+
 function ToolTimeline({
   steps,
   isStreaming,
@@ -338,13 +352,15 @@ function ToolTimeline({
   const timelineItems = buildTraceTimelineItems(steps, streamingMessages)
   const traceItemCount = timelineItems.length
   const activeMessageId = streamingMessages[streamingMessages.length - 1]?.id
-  const [isOpen, setIsOpen] = useState(isStreaming || hasRunningStep)
+  const isTraceActive = isStreaming || hasRunningStep
+  const wasTraceActiveRef = useRef(isTraceActive)
+  const [isOpen, setIsOpen] = useState(isTraceActive)
 
   useEffect(() => {
-    if (isStreaming || hasRunningStep) {
-      setIsOpen(true)
-    }
-  }, [hasRunningStep, isStreaming])
+    const wasActive = wasTraceActiveRef.current
+    wasTraceActiveRef.current = isTraceActive
+    setIsOpen((currentOpen) => resolveTraceOpenState(currentOpen, { wasActive, isActive: isTraceActive }))
+  }, [isTraceActive])
 
   const summary = isStreaming || hasRunningStep
     ? `${traceItemCount} ${traceItemCount === 1 ? "item" : "items"} active`
@@ -353,61 +369,77 @@ function ToolTimeline({
       : `${traceItemCount} ${traceItemCount === 1 ? "item" : "items"} completed`
 
   return (
-    <Collapsible
-      open={isOpen}
-      onOpenChange={setIsOpen}
-      className="w-full max-w-2xl overflow-hidden rounded-lg border border-stone-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]"
+    <Accordion
+      type="single"
+      collapsible
+      value={isOpen ? "agent-trace" : ""}
+      onValueChange={(value) => setIsOpen(value === "agent-trace")}
+      data-slot="agent-trace"
+      className="w-full max-w-2xl"
     >
-      <CollapsibleTrigger asChild>
-        <button
-          type="button"
-          className="flex min-h-11 w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40"
-          aria-label="Toggle agent trace"
-        >
-          <span
-            className={cn(
-              "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
-              isStreaming || hasRunningStep
-                ? "bg-emerald-50 text-emerald-700"
-                : failedCount
-                  ? "bg-rose-50 text-rose-700"
-                  : "bg-stone-100 text-stone-600",
-            )}
+      <AccordionItem value="agent-trace" data-slot="agent-trace-item" className="border-0 py-2">
+        <AccordionPrimitive.Header className="flex">
+          <AccordionPrimitive.Trigger
+            data-slot="agent-trace-trigger"
+            className="flex min-h-14 flex-1 items-center justify-between gap-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 [&>svg>path:last-child]:origin-center [&>svg>path:last-child]:transition-all [&>svg>path:last-child]:duration-200 [&[data-state=open]>svg>path:last-child]:rotate-90 [&[data-state=open]>svg>path:last-child]:opacity-0 [&[data-state=open]>svg]:rotate-180"
+            aria-label="Toggle agent trace"
           >
-            {isStreaming || hasRunningStep ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold text-stone-800">Trace</span>
-            <span className="block truncate text-[11px] text-stone-500">{summary}</span>
-          </span>
-          <ChevronDown className={cn("h-4 w-4 shrink-0 text-stone-400 transition-transform duration-200", isOpen && "rotate-180")} />
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent
-        forceMount
-        className="border-t border-stone-100 px-3.5 py-3 data-[state=closed]:hidden"
-        aria-label="Agent trace"
-      >
-        <div className="space-y-3">
-          {timelineItems.map((item, index) =>
-            item.kind === "tool" ? (
-              <ToolTimelineItem
-                key={`tool-${item.step.id}`}
-                step={item.step}
-                isLast={index === timelineItems.length - 1}
-              />
-            ) : (
-              <StreamingMessageTrace
-                key={`message-${item.message.id}`}
-                message={item.message}
-                isActive={isStreaming && item.message.id === activeMessageId}
-                isLast={index === timelineItems.length - 1}
-              />
-            ),
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+            <div className="flex min-w-0 items-center gap-3">
+              <div
+                data-slot="trace-summary-icon"
+                data-trace-state={isTraceActive ? "active" : failedCount ? "failed" : "idle"}
+                className={cn(
+                  "relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full",
+                  isTraceActive
+                    ? "text-white"
+                    : failedCount
+                      ? "bg-rose-50 text-rose-700"
+                      : "bg-stone-100 text-stone-600",
+                )}
+                aria-hidden="true"
+              >
+                {isTraceActive && (
+                  <div data-slot="trace-summary-orb" className="absolute inset-0">
+                    <AnimatedOrb size={40} />
+                  </div>
+                )}
+                <GitCompareArrows className="relative z-10 h-4 w-4 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)]" />
+              </div>
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-[15px] font-semibold leading-5 text-stone-800">Trace</span>
+                <span className="truncate text-[13px] font-normal leading-5 text-stone-500">{summary}</span>
+              </span>
+            </div>
+            <Plus
+              className="h-4 w-4 shrink-0 text-stone-400 transition-transform duration-200"
+              strokeWidth={2}
+              aria-hidden="true"
+            />
+          </AccordionPrimitive.Trigger>
+        </AccordionPrimitive.Header>
+        <AccordionContent
+          className="ml-3 pb-2 pl-10 pt-1"
+          aria-label="Agent trace"
+        >
+          <div className="space-y-3">
+            {timelineItems.map((item) =>
+              item.kind === "tool" ? (
+                <ToolTimelineItem
+                  key={`tool-${item.step.id}`}
+                  step={item.step}
+                />
+              ) : (
+                <StreamingMessageTrace
+                  key={`message-${item.message.id}`}
+                  message={item.message}
+                  isActive={isStreaming && item.message.id === activeMessageId}
+                />
+              ),
+            )}
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   )
 }
 
@@ -445,11 +477,9 @@ function buildTraceTimelineItems(steps: ToolStep[], messages: TraceMessage[]): T
 function StreamingMessageTrace({
   message,
   isActive,
-  isLast,
 }: {
   message: TraceMessage
   isActive: boolean
-  isLast: boolean
 }) {
   return (
     <div
@@ -457,8 +487,10 @@ function StreamingMessageTrace({
       data-trace-message-id={message.id}
       className="relative grid grid-cols-[1.75rem_minmax(0,1fr)] gap-2.5"
     >
-      {!isLast && <span className="absolute left-[13px] top-7 h-[calc(100%+0.25rem)] w-px bg-stone-200" aria-hidden="true" />}
-      <span className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md border border-stone-200 bg-stone-50">
+      <span
+        data-slot="trace-message-icon"
+        className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md bg-stone-50"
+      >
         <MessageSquareText className="h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
       </span>
       <div className="min-w-0 pt-0.5 opacity-80" aria-label="Agent thinking">
@@ -472,19 +504,26 @@ function StreamingMessageTrace({
   )
 }
 
-function ToolTimelineItem({ step, isLast }: { step: ToolStep; isLast: boolean }) {
+function ToolTimelineItem({ step }: { step: ToolStep }) {
   const hasDetails = Boolean(step.input || step.output)
 
   return (
     <div className="relative grid grid-cols-[1.75rem_minmax(0,1fr)] gap-2.5">
-      {!isLast && <span className="absolute left-[13px] top-7 h-[calc(100%+0.25rem)] w-px bg-stone-200" aria-hidden="true" />}
-      <span className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md border border-stone-200 bg-white">
+      <span
+        data-slot="trace-tool-icon"
+        className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white"
+      >
         <ToolIcon step={step} />
       </span>
       <div className="min-w-0 pt-0.5">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-xs font-semibold text-stone-800">{step.title}</span>
-          <span className={cn("text-[10px] font-medium uppercase", statusClass(step.status))}>{statusLabel(step.status)}</span>
+          <span
+            data-slot="trace-tool-status"
+            className={cn("text-[10px] font-medium uppercase", statusClass(step.status))}
+          >
+            {statusLabel(step.status)}
+          </span>
         </div>
         <p className="mt-0.5 break-words text-xs leading-5 text-stone-500">{step.description}</p>
         {hasDetails && (
@@ -517,10 +556,10 @@ function ToolDetail({ label, value }: { label: string; value: string }) {
 
 function ToolIcon({ step }: { step: ToolStep }) {
   if (step.status === "running") {
-    return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-emerald-600" aria-hidden="true" />
+    return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[#b4fbde]" aria-hidden="true" />
   }
   if (step.status === "completed") {
-    return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+    return <CheckCircle2 className="h-3.5 w-3.5 text-[#b4fbde]" aria-hidden="true" />
   }
   if (step.status === "failed") {
     return <CircleAlert className="h-3.5 w-3.5 text-rose-600" aria-hidden="true" />
@@ -545,8 +584,8 @@ function statusLabel(status: ToolStepStatus): string {
 }
 
 function statusClass(status: ToolStepStatus): string {
-  if (status === "running") return "text-emerald-700"
-  if (status === "completed") return "text-emerald-700"
+  if (status === "running") return "text-[#c6e5ec]"
+  if (status === "completed") return "text-[#c6e5ec]"
   if (status === "failed") return "text-rose-700"
   return "text-stone-400"
 }
