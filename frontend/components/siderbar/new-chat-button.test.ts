@@ -34,6 +34,23 @@ test("styles the new chat button as a borderless rounded zinc surface", () => {
   assert.match(newChatButton, /bg-\[#f4f4f5\]/)
 })
 
+test("keeps the session list close to the new chat button", () => {
+  const sessionList = siderSource.match(
+    /<div\s+ref=\{sessionListRef\}[\s\S]*?>/,
+  )?.[0]
+  const topFade = siderSource.match(
+    /<div\s+className="pointer-events-none absolute inset-x-0 top-0[^\"]*"/,
+  )?.[0]
+
+  assert.ok(sessionList, "expected the sider session list")
+  assert.match(sessionList, /pt-4/)
+  assert.match(sessionList, /pb-20/)
+  assert.doesNotMatch(sessionList, /py-20/)
+  assert.ok(topFade, "expected the session list top fade")
+  assert.match(topFade, /h-4/)
+  assert.doesNotMatch(topFade, /h-24/)
+})
+
 test("moves the desktop new chat action from floating controls into the sider", () => {
   const desktopControls = chatShellSource.match(
     /<div ref=\{sidebarControlsRef\}[\s\S]*?<\/div>/,
