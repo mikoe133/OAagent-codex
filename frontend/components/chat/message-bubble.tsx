@@ -79,18 +79,6 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
       )}
       aria-label={isUser ? "Your message" : "OA Agent response"}
     >
-      {!isUser && (
-        <div
-          className={cn(
-            "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-            assistantIsStreaming && "sticky bottom-4",
-          )}
-          aria-hidden="true"
-        >
-          <AnimatedOrb className="h-8 w-8 shrink-0" />
-        </div>
-      )}
-
       <div className={cn("min-w-0", isUser ? "flex flex-col items-end" : "flex-1")}>
         {!isUser && (
           <div className="mb-1.5 flex items-center gap-2 text-xs text-stone-500">
