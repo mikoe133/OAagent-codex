@@ -5,20 +5,19 @@ import test from "node:test"
 const siderSource = readFileSync(new URL("./Sider.tsx", import.meta.url), "utf8")
 const chatShellSource = readFileSync(new URL("../chat/chat-shell.tsx", import.meta.url), "utf8")
 
-test("places the new chat button below the divider and above the session messages", () => {
-  const searchPanelIndex = siderSource.indexOf('data-slot="sider-search-panel"')
+test("places search and new chat in one borderless 3:2 row above the session messages", () => {
+  const actionRowIndex = siderSource.indexOf('data-slot="sider-actions"')
   const buttonIndex = siderSource.indexOf('data-slot="new-chat-button"')
   const sessionListIndex = siderSource.indexOf("ref={sessionListRef}")
-  const searchPanel = siderSource.match(
-    /<div[\s\S]*?data-slot="sider-search-panel"[\s\S]*?<\/div>/,
+  const actionRow = siderSource.match(
+    /<div\s+data-slot="sider-actions"[\s\S]*?<SearchBox[\s\S]*?<button[\s\S]*?data-slot="new-chat-button"[\s\S]*?<\/button>\s*<\/div>/,
   )?.[0]
 
-  assert.notEqual(searchPanelIndex, -1, "expected a divided search panel")
-  assert.ok(searchPanel, "expected the sider search panel")
-  assert.match(searchPanel, /border-b/)
-  assert.doesNotMatch(searchPanel, /data-slot="new-chat-button"/)
-  assert.notEqual(buttonIndex, -1, "expected a new chat button in the sider")
-  assert.ok(searchPanelIndex < buttonIndex, "expected the new chat button below the divider")
+  assert.notEqual(actionRowIndex, -1, "expected a shared sider action row")
+  assert.ok(actionRow, "expected search and new chat in the same row")
+  assert.match(actionRow, /grid-cols-\[minmax\(0,3fr\)_minmax\(0,2fr\)\]/)
+  assert.doesNotMatch(actionRow, /border(?:-b)?/)
+  assert.ok(actionRowIndex < buttonIndex, "expected search before the new chat button")
   assert.ok(buttonIndex < sessionListIndex, "expected the new chat button above the session list")
 })
 
