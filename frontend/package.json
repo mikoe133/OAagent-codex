@@ -7,7 +7,7 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
-    "test:chat": "tsx --test proxy.test.ts app/api/chat/route.test.ts app/api/chat/sessions/route.test.ts components/chat/chat-stream.test.ts components/chat/composer.test.tsx components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts components/chat/session-background.test.ts components/siderbar/new-chat-button.test.ts components/siderbar/provider-menu.test.ts components/siderbar/session-list-order.test.ts components/siderbar/session-loading-indicator.test.ts components/ui/shining-text.test.ts lib/model-catalog.test.ts lib/oa-navigation.test.ts",
+    "test:chat": "tsx --test proxy.test.ts app/api/chat/route.test.ts app/api/chat/sessions/route.test.ts components/chat/chat-stream.test.ts components/chat/composer.test.tsx components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts components/chat/session-background.test.ts components/siderbar/new-chat-button.test.ts components/siderbar/provider-menu.test.ts components/siderbar/session-list-order.test.ts components/siderbar/session-loading-indicator.test.ts components/siderbar/sider-search.test.ts components/ui/shining-text.test.ts lib/model-catalog.test.ts lib/oa-navigation.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

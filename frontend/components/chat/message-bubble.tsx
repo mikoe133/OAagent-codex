@@ -559,7 +559,7 @@ function ToolIcon({ step }: { step: ToolStep }) {
     return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[#b4fbde]" aria-hidden="true" />
   }
   if (step.status === "completed") {
-    return <CheckCircle2 className="h-3.5 w-3.5 text-[#b4fbde]" aria-hidden="true" />
+    return <CheckCircle2 className="h-3.5 w-3.5 text-[#00BFFF]" aria-hidden="true" />
   }
   if (step.status === "failed") {
     return <CircleAlert className="h-3.5 w-3.5 text-rose-600" aria-hidden="true" />
@@ -585,7 +585,7 @@ function statusLabel(status: ToolStepStatus): string {
 
 function statusClass(status: ToolStepStatus): string {
   if (status === "running") return "text-[#c6e5ec]"
-  if (status === "completed") return "text-[#c6e5ec]"
+  if (status === "completed") return "text-[#00619a]"
   if (status === "failed") return "text-rose-700"
   return "text-stone-400"
 }

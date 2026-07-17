@@ -141,18 +141,24 @@ const SearchBox = ({
   hasValue?: boolean
   onClear?: () => void
 }) => (
-  <div className="relative w-full">
-    <Search className="absolute inset-y-0 left-3 my-auto h-5 w-5 text-slate-400" aria-hidden="true" />
+  <div
+    data-slot="sider-search"
+    className="group/search relative flex h-10 w-full items-center rounded-lg bg-[#f4f4f5] transition-[background-color,box-shadow] duration-200 hover:bg-slate-100 focus-within:bg-white focus-within:shadow-[0_6px_20px_rgba(15,23,42,0.08)]"
+  >
+    <Search
+      className="pointer-events-none absolute left-3.5 h-4 w-4 text-slate-400 transition-colors duration-200 group-focus-within/search:text-slate-600"
+      aria-hidden="true"
+    />
     <input
       {...props}
       type="search"
-      className="w-full rounded-lg border border-slate-200 bg-white/80 py-2 pl-12 pr-10 text-sm text-slate-700 shadow-sm outline-none transition duration-200 placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-900/10"
+      className="h-full w-full appearance-none rounded-lg bg-transparent pl-10 pr-10 text-[13px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
     />
     {hasValue ? (
       <button
         type="button"
         aria-label="Clear search"
-        className="absolute inset-y-0 right-2 my-auto flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
+        className="absolute right-2 flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-[background-color,color,box-shadow] duration-150 hover:bg-white hover:text-slate-700 hover:shadow-[0_1px_3px_rgba(15,23,42,0.08)] focus-visible:bg-white focus-visible:text-slate-700 focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(15,23,42,0.08)]"
         onClick={onClear}
       >
         <X className="h-4 w-4" aria-hidden="true" />
@@ -571,7 +577,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             className="flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg border-0 bg-[#f4f4f5] px-2 text-sm font-medium text-slate-700 transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
           >
             <SquarePen className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span className="truncate">New chat</span>
+            <span className="truncate">New</span>
           </button>
         </div>
 

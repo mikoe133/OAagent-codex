@@ -205,8 +205,8 @@ test("streaming agent messages render as separate subdued trace steps in event o
   assert.match(html, /data-slot="trace-summary-orb"/)
   assert.doesNotMatch(messageIcon, /\bborder(?:-|\b)/)
   assert.doesNotMatch(toolIcon, /\bborder(?:-|\b)/)
-  assert.match(toolStatus, /text-\[#c6e5ec\]/)
-  assert.match(html, /lucide-circle-check[^>]*text-\[#b4fbde\]/)
+  assert.match(toolStatus, /text-\[#00619a\]/)
+  assert.match(html, /lucide-circle-check[^>]*text-\[#00BFFF\]/)
 })
 
 test("running trace nodes use the mint icon color", () => {
