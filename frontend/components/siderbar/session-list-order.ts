@@ -5,6 +5,7 @@ export type SessionItemIdentity = {
 
 type SessionCreatedAt = {
   createdAt?: string
+  sessionId?: string
 }
 
 type SessionIdentity = {
@@ -30,7 +31,8 @@ export function sortSessionItemsByCreatedAt<T extends SessionCreatedAt>(items: T
     .map((item, index) => ({ item, index, timestamp: parseCreatedAt(item.createdAt) }))
     .sort((left, right) => {
       if (left.timestamp === right.timestamp) {
-        return left.index - right.index
+        const identityOrder = (left.item.sessionId || "").localeCompare(right.item.sessionId || "")
+        return identityOrder || left.index - right.index
       }
       return right.timestamp - left.timestamp
     })

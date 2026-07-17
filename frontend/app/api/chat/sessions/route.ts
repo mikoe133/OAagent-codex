@@ -125,6 +125,7 @@ export async function PATCH(request: Request) {
   const messages = normalizeMessages(body.messages)
   const summary = stringValue(body.summary) || buildSummary(messages)
   const title = stringValue(body.title) || summary || DEFAULT_TITLE
+  const createdAt = inferCreatedAtFromSessionId(sessionId)
   const recordBody = {
     schema: COPILOT_RECORD_SCHEMA,
     agentSessionId: sessionId,
@@ -132,6 +133,7 @@ export async function PATCH(request: Request) {
     summary,
     title,
     messages,
+    ...(createdAt ? { createdAt } : {}),
   }
 
   try {
@@ -149,7 +151,11 @@ export async function PATCH(request: Request) {
     }
 
     const payload = parseJson<CopilotRecordEnvelope>(text)
-    const session = normalizeCopilotRecord(payload?.data) || buildFallbackSession(sessionId, messages)
+    const savedCreatedAt = normalizeTimestamp(saveResult.recordBody.createdAt)
+    const normalizedSession = normalizeCopilotRecord(payload?.data)
+    const session = normalizedSession
+      ? { ...normalizedSession, createdAt: savedCreatedAt || normalizedSession.createdAt }
+      : buildFallbackSession(sessionId, messages, savedCreatedAt)
     return jsonDataResponse({ session }, upstreamResponse.status)
   } catch (error) {
     return jsonResponse(
@@ -179,6 +185,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    const createdAt = inferCreatedAtFromSessionId(sessionId) || new Date().toISOString()
     const upstreamResponse = await fetch(url, {
       method: "POST",
       headers: buildOaHeaders(sessionToken, "application/json"),
@@ -189,6 +196,7 @@ export async function POST(request: Request) {
         summary: null,
         title: DEFAULT_TITLE,
         messages: [],
+        createdAt,
       }),
       cache: "no-store",
       signal: request.signal,
@@ -200,7 +208,10 @@ export async function POST(request: Request) {
     }
 
     const payload = parseJson<CopilotRecordEnvelope>(text)
-    const session = normalizeCopilotRecord(payload?.data) || buildFallbackSession(sessionId)
+    const normalizedSession = normalizeCopilotRecord(payload?.data)
+    const session = normalizedSession
+      ? { ...normalizedSession, createdAt }
+      : buildFallbackSession(sessionId, [], createdAt)
     return jsonDataResponse({ session, sessions: [session] }, upstreamResponse.status)
   } catch (error) {
     return jsonResponse(
@@ -283,8 +294,13 @@ function normalizeCopilotRecord(value: unknown): NormalizedSession | null {
     return null
   }
 
-  const createdAt = stringField(item, "created_at") || stringField(item, "createdAt") || new Date().toISOString()
-  const updatedAt = stringField(item, "updated_at") || stringField(item, "updatedAt") || createdAt
+  const createdAt =
+    normalizeTimestamp(record.createdAt) ||
+    inferCreatedAtFromSessionId(sessionId) ||
+    normalizeTimestamp(item.created_at) ||
+    normalizeTimestamp(item.createdAt) ||
+    new Date().toISOString()
+  const updatedAt = normalizeTimestamp(item.updated_at) || normalizeTimestamp(item.updatedAt) || createdAt
 
   return {
     sessionId,
@@ -401,7 +417,7 @@ async function fetchSessionList(sessionToken: string, signal: AbortSignal): Prom
     }
   }
 
-  return sessions.sort(compareCreatedAtDescending)
+  return dedupeSessionsBySessionId(sessions).sort(compareCreatedAtDescending)
 }
 
 async function fetchAgentSessionListBestEffort(
@@ -503,7 +519,7 @@ async function saveCopilotRecord(input: {
   signal: AbortSignal
   recordId: string | null
   recordBody: Record<string, unknown>
-}): Promise<{ response: Response; text: string }> {
+}): Promise<{ response: Response; text: string; recordBody: Record<string, unknown> }> {
   const url = buildOaApiUrl("/copilot/record")
   if (!url) {
     throw new Error("OA API service is not configured")
@@ -524,7 +540,7 @@ async function saveCopilotRecord(input: {
 
   const recordId = input.recordId
   if (!recordId || response.status !== 405) {
-    return { response, text }
+    return { response, text, recordBody: input.recordBody }
   }
 
   return replaceCopilotRecord({
@@ -538,27 +554,53 @@ async function replaceCopilotRecord(input: {
   signal: AbortSignal
   recordId: string
   recordBody: Record<string, unknown>
-}): Promise<{ response: Response; text: string }> {
+}): Promise<{ response: Response; text: string; recordBody: Record<string, unknown> }> {
   const createUrl = buildOaApiUrl("/copilot/record")
   if (!createUrl) {
     throw new Error("OA API service is not configured")
   }
 
+  const recordBody = await preserveReplacementCreatedAt(input)
   const createResponse = await fetch(createUrl, {
     method: "POST",
     headers: buildOaHeaders(input.sessionToken, "application/json"),
-    body: JSON.stringify(input.recordBody),
+    body: JSON.stringify(recordBody),
     cache: "no-store",
     signal: input.signal,
   })
   const createText = await createResponse.text()
 
   if (!createResponse.ok) {
-    return { response: createResponse, text: createText }
+    return { response: createResponse, text: createText, recordBody }
   }
 
   await deleteCopilotRecordBestEffort(input.sessionToken, input.signal, input.recordId)
-  return { response: createResponse, text: createText }
+  return { response: createResponse, text: createText, recordBody }
+}
+
+async function preserveReplacementCreatedAt(input: {
+  sessionToken: string
+  signal: AbortSignal
+  recordId: string
+  recordBody: Record<string, unknown>
+}): Promise<Record<string, unknown>> {
+  if (normalizeTimestamp(input.recordBody.createdAt)) {
+    return input.recordBody
+  }
+
+  try {
+    const existingSession = await fetchRecordById(input.sessionToken, input.signal, input.recordId)
+    if (existingSession) {
+      return { ...input.recordBody, createdAt: existingSession.createdAt }
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error
+    }
+    console.error("Failed to preserve replaced copilot record creation time:", error)
+  }
+
+  return { ...input.recordBody, createdAt: new Date().toISOString() }
 }
 
 async function deleteCopilotRecordBestEffort(sessionToken: string, signal: AbortSignal, recordId: string): Promise<void> {
@@ -605,16 +647,33 @@ async function deleteCopilotRecord(sessionToken: string, signal: AbortSignal, re
   }
 }
 
-function buildFallbackSession(sessionId: string, messages: NormalizedMessage[] = []): NormalizedSession {
+function buildFallbackSession(
+  sessionId: string,
+  messages: NormalizedMessage[] = [],
+  originalCreatedAt?: string | null,
+): NormalizedSession {
   const now = new Date().toISOString()
   return {
     sessionId,
     threadId: null,
     summary: buildSummary(messages),
-    createdAt: now,
+    createdAt: originalCreatedAt || inferCreatedAtFromSessionId(sessionId) || now,
     updatedAt: now,
     messages,
   }
+}
+
+function dedupeSessionsBySessionId(sessions: NormalizedSession[]): NormalizedSession[] {
+  const bySessionId = new Map<string, NormalizedSession>()
+
+  for (const session of sessions) {
+    const existing = bySessionId.get(session.sessionId)
+    if (!existing || compareSessionFreshness(session, existing) > 0) {
+      bySessionId.set(session.sessionId, session)
+    }
+  }
+
+  return [...bySessionId.values()]
 }
 
 function mergeSessionSources(copilotSessions: NormalizedSession[], agentSessions: NormalizedSession[]): NormalizedSession[] {
@@ -626,7 +685,36 @@ function mergeSessionSources(copilotSessions: NormalizedSession[], agentSessions
 }
 
 function compareCreatedAtDescending(left: NormalizedSession, right: NormalizedSession): number {
-  return Date.parse(right.createdAt) - Date.parse(left.createdAt)
+  const timestampOrder = compareTimestamps(left.createdAt, right.createdAt)
+  return timestampOrder === 0 ? left.sessionId.localeCompare(right.sessionId) : -timestampOrder
+}
+
+function compareSessionFreshness(left: NormalizedSession, right: NormalizedSession): number {
+  const timestampOrder = compareTimestamps(left.updatedAt, right.updatedAt)
+  if (timestampOrder !== 0) {
+    return timestampOrder
+  }
+
+  return compareRecordIds(left.recordId, right.recordId)
+}
+
+function compareTimestamps(left: string, right: string): number {
+  const leftTimestamp = parseTimestamp(left)
+  const rightTimestamp = parseTimestamp(right)
+  if (leftTimestamp === rightTimestamp) {
+    return 0
+  }
+  return leftTimestamp < rightTimestamp ? -1 : 1
+}
+
+function compareRecordIds(left: string | number | undefined, right: string | number | undefined): number {
+  const leftNumber = Number(left)
+  const rightNumber = Number(right)
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
+    return leftNumber < rightNumber ? -1 : 1
+  }
+
+  return String(left ?? "").localeCompare(String(right ?? ""))
 }
 
 function normalizeAgentSessions(payload: AgentListEnvelope | null): NormalizedSession[] {
@@ -652,8 +740,9 @@ function normalizeAgentSession(value: unknown): NormalizedSession | null {
     return null
   }
 
-  const createdAt = stringField(item, "createdAt") || new Date().toISOString()
-  const updatedAt = stringField(item, "updatedAt") || createdAt
+  const createdAt =
+    normalizeTimestamp(item.createdAt) || inferCreatedAtFromSessionId(sessionId) || new Date().toISOString()
+  const updatedAt = normalizeTimestamp(item.updatedAt) || createdAt
 
   return {
     sessionId,
@@ -857,6 +946,27 @@ function stringField(record: Record<string, unknown>, key: string): string | nul
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function normalizeTimestamp(value: unknown): string | null {
+  const timestamp = stringValue(value)
+  return timestamp && Number.isFinite(Date.parse(timestamp)) ? timestamp : null
+}
+
+function inferCreatedAtFromSessionId(sessionId: string): string | null {
+  const match = /^web-(\d{12,14})-/.exec(sessionId)
+  if (!match) {
+    return null
+  }
+
+  const timestamp = Number(match[1])
+  const date = new Date(timestamp)
+  return Number.isFinite(timestamp) && !Number.isNaN(date.getTime()) ? date.toISOString() : null
+}
+
+function parseTimestamp(value: string): number {
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY
 }
 
 function normalizeSessionId(value: unknown): string | null {

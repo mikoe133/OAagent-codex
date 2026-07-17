@@ -149,10 +149,11 @@ test("PATCH persists the immutable creation time from generated session ids", as
 
   const createdAt = "2026-07-10T08:00:00.000Z"
   const sessionId = `web-${Date.parse(createdAt)}-abcdefg`
-  let savedRecord: Record<string, unknown> | null = null
+  const savedRecords: Array<Record<string, unknown>> = []
 
   globalThis.fetch = async (_input, init) => {
-    savedRecord = JSON.parse(String(init?.body)) as Record<string, unknown>
+    const savedRecord = JSON.parse(String(init?.body)) as Record<string, unknown>
+    savedRecords.push(savedRecord)
     return Response.json({
       data: {
         id: 9,
@@ -177,8 +178,74 @@ test("PATCH persists the immutable creation time from generated session ids", as
     const payload = (await response.json()) as { session: { createdAt: string } }
 
     assert.equal(response.status, 200)
-    assert.equal(savedRecord?.createdAt, createdAt)
+    assert.equal(savedRecords[0]?.createdAt, createdAt)
     assert.equal(payload.session.createdAt, createdAt)
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreEnv("OA_API_BASE_URL", originalOaApiBaseUrl)
+  }
+})
+
+test("PATCH fallback preserves creation time when replacing a legacy OA record", async () => {
+  const originalFetch = globalThis.fetch
+  const originalOaApiBaseUrl = process.env.OA_API_BASE_URL
+  process.env.OA_API_BASE_URL = "https://oa.example.test"
+
+  const createdAt = "2026-07-10T08:00:00.000Z"
+  const methods: string[] = []
+  const replacementRecords: Array<Record<string, unknown>> = []
+
+  globalThis.fetch = async (_input, init) => {
+    const method = init?.method || "GET"
+    methods.push(method)
+
+    if (method === "PATCH") {
+      return new Response("Method Not Allowed", { status: 405 })
+    }
+    if (method === "GET") {
+      return Response.json({
+        data: {
+          id: 9,
+          record: { agentSessionId: "legacy-session", title: "Legacy" },
+          created_at: createdAt,
+          updated_at: "2026-07-12T08:00:00.000Z",
+        },
+      })
+    }
+    if (method === "POST") {
+      const replacementRecord = JSON.parse(String(init?.body)) as Record<string, unknown>
+      replacementRecords.push(replacementRecord)
+      return Response.json({
+        data: {
+          id: 10,
+          record: replacementRecord,
+          created_at: "2026-07-17T08:00:00.000Z",
+          updated_at: "2026-07-17T08:00:00.000Z",
+        },
+      })
+    }
+
+    return Response.json({ data: { record_id: 9 } })
+  }
+
+  try {
+    const response = await sessionsRoute.PATCH(
+      new Request("http://localhost/api/chat/sessions", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          cookie: "sessionid=test-session-token",
+        },
+        body: JSON.stringify({ sessionId: "legacy-session", recordId: 9, messages: [] }),
+      }),
+    )
+    const payload = (await response.json()) as { session: { createdAt: string; recordId: number } }
+
+    assert.equal(response.status, 200)
+    assert.deepEqual(methods, ["PATCH", "GET", "POST", "DELETE"])
+    assert.equal(replacementRecords[0]?.createdAt, createdAt)
+    assert.equal(payload.session.createdAt, createdAt)
+    assert.equal(payload.session.recordId, 10)
   } finally {
     globalThis.fetch = originalFetch
     restoreEnv("OA_API_BASE_URL", originalOaApiBaseUrl)
