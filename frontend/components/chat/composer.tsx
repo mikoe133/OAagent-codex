@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import Image from "next/image"
 import { AudioWaveform } from "./audio-waveform"
+import { shouldSubmitComposerOnKeyDown } from "./composer-keyboard"
 import TextType from "@/components/text/TextType"
 import { getModelsForProvider, type AIModel, type ModelProvider } from "@/lib/model-catalog"
 
@@ -308,7 +309,14 @@ export function Composer({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (
+        shouldSubmitComposerOnKeyDown({
+          key: e.key,
+          shiftKey: e.shiftKey,
+          isComposing: e.nativeEvent.isComposing,
+          keyCode: e.keyCode,
+        })
+      ) {
         e.preventDefault()
         handleSend()
       }
