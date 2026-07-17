@@ -1,6 +1,11 @@
 import type { ThreadEvent, ThreadItem, Usage } from "@openai/codex-sdk";
 import type { AppConfig } from "../config/config.js";
-import { resolveRequestedModel } from "../config/modelCatalog.js";
+import {
+  getDefaultModel,
+  resolveRequestedModel,
+  resolveRequestedProvider,
+  type ModelProviderId,
+} from "../config/modelCatalog.js";
 import {
   createCodexClient,
   startOrResumeThread,
@@ -21,6 +26,7 @@ import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js"
 export type SendMessageInput = {
   sessionId: string;
   message: string;
+  provider?: string | null;
   model?: string | null;
   oaApiToken?: string | null;
 };
@@ -28,6 +34,7 @@ export type SendMessageInput = {
 export type SendMessageResult = {
   sessionId: string;
   threadId: string;
+  provider: ModelProviderId;
   model: string;
   finalResponse: string;
   executedCommands: string[];
@@ -142,7 +149,7 @@ export class AgentService {
   }
 
   private async runMessage(input: SendMessageInput): Promise<SendMessageResult> {
-    const runConfig = await resolveRunConfig(this.config, input.model);
+    const runConfig = await resolveRunConfig(this.config, input.provider, input.model);
     const session = await this.prepareSession(input);
     const runtimeContext = this.getRuntimeContext(input.sessionId);
     const codex = createCodexClient(runConfig, input.sessionId);
@@ -174,6 +181,7 @@ export class AgentService {
     return {
       sessionId: input.sessionId,
       threadId: thread.id,
+      provider: runConfig.modelProvider,
       model: runConfig.model,
       finalResponse: redactSecrets(turn.finalResponse, secrets),
       executedCommands: collectExecutedCommands(turn.items).map((command) =>
@@ -191,7 +199,7 @@ export class AgentService {
     throwIfAborted(signal);
     await emit({ type: "run.started", sessionId: input.sessionId });
 
-    const runConfig = await resolveRunConfig(this.config, input.model);
+    const runConfig = await resolveRunConfig(this.config, input.provider, input.model);
     const session = await this.prepareSession(input);
     const runtimeContext = this.getRuntimeContext(input.sessionId);
     const codex = createCodexClient(runConfig, input.sessionId);
@@ -269,6 +277,7 @@ export class AgentService {
     const result: SendMessageResult = {
       sessionId: input.sessionId,
       threadId: thread.id,
+      provider: runConfig.modelProvider,
       model: runConfig.model,
       finalResponse: state.finalResponse,
       executedCommands: collectExecutedCommands(state.items).map((command) =>
@@ -533,7 +542,7 @@ export class AgentService {
 
   private getSecrets(sessionOaApiToken: string | null = null): string[] {
     return [
-      this.config.modelApiKey,
+      ...Object.values(this.config.modelProviders).map((provider) => provider.apiKey),
       sessionOaApiToken ?? "",
       this.config.oaApiToolToken,
     ];
@@ -587,11 +596,15 @@ function buildPromptForSession(
 
 async function resolveRunConfig(
   config: AppConfig,
+  requestedProvider: string | null | undefined,
   requestedModel: string | null | undefined,
 ): Promise<AppConfig> {
-  const model = resolveRequestedModel(requestedModel, config.model);
+  const modelProvider = resolveRequestedProvider(requestedProvider, config.modelProvider);
+  const fallbackModel =
+    modelProvider === config.modelProvider ? config.model : getDefaultModel(modelProvider);
+  const model = resolveRequestedModel(modelProvider, requestedModel, fallbackModel);
   const openapi = await resolveOpenApiContract(config);
-  return { ...config, model, openapiPath: openapi.path };
+  return { ...config, modelProvider, model, openapiPath: openapi.path };
 }
 
 function buildNextSummary(

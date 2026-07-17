@@ -18,11 +18,20 @@ interface MessageListProps {
   onRetry: () => void
   onFeedback: (messageId: string, feedback: Message["feedback"]) => void
   isLoaded: boolean // Added isLoaded prop to know when localStorage is loaded
+  oaNavigationUrl: string
 }
 
 const LAUNCH_SOUND_URL = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/launch-SUi0itAGHr1wtvdDYYG5bzFLsIYHtP.mp3"
 
-export function MessageList({ messages, isStreaming, error, onRetry, onFeedback, isLoaded }: MessageListProps) {
+export function MessageList({
+  messages,
+  isStreaming,
+  error,
+  onRetry,
+  onFeedback,
+  isLoaded,
+  oaNavigationUrl,
+}: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -194,6 +203,7 @@ export function MessageList({ messages, isStreaming, error, onRetry, onFeedback,
               message={message}
               isStreaming={isStreaming && message.role === "assistant" && message === lastMessage}
               onFeedback={onFeedback}
+              oaNavigationUrl={oaNavigationUrl}
             />
           ))}
 

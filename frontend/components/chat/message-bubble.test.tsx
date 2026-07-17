@@ -6,6 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { MessageBubble } from "./message-bubble"
 import type { Message } from "./chat-shell"
 
+const OA_NAVIGATION_URL = "https://rwkv-oa.vercel.app/"
+
 test("user messages expose a copy action beneath the bubble", () => {
   const message = {
     id: "user-1",
@@ -14,7 +16,7 @@ test("user messages expose a copy action beneath the bubble", () => {
     createdAt: new Date("2026-07-10T09:59:00.000Z"),
   } satisfies Message
 
-  const html = renderToStaticMarkup(<MessageBubble message={message} />)
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
   assert.match(html, /aria-label="Copy message"/)
 })
@@ -35,8 +37,8 @@ test("user and assistant action controls reveal on hover or keyboard focus", () 
   } satisfies Message
 
   const renderedMessages = [
-    renderToStaticMarkup(<MessageBubble message={userMessage} />),
-    renderToStaticMarkup(<MessageBubble message={assistantMessage} />),
+    renderToStaticMarkup(<MessageBubble message={userMessage} oaNavigationUrl={OA_NAVIGATION_URL} />),
+    renderToStaticMarkup(<MessageBubble message={assistantMessage} oaNavigationUrl={OA_NAVIGATION_URL} />),
   ]
 
   for (const html of renderedMessages) {
@@ -57,11 +59,15 @@ test("completed assistant replies expose copy and feedback actions", () => {
     feedback: "like",
   } satisfies Message
 
-  const html = renderToStaticMarkup(<MessageBubble message={message} />)
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
   assert.match(html, /aria-label="Copy response"/)
   assert.match(html, /aria-label="Like response"/)
   assert.match(html, /aria-label="Dislike response"/)
+  assert.match(html, /aria-label="Open OA"/)
+  assert.match(html, /href="https:\/\/rwkv-oa\.vercel\.app\/"/)
+  assert.match(html, /target="_blank"/)
+  assert.match(html, /rel="noopener noreferrer"/)
   assert.match(html, /aria-pressed="true"/)
   assert.match(html, /<strong>Ready\.<\/strong>/)
   assert.match(html, /data-slot="assistant-response"/)
@@ -77,7 +83,9 @@ test("streaming assistant replies announce live output without feedback controls
     status: "streaming",
   } satisfies Message
 
-  const html = renderToStaticMarkup(<MessageBubble message={message} isStreaming />)
+  const html = renderToStaticMarkup(
+    <MessageBubble message={message} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
 
   assert.match(html, /Generating response/)
   assert.match(html, /data-slot="streaming-message-trace"/)
@@ -85,6 +93,7 @@ test("streaming assistant replies announce live output without feedback controls
   assert.doesNotMatch(html, /aria-label="Copy response"/)
   assert.doesNotMatch(html, /aria-label="Like response"/)
   assert.doesNotMatch(html, /aria-label="Dislike response"/)
+  assert.doesNotMatch(html, /aria-label="Open OA"/)
 })
 
 test("streaming agent messages render as separate subdued trace steps in event order", () => {
@@ -116,7 +125,9 @@ test("streaming agent messages render as separate subdued trace steps in event o
     ],
   } satisfies Message
 
-  const html = renderToStaticMarkup(<MessageBubble message={message} isStreaming />)
+  const html = renderToStaticMarkup(
+    <MessageBubble message={message} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
   const traceMessages = html.match(/data-slot="streaming-message-trace"/g) ?? []
   const firstMessageIndex = html.indexOf("I will inspect the records.")
   const toolIndex = html.indexOf("Fetch records")
@@ -151,7 +162,7 @@ test("assistant replies expose completed tool activity and details", () => {
     ],
   } satisfies Message
 
-  const html = renderToStaticMarkup(<MessageBubble message={message} />)
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
   assert.match(html, /Trace/)
   assert.match(html, /npm run build/)

@@ -68,15 +68,17 @@ export default function LoginPage() {
       <section className="relative z-10 flex min-h-dvh w-full flex-col lg:flex-row">
         <div className="flex min-h-[38dvh] min-w-0 flex-1 items-center px-6 py-10 sm:px-10 lg:min-h-dvh lg:px-16 xl:px-20">
           <div className="min-w-0 max-w-xl text-white drop-shadow-[0_2px_18px_rgba(15,23,42,0.35)]">
-            <div className="mb-6 inline-flex h-10 items-center rounded-lg border border-white/35 bg-white/15 px-4 text-sm font-medium tracking-wide shadow-sm backdrop-blur-xl">
-              RWKVOS
+            <div className="mb-6 inline-flex h-10 items-center rounded-lg border border-white/35 bg-white/15 px-4 shadow-sm backdrop-blur-xl">
+              <span className="text-base font-semibold tracking-[0.12em] text-white drop-shadow-[0_1px_8px_rgba(255,255,255,0.3)]">
+                RWKV OS
+              </span>
             </div>
             <h1 className="break-words text-3xl font-semibold leading-tight sm:text-4xl md:text-6xl">
               Sign in to continue.
             </h1>
             <TextType
               className="mt-5 max-w-md text-base leading-7 text-white/78 md:text-lg"
-              text={["Welcome to RWKVOS!", "Continue your conversation with the AI assistant."]}
+              text={["Welcome to OA Agent!", "Continue your conversation with the AI assistant."]}
               typingSpeed={75}
               pauseDuration={1500}
               showCursor

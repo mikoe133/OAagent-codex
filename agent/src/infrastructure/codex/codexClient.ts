@@ -8,6 +8,7 @@ import type { AppConfig } from "../../config/config.js";
  */
 function buildChildEnv(
   config: AppConfig,
+  providerConfig: AppConfig["modelProviders"][AppConfig["modelProvider"]],
   toolSessionId?: string,
 ): Record<string, string> {
   const passthroughKeys = ["PATH", "HOME", "TMPDIR", "USER", "LANG", "TERM"];
@@ -18,7 +19,7 @@ function buildChildEnv(
       env[key] = value;
     }
   }
-  env.NEXTTOKEN_API_KEY = config.modelApiKey;
+  env[providerConfig.envKey] = providerConfig.apiKey;
   env.CALL_OA_API_URL = `http://127.0.0.1:${config.serverPort}/__internal/call-oa-api`;
   env.CALL_OA_API_TOKEN = config.oaApiToolToken;
   if (toolSessionId) {
@@ -31,15 +32,16 @@ export function createCodexClient(
   config: AppConfig,
   toolSessionId?: string,
 ): Codex {
+  const providerConfig = config.modelProviders[config.modelProvider];
   return new Codex({
-    env: buildChildEnv(config, toolSessionId),
+    env: buildChildEnv(config, providerConfig, toolSessionId),
     config: {
       model_provider: config.modelProvider,
       model_providers: {
         [config.modelProvider]: {
-          name: "Nexttoken",
-          base_url: config.modelBaseUrl,
-          env_key: "NEXTTOKEN_API_KEY",
+          name: providerConfig.name,
+          base_url: providerConfig.baseUrl,
+          env_key: providerConfig.envKey,
           wire_api: "responses",
         },
       },

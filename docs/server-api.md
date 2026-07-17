@@ -19,8 +19,10 @@
 | --- | --- | --- |
 | `NEXTTOKEN_API_KEY` | 无 | 必填。Codex SDK 调用模型所需凭证 |
 | `NEXTTOKEN_API_BASE_URL` | `https://next-token.cc` | Nexttoken OpenAI-compatible API 地址。程序会自动补 `/v1` |
-| `CODEX_MODEL_PROVIDER` | `nexttoken` | Codex SDK model provider 标识 |
-| `CODEX_MODEL` | `gpt-5.6-terra` | Codex SDK 使用的模型 ID |
+| `OPENROUTER_API_KEY` | 无 | 必填。切换到 OpenRouter 时使用的模型凭证 |
+| `OPENROUTER_API_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter OpenAI-compatible API 地址 |
+| `CODEX_MODEL_PROVIDER` | `nexttoken` | CLI 和省略 `provider` 时使用的默认 provider |
+| `CODEX_MODEL` | `gpt-5.6-terra` | 默认 provider 使用的模型 ID |
 | `OA_OPENAPI_URL` | `https://api-oa.rwkvos.com/openapi_json` | 优先读取的 OA OpenAPI 地址。请求失败、非 2xx 或内容非法时回退本地契约 |
 | `OA_API_BASE_URL` | 空 | OA 后端地址。HTTP 服务用它验证用户 OA token,受控工具也通过该地址调用 OA |
 | `OA_AUTH_ALIAS` | `default` | OA 登录和 token 验证使用的数据源 alias |
@@ -129,6 +131,7 @@ Cookie: foo=1; sessionid=<OA_USER_TOKEN>; bar=2
 {
   "sessionId": "demo",
   "threadId": "thread_...",
+  "provider": "nexttoken",
   "model": "gpt-5.6-terra",
   "finalResponse": "可以使用 ...",
   "executedCommands": [
@@ -144,7 +147,8 @@ Cookie: foo=1; sessionid=<OA_USER_TOKEN>; bar=2
 | --- | --- | --- |
 | `sessionId` | `string` | 本次消息所属 session |
 | `threadId` | `string` | 本次运行后关联的 Codex thread ID |
-| `model` | `string` | 本轮实际使用的 Nexttoken 模型 ID |
+| `provider` | `string` | 本轮实际使用的模型提供商 |
+| `model` | `string` | 本轮实际使用的模型 ID |
 | `finalResponse` | `string` | agent 的最终中文回答。已对已知密钥做脱敏 |
 | `executedCommands` | `string[]` | agent 运行过程中执行过的命令记录。已对已知密钥做脱敏 |
 | `summary` | `string` | 写回 session 的紧凑摘要,用于后续续聊 |
@@ -259,10 +263,11 @@ GET /health
 GET /v1/models
 ```
 
-用途:返回允许前端选择的 Nexttoken 模型白名单。鉴权规则与其他 `/v1/*` 接口相同。
+用途:返回默认 provider 的模型列表和全部 provider 白名单。鉴权规则与其他 `/v1/*` 接口相同。
 
 ```json
 {
+  "provider": "nexttoken",
   "models": [
     "gpt-5.4",
     "gpt-5.4-mini",
@@ -270,7 +275,23 @@ GET /v1/models
     "gpt-5.6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra"
-  ]
+  ],
+  "providers": {
+    "nexttoken": [
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.5",
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra"
+    ],
+    "openrouter": [
+      "z-ai/glm-5.2",
+      "moonshotai/kimi-k3",
+      "openai/gpt-5.5",
+      "openai/gpt-5.4"
+    ]
+  }
 }
 ```
 
@@ -425,6 +446,7 @@ POST /v1/sessions/{sessionId}/messages
 ```json
 {
   "message": "我想查一下周报列表,应该调用哪个接口?",
+  "provider": "nexttoken",
   "model": "gpt-5.6-terra"
 }
 ```
@@ -434,7 +456,8 @@ POST /v1/sessions/{sessionId}/messages
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `message` | `string` | 是 | 用户输入。去掉首尾空白后不能为空 |
-| `model` | `string` | 否 | 本轮模型。省略时使用 `CODEX_MODEL`;传入时必须属于 `/v1/models` 白名单 |
+| `provider` | `string` | 否 | 本轮 provider,可选 `nexttoken` 或 `openrouter`;省略时使用 `CODEX_MODEL_PROVIDER` |
+| `model` | `string` | 否 | 本轮模型。省略时使用该 provider 的默认模型;传入时必须属于对应 provider 白名单 |
 
 响应示例:
 
@@ -442,6 +465,7 @@ POST /v1/sessions/{sessionId}/messages
 {
   "sessionId": "demo",
   "threadId": "thread_...",
+  "provider": "nexttoken",
   "model": "gpt-5.6-terra",
   "finalResponse": "建议使用 `weekly_report_list_weekly_report_report_list_get` ...",
   "executedCommands": [
@@ -456,7 +480,7 @@ POST /v1/sessions/{sessionId}/messages
 | 状态码 | 说明 |
 | --- | --- |
 | `200` | agent 运行成功 |
-| `400` | `message` 缺失/为空,或 `model` 不是字符串/不在白名单 |
+| `400` | `message` 缺失/为空,或 `provider`/`model` 类型错误、组合不在白名单 |
 | `401` | 鉴权失败 |
 | `500` | 非法 JSON、非法 `sessionId`、请求体过大、agent 未返回最终回答、模型调用失败或其他服务端错误 |
 
@@ -466,7 +490,7 @@ POST /v1/sessions/{sessionId}/messages
 curl -s -X POST http://127.0.0.1:3000/v1/sessions/demo/messages \
   -H 'content-type: application/json' \
   -H "Cookie: sessionid=$OA_USER_TOKEN" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","model":"gpt-5.6-terra"}'
+  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","provider":"nexttoken","model":"gpt-5.6-terra"}'
 ```
 
 ### 流式发送消息
@@ -492,7 +516,7 @@ event: message.delta
 data: {"type":"message.delta","sessionId":"demo","itemId":"...","delta":"建议使用","text":"建议使用"}
 
 event: run.completed
-data: {"type":"run.completed","sessionId":"demo","result":{"sessionId":"demo","threadId":"thread_...","model":"gpt-5.6-terra","finalResponse":"建议使用 ...","executedCommands":["python3 ..."],"summary":"用户: ..."},"usage":{"input_tokens":123,"cached_input_tokens":0,"output_tokens":45,"reasoning_output_tokens":0}}
+data: {"type":"run.completed","sessionId":"demo","result":{"sessionId":"demo","threadId":"thread_...","provider":"nexttoken","model":"gpt-5.6-terra","finalResponse":"建议使用 ...","executedCommands":["python3 ..."],"summary":"用户: ..."},"usage":{"input_tokens":123,"cached_input_tokens":0,"output_tokens":45,"reasoning_output_tokens":0}}
 
 : keep-alive
 ```
@@ -503,7 +527,7 @@ data: {"type":"run.completed","sessionId":"demo","result":{"sessionId":"demo","t
 curl -N -X POST http://127.0.0.1:3000/v1/sessions/demo/messages/stream \
   -H 'content-type: application/json' \
   -H "Cookie: sessionid=$OA_USER_TOKEN" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","model":"gpt-5.6-terra"}'
+  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","provider":"nexttoken","model":"gpt-5.6-terra"}'
 ```
 
 浏览器示例:
@@ -514,6 +538,7 @@ const response = await fetch("/v1/sessions/demo/messages/stream", {
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
     message: "我想查一下周报列表,应该调用哪个接口?",
+    provider: "nexttoken",
     model: "gpt-5.6-terra",
   }),
 });
@@ -630,7 +655,7 @@ CLI 参数:
 - `summary` 是本服务本地生成的紧凑摘要,最多约 3000 字符,每轮会追加当前用户输入和 agent 最终回答的压缩版本。
 - 同一个 `sessionId` 的并发消息会排队串行执行,避免多个请求同时改写同一个 session。
 - 第一次消息使用完整任务提示词;后续消息会附带 `<conversation_memory>` 摘要和新的 `<user_task>`。
-- 服务只会对已知密钥值做脱敏,不会把 `NEXTTOKEN_API_KEY` 或用户 OA token 写入响应。
+- 服务只会对已知密钥值做脱敏,不会把 `NEXTTOKEN_API_KEY`、`OPENROUTER_API_KEY` 或用户 OA token 写入响应。
 
 ## 通用错误格式
 

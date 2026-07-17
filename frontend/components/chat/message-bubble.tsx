@@ -10,6 +10,7 @@ import {
   CircleAlert,
   CircleStop,
   Copy,
+  ExternalLink,
   Globe2,
   LoaderCircle,
   MessageSquareText,
@@ -34,6 +35,7 @@ interface MessageBubbleProps {
   message: Message
   isStreaming?: boolean
   onFeedback?: (messageId: string, feedback: Message["feedback"]) => void
+  oaNavigationUrl: string
 }
 
 function formatTime(date: Date): string {
@@ -46,7 +48,7 @@ function formatTime(date: Date): string {
 const MESSAGE_ACTION_CONTROLS_CLASS =
   "flex items-center transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none pointer-fine:pointer-events-none pointer-fine:translate-y-0.5 pointer-fine:opacity-0 pointer-fine:group-hover/message:pointer-events-auto pointer-fine:group-hover/message:translate-y-0 pointer-fine:group-hover/message:opacity-100 pointer-fine:group-focus-within/message:pointer-events-auto pointer-fine:group-focus-within/message:translate-y-0 pointer-fine:group-focus-within/message:opacity-100"
 
-export function MessageBubble({ message, isStreaming = false, onFeedback }: MessageBubbleProps) {
+export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavigationUrl }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const assistantIsStreaming = !isUser && (isStreaming || message.status === "streaming")
   const toolSteps = message.toolSteps ?? []
@@ -152,7 +154,12 @@ export function MessageBubble({ message, isStreaming = false, onFeedback }: Mess
         {isUser ? (
           <UserActions message={message} />
         ) : (
-          <AssistantActions message={message} isStreaming={assistantIsStreaming} onFeedback={onFeedback} />
+          <AssistantActions
+            message={message}
+            isStreaming={assistantIsStreaming}
+            onFeedback={onFeedback}
+            oaNavigationUrl={oaNavigationUrl}
+          />
         )}
       </div>
     </article>
@@ -179,10 +186,12 @@ function AssistantActions({
   message,
   isStreaming,
   onFeedback,
+  oaNavigationUrl,
 }: {
   message: Message
   isStreaming: boolean
   onFeedback?: MessageBubbleProps["onFeedback"]
+  oaNavigationUrl: string
 }) {
   const showActions =
     !isStreaming &&
@@ -237,6 +246,26 @@ function AssistantActions({
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={6}>Not helpful</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                variant="ghost"
+                size="icon-sm"
+                className="h-7 w-7 rounded-md text-stone-400 hover:bg-sky-50 hover:text-sky-700"
+              >
+                <a
+                  href={oaNavigationUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Open OA"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>Open OA</TooltipContent>
           </Tooltip>
         </span>
       )}

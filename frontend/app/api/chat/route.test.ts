@@ -30,7 +30,8 @@ test("POST forwards the selected model to the agent service", async () => {
         },
         body: JSON.stringify({
           sessionId: "model-switch-session",
-          model: "gpt-5.6-terra",
+          provider: "openrouter",
+          model: "z-ai/glm-5.2",
           messages: [{ role: "user", content: "hello" }],
         }),
       }),
@@ -39,9 +40,42 @@ test("POST forwards the selected model to the agent service", async () => {
 
     assert.deepEqual(forwardedBody, {
       message: "hello",
-      model: "gpt-5.6-terra",
+      provider: "openrouter",
+      model: "z-ai/glm-5.2",
     })
     assert.equal(forwardedAuthorization, "Bearer test-session-token")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("POST rejects an unknown provider before calling the agent service", async () => {
+  const originalFetch = globalThis.fetch
+  let fetchCalled = false
+  globalThis.fetch = async () => {
+    fetchCalled = true
+    return new Response(null, { status: 500 })
+  }
+
+  try {
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "sessionid=test-session-token",
+        },
+        body: JSON.stringify({
+          sessionId: "model-switch-session",
+          provider: "unknown",
+          model: "z-ai/glm-5.2",
+          messages: [{ role: "user", content: "hello" }],
+        }),
+      }),
+    )
+
+    assert.equal(response.status, 400)
+    assert.equal(fetchCalled, false)
   } finally {
     globalThis.fetch = originalFetch
   }

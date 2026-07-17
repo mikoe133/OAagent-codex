@@ -19,6 +19,7 @@ test("protects public agent routes with a validated OA token", async () => {
     oaUserTokenHeader: "Authorization",
     oaUserTokenPrefix: "Bearer",
     oaApiToolToken: "internal-tool-token",
+    modelProvider: "nexttoken",
   } as AppConfig;
   const agentService = {} as AgentService;
   const sessionStore = new SessionStore(path.join(directory, "sessions.json"));
@@ -45,6 +46,33 @@ test("protects public agent routes with a validated OA token", async () => {
       });
     const valid = await requestJson(address.port, "/v1/models", "valid-token");
     assert.equal(valid.status, 200);
+    assert.deepEqual(valid.body, {
+      provider: "nexttoken",
+      models: [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.5",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+      ],
+      providers: {
+        nexttoken: [
+          "gpt-5.4",
+          "gpt-5.4-mini",
+          "gpt-5.5",
+          "gpt-5.6-luna",
+          "gpt-5.6-sol",
+          "gpt-5.6-terra",
+        ],
+        openrouter: [
+          "z-ai/glm-5.2",
+          "moonshotai/kimi-k3",
+          "openai/gpt-5.5",
+          "openai/gpt-5.4",
+        ],
+      },
+    });
 
     globalThis.fetch = async () => {
       throw new Error("connection refused");

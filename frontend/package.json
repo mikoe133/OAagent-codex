@@ -7,7 +7,7 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
-    "test:chat": "tsx --test proxy.test.ts app/api/chat/route.test.ts app/api/chat/sessions/route.test.ts components/chat/chat-stream.test.ts components/chat/composer.test.tsx components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts components/siderbar/session-list-order.test.ts",
+    "test:chat": "tsx --test proxy.test.ts app/api/chat/route.test.ts app/api/chat/sessions/route.test.ts components/chat/chat-stream.test.ts components/chat/composer.test.tsx components/chat/message-bubble.test.tsx components/chat/message-list-layout.test.ts components/chat/session-background.test.ts components/siderbar/provider-menu.test.ts components/siderbar/session-list-order.test.ts components/siderbar/session-loading-indicator.test.ts components/ui/shining-text.test.ts lib/model-catalog.test.ts lib/oa-navigation.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -52,6 +52,7 @@
     "gsap": "^3.15.0",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
+    "motion": "^12.42.2",
     "next": "16.2.10",
     "next-themes": "^0.4.6",
     "react": "19.2.0",

@@ -31,6 +31,7 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.match(workflow, /DEPLOY_HOST: \$\{\{ vars\.DEPLOY_HOST \}\}/)
   assert.match(workflow, /uses: docker\/setup-qemu-action@v3/)
   assert.match(workflow, /NEXTTOKEN_API_KEY: \$\{\{ secrets\.NEXTTOKEN_API_KEY \}\}/)
+  assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
   assert.match(workflow, /bash scripts\/render-runtime-env\.sh/)
   assert.match(workflow, /push: \$\{\{ github\.event_name != 'pull_request' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/test'\) \}\}/)

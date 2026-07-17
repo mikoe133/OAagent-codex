@@ -1,0 +1,20 @@
+<svg width="1400" height="560" viewBox="0 0 1400 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1400" height="560" fill="#F7F8FB"/>
+  <text x="52" y="58" fill="#64748B" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="26" font-weight="600">OA Agent · 官方 R 图标方向</text>
+  <text x="52" y="91" fill="#94A3B8" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="16">基于 RWKV 官网原始 R 轮廓 · 白底 · 极简彩色 · 未接入前端</text>
+
+  <rect x="52" y="125" width="410" height="380" rx="24" fill="white"/>
+  <text x="84" y="169" fill="#A5B4C8" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600">01 / 柔和渐变</text>
+  <image href="r-icon-01-gradient.svg" x="127" y="190" width="260" height="260"/>
+  <image href="r-icon-01-gradient.svg" x="398" y="443" width="32" height="32"/>
+
+  <rect x="495" y="125" width="410" height="380" rx="24" fill="white"/>
+  <text x="527" y="169" fill="#A5B4C8" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600">02 / 左右双色</text>
+  <image href="r-icon-02-split.svg" x="570" y="190" width="260" height="260"/>
+  <image href="r-icon-02-split.svg" x="841" y="443" width="32" height="32"/>
+
+  <rect x="938" y="125" width="410" height="380" rx="24" fill="white"/>
+  <text x="970" y="169" fill="#A5B4C8" font-family="PingFang SC, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600">03 / 斜腿强调</text>
+  <image href="r-icon-03-leg.svg" x="1013" y="190" width="260" height="260"/>
+  <image href="r-icon-03-leg.svg" x="1284" y="443" width="32" height="32"/>
+</svg>

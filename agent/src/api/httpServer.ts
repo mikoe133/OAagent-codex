@@ -7,8 +7,11 @@ import type {
 } from "../application/agentService.js";
 import type { AppConfig } from "../config/config.js";
 import {
-  SUPPORTED_MODELS,
+  MODEL_CATALOG,
+  getDefaultModel,
   resolveRequestedModel,
+  resolveRequestedProvider,
+  type ModelProviderId,
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
@@ -128,7 +131,11 @@ async function routeRequest(
   }
 
   if (method === "GET" && url.pathname === "/v1/models") {
-    writeJson(response, 200, { models: [...SUPPORTED_MODELS] });
+    writeJson(response, 200, {
+      provider: config.modelProvider,
+      models: [...MODEL_CATALOG[config.modelProvider]],
+      providers: MODEL_CATALOG,
+    });
     return;
   }
 
@@ -194,15 +201,16 @@ async function routeRequest(
       writeJson(response, 400, { error: "message 必须是非空字符串" });
       return;
     }
-    const model = resolveMessageModel(config, body, response);
-    if (!model) {
+    const selection = resolveMessageSelection(config, body, response);
+    if (!selection) {
       return;
     }
 
     const result = await agentService.sendMessage({
       sessionId,
       message,
-      model,
+      provider: selection.provider,
+      model: selection.model,
       oaApiToken,
     });
     writeJson(response, 200, result);
@@ -231,15 +239,16 @@ async function routeRequest(
       writeJson(response, 400, { error: "message 必须是非空字符串" });
       return;
     }
-    const model = resolveMessageModel(config, body, response);
-    if (!model) {
+    const selection = resolveMessageSelection(config, body, response);
+    if (!selection) {
       return;
     }
 
     await streamAgentMessage(agentService, request, response, {
       sessionId,
       message,
-      model,
+      provider: selection.provider,
+      model: selection.model,
       oaApiToken,
     });
     return;
@@ -405,11 +414,16 @@ function stringField(body: JsonObject, field: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveMessageModel(
+function resolveMessageSelection(
   config: AppConfig,
   body: JsonObject,
   response: ServerResponse,
-): string | null {
+): { provider: ModelProviderId; model: string } | null {
+  const rawProvider = body.provider;
+  if (rawProvider !== undefined && typeof rawProvider !== "string") {
+    writeJson(response, 400, { error: "provider 必须是字符串" });
+    return null;
+  }
   const rawModel = body.model;
   if (rawModel !== undefined && typeof rawModel !== "string") {
     writeJson(response, 400, { error: "model 必须是字符串" });
@@ -417,7 +431,13 @@ function resolveMessageModel(
   }
 
   try {
-    return resolveRequestedModel(rawModel, config.model);
+    const provider = resolveRequestedProvider(rawProvider, config.modelProvider);
+    const fallbackModel =
+      provider === config.modelProvider ? config.model : getDefaultModel(provider);
+    return {
+      provider,
+      model: resolveRequestedModel(provider, rawModel, fallbackModel),
+    };
   } catch (error) {
     writeJson(response, 400, {
       error: error instanceof Error ? error.message : String(error),

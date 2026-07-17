@@ -22,5 +22,8 @@
     "start:server": "npm run start:server -w agent",
     "test:deploy": "node --test scripts/*.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "dependencies": {
+    "styled-components": "^6.4.3"
   }
 }

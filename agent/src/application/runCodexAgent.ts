@@ -126,7 +126,10 @@ export async function runCodexAgent(
     );
   }
 
-  const secrets = [config.modelApiKey, config.oaApiToolToken];
+  const secrets = [
+    ...Object.values(config.modelProviders).map((provider) => provider.apiKey),
+    config.oaApiToolToken,
+  ];
   return {
     finalResponse: redactSecrets(turn.finalResponse, secrets),
     executedCommands: collectExecutedCommands(turn.items).map((command) =>

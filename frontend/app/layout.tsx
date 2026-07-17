@@ -10,9 +10,9 @@ export const metadata: Metadata = {
   description: "Chat with OA Agent powered by Gemini",
   generator: "v0.app",
   icons: {
-    icon: "/logo/logo.png",
-    shortcut: "/logo/logo.png",
-    apple: "/apple-icon.png",
+    icon: "/logo/R-light.png",
+    shortcut: "/logo/R-light.png",
+    apple: "/logo/R-light.png",
   },
 }
 

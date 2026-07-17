@@ -4,9 +4,20 @@ import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react
 import { PanelLeftClose, PanelLeftOpen, SquarePen } from "lucide-react"
 import { gsap } from "gsap"
 import { MessageList } from "./message-list"
-import { Composer, DEFAULT_AI_MODEL, isAIModel, type AIModel } from "./composer"
+import { Composer } from "./composer"
 import { Button } from "@/components/ui/button"
-import Sider, { type ChatSessionListItem } from "@/components/siderbar/Sider"
+import Sider, {
+  type ChatSessionListItem,
+  type SessionIndicatorState,
+} from "@/components/siderbar/Sider"
+import {
+  DEFAULT_MODEL_PROVIDER,
+  getDefaultModel,
+  isModelForProvider,
+  isModelProvider,
+  type AIModel,
+  type ModelProvider,
+} from "@/lib/model-catalog"
 import {
   drainChatSseBuffer,
   isToolTimelineEvent,
@@ -16,6 +27,7 @@ import {
   type TraceMessage,
   type ToolStep,
 } from "./chat-stream"
+import { resolveLoadedSessionMessages } from "./session-messages"
 // import LineSidebar from "./siderbar"
 
 // Data model for messages
@@ -40,6 +52,7 @@ export type { ToolStep, ToolStepStatus, TraceMessage } from "./chat-stream"
 // localStorage key for persisting messages
 const STORAGE_KEY = "chat-messages"
 const MODEL_STORAGE_KEY = "chat-selected-model"
+const MODEL_PROVIDER_STORAGE_KEY = "chat-model-provider"
 const AGENT_SESSION_STORAGE_KEY = "chat-agent-session-id"
 const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
 const SIDEBAR_WIDTH = 320
@@ -47,6 +60,8 @@ const SIDEBAR_DESKTOP_QUERY = "(min-width: 640px)"
 const COLLAPSED_CONTROL_LEFT = 16
 const EXPANDED_CONTROL_LEFT = SIDEBAR_WIDTH + COLLAPSED_CONTROL_LEFT
 const TYPEWRITER_INTERVAL_MS = 18
+const SESSION_INDICATOR_VIEWED_HOLD_MS = 1500
+const SESSION_INDICATOR_FADE_MS = 500
 const FLOATING_CONTROL_BUTTON_CLASS =
   "h-10 w-10 rounded-full bg-zinc-100 text-stone-600 hover:bg-zinc-200"
 
@@ -70,6 +85,16 @@ type StoredMessage = {
 
 type ChatSessionResponse = {
   session?: ChatSessionRecord
+}
+
+type ActiveSessionRun = {
+  requestId: string
+  controller: AbortController
+}
+
+type SessionIndicatorTimers = {
+  pause?: ReturnType<typeof setTimeout>
+  dismiss?: ReturnType<typeof setTimeout>
 }
 
 // Generates a unique ID for messages
@@ -351,12 +376,15 @@ function normalizeStoredToolStatus(value: unknown): ToolStep["status"] {
   return "info"
 }
 
-export function ChatShell() {
+export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [messages, setMessages] = useState<Message[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
+  const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set())
+  const [sessionIndicatorStates, setSessionIndicatorStates] = useState<Map<string, SessionIndicatorState>>(
+    () => new Map(),
+  )
   const [error, setError] = useState<string | null>(null)
-  const [abortController, setAbortController] = useState<AbortController | null>(null)
-  const [selectedModel, setSelectedModel] = useState<AIModel>(DEFAULT_AI_MODEL)
+  const [selectedProvider, setSelectedProvider] = useState<ModelProvider>(DEFAULT_MODEL_PROVIDER)
+  const [selectedModel, setSelectedModel] = useState<AIModel>(() => getDefaultModel(DEFAULT_MODEL_PROVIDER))
   const [agentSessionId, setAgentSessionId] = useState("")
   const [activeRecordId, setActiveRecordId] = useState<string | number | null>(null)
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
@@ -369,28 +397,41 @@ export function ChatShell() {
   const composerLayoutRef = useRef<HTMLDivElement | null>(null)
   const hasAppliedSiderLayoutRef = useRef(false)
   const activeSessionIdRef = useRef("")
-  const activeRequestIdRef = useRef<string | null>(null)
+  const activeSessionRunsRef = useRef(new Map<string, ActiveSessionRun>())
+  const sessionIndicatorStatesRef = useRef(new Map<string, SessionIndicatorState>())
+  const sessionIndicatorTimersRef = useRef(new Map<string, SessionIndicatorTimers>())
   const messagesRef = useRef<Message[]>([])
+  const sessionMessagesRef = useRef(new Map<string, Message[]>())
   const sessionSaveQueuesRef = useRef(new Map<string, Promise<void>>())
   const deletedSessionIdsRef = useRef(new Set<string>())
+  const isStreaming = Boolean(agentSessionId && runningSessionIds.has(agentSessionId))
 
   // Load messages from localStorage on mount
   useEffect(() => {
     try {
+      let storedMessages: Message[] = []
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         const parsed = JSON.parse(stored)
-        const storedMessages = normalizeStoredMessages(parsed)
+        storedMessages = normalizeStoredMessages(parsed)
         messagesRef.current = storedMessages
         setMessages(storedMessages)
       }
+      const savedProvider = localStorage.getItem(MODEL_PROVIDER_STORAGE_KEY)
+      const provider = isModelProvider(savedProvider) ? savedProvider : DEFAULT_MODEL_PROVIDER
       const savedModel = localStorage.getItem(MODEL_STORAGE_KEY)
-      if (isAIModel(savedModel)) {
+      setSelectedProvider(provider)
+      if (isModelForProvider(provider, savedModel)) {
         setSelectedModel(savedModel)
-      } else if (savedModel) {
-        localStorage.removeItem(MODEL_STORAGE_KEY)
+      } else {
+        const defaultModel = getDefaultModel(provider)
+        setSelectedModel(defaultModel)
+        localStorage.setItem(MODEL_STORAGE_KEY, defaultModel)
       }
-      setAgentSessionId(getOrCreateAgentSessionId())
+      const currentSessionId = getOrCreateAgentSessionId()
+      activeSessionIdRef.current = currentSessionId
+      sessionMessagesRef.current.set(currentSessionId, storedMessages)
+      setAgentSessionId(currentSessionId)
     } catch (e) {
       console.error("Failed to load from localStorage:", e)
     } finally {
@@ -402,9 +443,25 @@ export function ChatShell() {
     activeSessionIdRef.current = agentSessionId
   }, [agentSessionId])
 
+  useEffect(
+    () => () => {
+      sessionIndicatorTimersRef.current.forEach(({ pause, dismiss }) => {
+        if (pause) clearTimeout(pause)
+        if (dismiss) clearTimeout(dismiss)
+      })
+      sessionIndicatorTimersRef.current.clear()
+    },
+    [],
+  )
+
   // Persist messages to localStorage whenever they change
   useEffect(() => {
     messagesRef.current = messages
+
+    const currentSessionId = activeSessionIdRef.current
+    if (currentSessionId) {
+      sessionMessagesRef.current.set(currentSessionId, messages)
+    }
 
     if (!isLoaded) {
       return
@@ -508,9 +565,23 @@ export function ChatShell() {
     return () => window.removeEventListener("resize", handleResize)
   }, [animateSiderLayout])
 
-  const handleModelChange = useCallback((model: AIModel) => {
-    setSelectedModel(model)
-    localStorage.setItem(MODEL_STORAGE_KEY, model)
+  const handleModelChange = useCallback(
+    (model: AIModel) => {
+      if (!isModelForProvider(selectedProvider, model)) {
+        return
+      }
+      setSelectedModel(model)
+      localStorage.setItem(MODEL_STORAGE_KEY, model)
+    },
+    [selectedProvider],
+  )
+
+  const handleProviderChange = useCallback((provider: ModelProvider) => {
+    const defaultModel = getDefaultModel(provider)
+    setSelectedProvider(provider)
+    setSelectedModel(defaultModel)
+    localStorage.setItem(MODEL_PROVIDER_STORAGE_KEY, provider)
+    localStorage.setItem(MODEL_STORAGE_KEY, defaultModel)
   }, [])
 
   const persistMessages = useCallback(
@@ -551,10 +622,81 @@ export function ChatShell() {
     [],
   )
 
+  const clearSessionIndicatorTimers = useCallback((sessionId: string) => {
+    const timers = sessionIndicatorTimersRef.current.get(sessionId)
+    if (timers?.pause) clearTimeout(timers.pause)
+    if (timers?.dismiss) clearTimeout(timers.dismiss)
+    sessionIndicatorTimersRef.current.delete(sessionId)
+  }, [])
+
+  const setSessionIndicatorState = useCallback(
+    (sessionId: string, state: SessionIndicatorState) => {
+      sessionIndicatorStatesRef.current.set(sessionId, state)
+      setSessionIndicatorStates(new Map(sessionIndicatorStatesRef.current))
+    },
+    [],
+  )
+
+  const clearSessionIndicator = useCallback(
+    (sessionId: string) => {
+      clearSessionIndicatorTimers(sessionId)
+      if (sessionIndicatorStatesRef.current.delete(sessionId)) {
+        setSessionIndicatorStates(new Map(sessionIndicatorStatesRef.current))
+      }
+    },
+    [clearSessionIndicatorTimers],
+  )
+
+  const dismissSessionIndicator = useCallback(
+    (sessionId: string) => {
+      if (sessionIndicatorStatesRef.current.get(sessionId) !== "paused") {
+        return
+      }
+
+      clearSessionIndicatorTimers(sessionId)
+      setSessionIndicatorState(sessionId, "dismissing")
+      const dismiss = setTimeout(() => {
+        if (sessionIndicatorStatesRef.current.get(sessionId) === "dismissing") {
+          sessionIndicatorStatesRef.current.delete(sessionId)
+          setSessionIndicatorStates(new Map(sessionIndicatorStatesRef.current))
+        }
+        sessionIndicatorTimersRef.current.delete(sessionId)
+      }, SESSION_INDICATOR_FADE_MS)
+      sessionIndicatorTimersRef.current.set(sessionId, { dismiss })
+    },
+    [clearSessionIndicatorTimers, setSessionIndicatorState],
+  )
+
+  const pauseSessionIndicator = useCallback(
+    (sessionId: string) => {
+      clearSessionIndicatorTimers(sessionId)
+      setSessionIndicatorState(sessionId, "paused")
+
+      if (activeSessionIdRef.current !== sessionId) {
+        return
+      }
+
+      const pause = setTimeout(() => {
+        if (activeSessionIdRef.current !== sessionId) {
+          sessionIndicatorTimersRef.current.delete(sessionId)
+          return
+        }
+        dismissSessionIndicator(sessionId)
+      }, SESSION_INDICATOR_VIEWED_HOLD_MS)
+      sessionIndicatorTimersRef.current.set(sessionId, { pause })
+    },
+    [clearSessionIndicatorTimers, dismissSessionIndicator, setSessionIndicatorState],
+  )
+
   // Send a message to the AI
   const sendMessage = useCallback(
     async (content: string, imageData?: string) => {
-      if ((!content.trim() && !imageData) || isStreaming) return
+      if (!content.trim() && !imageData) return
+
+      const currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
+      if (activeSessionRunsRef.current.has(currentAgentSessionId)) {
+        return
+      }
 
       setError(null)
       const conversationMessages = messagesRef.current
@@ -575,30 +717,46 @@ export function ChatShell() {
         status: "streaming",
       }
 
-      const currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
       if (!agentSessionId) {
         activeSessionIdRef.current = currentAgentSessionId
         setAgentSessionId(currentAgentSessionId)
       }
 
       const requestId = generateId()
-      activeRequestIdRef.current = requestId
+      const controller = new AbortController()
+      activeSessionRunsRef.current.set(currentAgentSessionId, { requestId, controller })
+      setRunningSessionIds((current) => new Set(current).add(currentAgentSessionId))
+      clearSessionIndicatorTimers(currentAgentSessionId)
+      setSessionIndicatorState(currentAgentSessionId, "running")
 
       const newMessages = [...conversationMessages, userMessage, assistantMessage]
+      let currentMessages = newMessages
       messagesRef.current = newMessages
+      sessionMessagesRef.current.set(currentAgentSessionId, newMessages)
       setMessages(newMessages)
-      setIsStreaming(true)
+      void persistMessages(currentAgentSessionId, activeRecordId, newMessages)
 
-      const controller = new AbortController()
-      setAbortController(controller)
       let cancelPendingTypewriter = () => {}
       let accumulatedContent = ""
       let visibleContent = ""
       let currentToolSteps: ToolStep[] = []
       let currentTraceMessages: TraceMessage[] = []
 
-      const isCurrentRequest = () =>
-        activeRequestIdRef.current === requestId && activeSessionIdRef.current === currentAgentSessionId
+      const isCurrentSessionRun = () =>
+        activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId
+
+      const publishSessionMessages = (nextMessages: Message[]) => {
+        if (!isCurrentSessionRun()) {
+          return
+        }
+
+        currentMessages = nextMessages
+        sessionMessagesRef.current.set(currentAgentSessionId, nextMessages)
+        if (activeSessionIdRef.current === currentAgentSessionId) {
+          messagesRef.current = nextMessages
+          setMessages(nextMessages)
+        }
+      }
 
       try {
         const response = await fetch("/api/chat", {
@@ -615,6 +773,7 @@ export function ChatShell() {
               content: m.content,
               imageData: m.imageData,
             })),
+            provider: selectedProvider,
             model: selectedModel,
           }),
           signal: controller.signal,
@@ -642,66 +801,36 @@ export function ChatShell() {
         let resolveTypewriterFlush: (() => void) | null = null
 
         const updateAssistantMessage = (content: string) => {
-          if (!isCurrentRequest()) {
-            return
-          }
-
-          setMessages((previousMessages) => {
-            if (!isCurrentRequest()) {
-              return previousMessages
-            }
-            const nextMessages = previousMessages.map((message) =>
-              message.id === assistantMessage.id ? { ...message, content, status: "streaming" as const } : message,
-            )
-            messagesRef.current = nextMessages
-            return nextMessages
-          })
+          const nextMessages = currentMessages.map((message) =>
+            message.id === assistantMessage.id ? { ...message, content, status: "streaming" as const } : message,
+          )
+          publishSessionMessages(nextMessages)
         }
 
         const updateAssistantToolSteps = (nextSteps: ToolStep[]) => {
           currentToolSteps = nextSteps
-          if (!isCurrentRequest()) {
-            return
-          }
-
-          setMessages((previousMessages) => {
-            if (!isCurrentRequest()) {
-              return previousMessages
-            }
-            const nextMessages = previousMessages.map((message) =>
-              message.id === assistantMessage.id
-                ? {
-                    ...message,
-                    toolSteps: nextSteps.length > 0 ? nextSteps : undefined,
-                  }
-                : message,
-            )
-            messagesRef.current = nextMessages
-            return nextMessages
-          })
+          const nextMessages = currentMessages.map((message) =>
+            message.id === assistantMessage.id
+              ? {
+                  ...message,
+                  toolSteps: nextSteps.length > 0 ? nextSteps : undefined,
+                }
+              : message,
+          )
+          publishSessionMessages(nextMessages)
         }
 
         const updateAssistantTraceMessages = (nextTraceMessages: TraceMessage[]) => {
           currentTraceMessages = nextTraceMessages
-          if (!isCurrentRequest()) {
-            return
-          }
-
-          setMessages((previousMessages) => {
-            if (!isCurrentRequest()) {
-              return previousMessages
-            }
-            const nextMessages = previousMessages.map((message) =>
-              message.id === assistantMessage.id
-                ? {
-                    ...message,
-                    traceMessages: nextTraceMessages.length > 0 ? nextTraceMessages : undefined,
-                  }
-                : message,
-            )
-            messagesRef.current = nextMessages
-            return nextMessages
-          })
+          const nextMessages = currentMessages.map((message) =>
+            message.id === assistantMessage.id
+              ? {
+                  ...message,
+                  traceMessages: nextTraceMessages.length > 0 ? nextTraceMessages : undefined,
+                }
+              : message,
+          )
+          publishSessionMessages(nextMessages)
         }
 
         const resolveFlushIfIdle = () => {
@@ -891,10 +1020,7 @@ export function ChatShell() {
           },
         ]
 
-        if (isCurrentRequest()) {
-          messagesRef.current = completedMessages
-          setMessages(completedMessages)
-        }
+        publishSessionMessages(completedMessages)
 
         void persistMessages(currentAgentSessionId, activeRecordId, completedMessages)
       } catch (e) {
@@ -920,25 +1046,35 @@ export function ChatShell() {
           },
         ]
 
-        if (isCurrentRequest()) {
-          messagesRef.current = terminalMessages
-          setMessages(terminalMessages)
-          if (!wasStopped) {
-            console.error("Error sending message:", e)
-            setError(errorMessage)
-          }
+        publishSessionMessages(terminalMessages)
+        if (!wasStopped && activeSessionIdRef.current === currentAgentSessionId && isCurrentSessionRun()) {
+          console.error("Error sending message:", e)
+          setError(errorMessage)
         }
 
         void persistMessages(currentAgentSessionId, activeRecordId, terminalMessages)
       } finally {
-        if (activeRequestIdRef.current === requestId) {
-          activeRequestIdRef.current = null
-          setIsStreaming(false)
-          setAbortController(null)
+        if (activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId) {
+          activeSessionRunsRef.current.delete(currentAgentSessionId)
+          setRunningSessionIds((current) => {
+            const next = new Set(current)
+            next.delete(currentAgentSessionId)
+            return next
+          })
+          pauseSessionIndicator(currentAgentSessionId)
         }
       }
     },
-    [isStreaming, selectedModel, agentSessionId, activeRecordId, persistMessages],
+    [
+      selectedProvider,
+      selectedModel,
+      agentSessionId,
+      activeRecordId,
+      persistMessages,
+      clearSessionIndicatorTimers,
+      pauseSessionIndicator,
+      setSessionIndicatorState,
+    ],
   )
 
   const retry = useCallback(() => {
@@ -948,17 +1084,18 @@ export function ChatShell() {
       const index = messages.findIndex((m) => m.id === lastUserMessage.id)
       const retryMessages = messages.slice(0, index)
       messagesRef.current = retryMessages
+      if (agentSessionId) {
+        sessionMessagesRef.current.set(agentSessionId, retryMessages)
+      }
       setMessages(retryMessages)
       setError(null)
       setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.imageData), 100)
     }
-  }, [messages, sendMessage])
+  }, [agentSessionId, messages, sendMessage])
 
   const stopStreaming = useCallback(() => {
-    if (abortController) {
-      abortController.abort()
-    }
-  }, [abortController])
+    activeSessionRunsRef.current.get(agentSessionId)?.controller.abort()
+  }, [agentSessionId])
 
   const handleMessageFeedback = useCallback(
     (messageId: string, feedback: Message["feedback"]) => {
@@ -970,6 +1107,7 @@ export function ChatShell() {
 
       const currentSessionId = activeSessionIdRef.current
       if (currentSessionId) {
+        sessionMessagesRef.current.set(currentSessionId, nextMessages)
         void persistMessages(currentSessionId, activeRecordId, nextMessages)
       }
     },
@@ -984,16 +1122,10 @@ export function ChatShell() {
       return
     }
 
-    activeRequestIdRef.current = null
-    if (abortController) {
-      abortController.abort()
-    }
-    setAbortController(null)
-    setIsStreaming(false)
-
     const nextAgentSessionId = createAgentSessionId()
 
     messagesRef.current = []
+    sessionMessagesRef.current.set(nextAgentSessionId, [])
     setMessages([])
     setError(null)
     localStorage.removeItem(STORAGE_KEY)
@@ -1015,19 +1147,25 @@ export function ChatShell() {
       .finally(() => {
         setSessionListRefreshKey((value) => value + 1)
       })
-  }, [abortController, isStreaming])
+  }, [isStreaming])
 
   const handleDeleteSession = useCallback(
     async (session: ChatSessionListItem) => {
       const { sessionId } = session
       deletedSessionIdsRef.current.add(sessionId)
+      clearSessionIndicator(sessionId)
 
-      if (activeSessionIdRef.current === sessionId) {
-        activeRequestIdRef.current = null
-        abortController?.abort()
-        setAbortController(null)
-        setIsStreaming(false)
+      const activeRun = activeSessionRunsRef.current.get(sessionId)
+      if (activeRun) {
+        activeSessionRunsRef.current.delete(sessionId)
+        activeRun.controller.abort()
+        setRunningSessionIds((current) => {
+          const next = new Set(current)
+          next.delete(sessionId)
+          return next
+        })
       }
+      sessionMessagesRef.current.delete(sessionId)
 
       try {
         await sessionSaveQueuesRef.current.get(sessionId)?.catch(() => undefined)
@@ -1055,45 +1193,65 @@ export function ChatShell() {
         throw error
       }
     },
-    [abortController],
+    [clearSessionIndicator],
   )
 
   const handleSelectSession = useCallback(
     async (session: ChatSessionListItem) => {
-      activeRequestIdRef.current = null
-      if (abortController) {
-        abortController.abort()
-      }
-      setAbortController(null)
-      setIsStreaming(false)
-
+      let selectedSessionId = session.sessionId
+      const cachedMessages = sessionMessagesRef.current.get(session.sessionId)
       setError(null)
-      setIsLoaded(false)
+      setIsLoaded(Boolean(cachedMessages))
       activeSessionIdRef.current = session.sessionId
       setAgentSessionId(session.sessionId)
       setActiveRecordId(session.recordId ?? null)
       persistAgentSessionId(session.sessionId)
+      dismissSessionIndicator(session.sessionId)
+      if (cachedMessages) {
+        messagesRef.current = cachedMessages
+        setMessages(cachedMessages)
+      } else {
+        messagesRef.current = []
+        setMessages([])
+      }
 
       try {
         const loadedSession = await loadChatSession(session)
+        if (activeSessionIdRef.current !== session.sessionId) {
+          return
+        }
         const nextSessionId = loadedSession?.sessionId || session.sessionId
+        selectedSessionId = nextSessionId
 
         activeSessionIdRef.current = nextSessionId
         setAgentSessionId(nextSessionId)
         setActiveRecordId(loadedSession?.recordId ?? session.recordId ?? null)
-        const loadedMessages = normalizeStoredMessages(loadedSession?.messages)
-        messagesRef.current = loadedMessages
-        setMessages(loadedMessages)
+        const nextMessages = resolveLoadedSessionMessages(
+          sessionMessagesRef.current.get(nextSessionId),
+          normalizeStoredMessages(loadedSession?.messages),
+          activeSessionRunsRef.current.has(nextSessionId) || sessionSaveQueuesRef.current.has(nextSessionId),
+        )
+        sessionMessagesRef.current.set(nextSessionId, nextMessages)
+        messagesRef.current = nextMessages
+        setMessages(nextMessages)
         persistAgentSessionId(nextSessionId)
       } catch (error) {
+        if (activeSessionIdRef.current !== session.sessionId) {
+          return
+        }
         console.error("Failed to load chat session:", error)
-        setMessages([])
+        if (!cachedMessages) {
+          messagesRef.current = []
+          setMessages([])
+        }
         setError(error instanceof Error ? error.message : "Failed to load chat session")
       } finally {
-        setIsLoaded(true)
+        if (activeSessionIdRef.current === selectedSessionId) {
+          setIsLoaded(true)
+        }
       }
     },
-    [abortController],
+    [dismissSessionIndicator],
   )
 
   const toggleSider = useCallback(() => {
@@ -1150,6 +1308,10 @@ export function ChatShell() {
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
         refreshKey={sessionListRefreshKey}
+        selectedProvider={selectedProvider}
+        onProviderChange={handleProviderChange}
+        providerSwitchDisabled={isStreaming}
+        sessionIndicatorStates={sessionIndicatorStates}
       />
       {/*
       <div className="absolute left-0 top-1/2 z-30 -translate-y-1/2">
@@ -1202,6 +1364,7 @@ export function ChatShell() {
           onRetry={retry}
           onFeedback={handleMessageFeedback}
           isLoaded={isLoaded}
+          oaNavigationUrl={oaNavigationUrl}
         />
       </div>
 
@@ -1210,6 +1373,7 @@ export function ChatShell() {
         onSend={sendMessage}
         onStop={stopStreaming}
         isStreaming={isStreaming}
+        selectedProvider={selectedProvider}
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
       />

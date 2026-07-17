@@ -7,14 +7,15 @@ import {
 } from "../src/application/agentService.js";
 import type { AppConfig } from "../src/config/config.js";
 import {
-  SUPPORTED_MODELS,
+  MODEL_CATALOG,
+  resolveRequestedProvider,
   resolveRequestedModel,
 } from "../src/config/modelCatalog.js";
 import { createThreadOptions } from "../src/infrastructure/codex/codexClient.js";
 
-describe("Nexttoken model selection", () => {
-  it("exposes the supported Nexttoken model whitelist", () => {
-    assert.deepEqual(SUPPORTED_MODELS, [
+describe("model provider selection", () => {
+  it("exposes isolated provider model whitelists", () => {
+    assert.deepEqual(MODEL_CATALOG.nexttoken, [
       "gpt-5.4",
       "gpt-5.4-mini",
       "gpt-5.5",
@@ -22,19 +23,42 @@ describe("Nexttoken model selection", () => {
       "gpt-5.6-sol",
       "gpt-5.6-terra",
     ]);
+    assert.deepEqual(MODEL_CATALOG.openrouter, [
+      "z-ai/glm-5.2",
+      "moonshotai/kimi-k3",
+      "openai/gpt-5.5",
+      "openai/gpt-5.4",
+    ]);
   });
 
-  it("accepts a supported requested model", () => {
+  it("accepts a supported provider and model", () => {
+    assert.equal(resolveRequestedProvider("openrouter", "nexttoken"), "openrouter");
     assert.equal(
-      resolveRequestedModel("gpt-5.6-terra", "gpt-5.6-terra"),
-      "gpt-5.6-terra",
+      resolveRequestedModel("openrouter", "z-ai/glm-5.2", "z-ai/glm-5.2"),
+      "z-ai/glm-5.2",
+    );
+    assert.equal(
+      resolveRequestedModel("openrouter", "moonshotai/kimi-k3", "z-ai/glm-5.2"),
+      "moonshotai/kimi-k3",
     );
   });
 
-  it("rejects models outside the whitelist", () => {
+  it("rejects unknown providers and cross-provider models", () => {
     assert.throws(
-      () => resolveRequestedModel("gpt-5.6-pro", "gpt-5.6-terra"),
-      /不支持的模型/,
+      () => resolveRequestedProvider("unknown", "nexttoken"),
+      /不支持的模型提供商/,
+    );
+    assert.throws(
+      () => resolveRequestedModel("openrouter", "gpt-5.6-terra", "z-ai/glm-5.2"),
+      /不支持模型/,
+    );
+    assert.throws(
+      () => resolveRequestedModel("openrouter", "openai/gpt-5.4-mini", "z-ai/glm-5.2"),
+      /不支持模型/,
+    );
+    assert.throws(
+      () => resolveRequestedModel("openrouter", "openai/gpt-5.4-nano", "z-ai/glm-5.2"),
+      /不支持模型/,
     );
   });
 

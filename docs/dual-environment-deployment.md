@@ -83,6 +83,7 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 | `DEPLOY_SSH_KEY` | `~/.ssh/oa_agent_deploy` 私钥完整内容 | 第 2 步生成 |
 | `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan` 完整输出 | 第 2 步生成并核对 |
 | `NEXTTOKEN_API_KEY` | Nexttoken Key | Nexttoken 控制台创建 |
+| `OPENROUTER_API_KEY` | OpenRouter Key | OpenRouter 控制台创建 |
 
 不需要配置:
 

@@ -5,13 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 require.extensions[".css"] = () => undefined
 
-test("the current model name opens model selection while voice and upload controls stay hidden", async () => {
-  const { AI_MODELS, Composer } = await import("./composer")
+test("the current nexttoken model opens model selection while voice and upload controls stay hidden", async () => {
+  const { Composer } = await import("./composer")
   const html = renderToStaticMarkup(
     <Composer
       onSend={() => undefined}
       onStop={() => undefined}
       isStreaming={false}
+      selectedProvider="nexttoken"
       selectedModel="gpt-5.6-terra"
       onModelChange={() => undefined}
     />,
@@ -23,11 +24,23 @@ test("the current model name opens model selection while voice and upload contro
 
   assert.ok(modelTrigger, "expected an accessible model selector button")
   assert.match(modelTrigger[1], /GPT-5\.6 Terra/)
-  assert.deepEqual(
-    AI_MODELS.map((model) => model.id),
-    ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
-  )
   assert.doesNotMatch(html, /aria-label="(?:Start|Stop) voice input"/)
   assert.doesNotMatch(html, /aria-label="Attach image"/)
   assert.doesNotMatch(html, /aria-label="Upload image"/)
+})
+
+test("shows the selected OpenRouter GLM model in the composer", async () => {
+  const { Composer } = await import("./composer")
+  const html = renderToStaticMarkup(
+    <Composer
+      onSend={() => undefined}
+      onStop={() => undefined}
+      isStreaming={false}
+      selectedProvider="openrouter"
+      selectedModel="z-ai/glm-5.2"
+      onModelChange={() => undefined}
+    />,
+  )
+
+  assert.match(html, /GLM-5\.2/)
 })

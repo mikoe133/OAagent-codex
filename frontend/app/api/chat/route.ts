@@ -3,10 +3,17 @@ import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
+import {
+  DEFAULT_MODEL_PROVIDER,
+  isModelForProvider,
+  isModelProvider,
+  type ModelProvider,
+} from "@/lib/model-catalog"
 
 type ChatRequestBody = {
   messages?: unknown
   sessionId?: unknown
+  provider?: unknown
   model?: unknown
 }
 
@@ -51,14 +58,18 @@ export async function POST(req: Request) {
     }
 
     const sessionId = resolveAgentSessionId(body.sessionId)
-    const model = resolveRequestedModel(body.model)
+    const provider = resolveRequestedProvider(body.provider)
+    if (!provider) {
+      return jsonResponse({ error: "Invalid provider" }, 400)
+    }
+    const model = resolveRequestedModel(body.model, provider)
     if (body.model !== undefined && !model) {
       return jsonResponse({ error: "Invalid model" }, 400)
     }
     const agentResponse = await fetch(buildAgentStreamUrl(sessionId), {
       method: "POST",
       headers: buildAgentHeaders(sessionToken),
-      body: JSON.stringify({ message, ...(model ? { model } : {}) }),
+      body: JSON.stringify({ message, provider, ...(model ? { model } : {}) }),
       signal: req.signal,
       cache: "no-store",
     })
@@ -133,12 +144,19 @@ function resolveAgentSessionId(input: unknown): string {
   return `web-${randomUUID()}`
 }
 
-function resolveRequestedModel(input: unknown): string | null {
+function resolveRequestedProvider(input: unknown): ModelProvider | null {
+  if (input === undefined) {
+    return DEFAULT_MODEL_PROVIDER
+  }
+  return isModelProvider(input) ? input : null
+}
+
+function resolveRequestedModel(input: unknown, provider: ModelProvider): string | null {
   if (typeof input !== "string") {
     return null
   }
   const model = input.trim()
-  return model || null
+  return isModelForProvider(provider, model) ? model : null
 }
 
 function buildAgentStreamUrl(sessionId: string): URL {

@@ -1,18 +1,26 @@
 "use client"
 
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
-import { ChevronsUpDown, LogOut, Search, Trash2, UserRound, X } from "lucide-react"
+import { ChevronsUpDown, LogOut, Network, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ShiningText } from "@/components/ui/shining-text"
 import { matchesSessionIdentity, resolveStableSessionOrder } from "./session-list-order"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "@/components/ui/m3-dropdown-menu"
+} from "@/components/ui/dropdown-menu"
+import { MODEL_PROVIDERS, isModelProvider, type ModelProvider } from "@/lib/model-catalog"
 
 type NavItem = {
   name: string
@@ -50,6 +58,8 @@ type SiderUser = Pick<AuthUser, "email"> & {
   name: string
 }
 
+export type SessionIndicatorState = "running" | "paused" | "dismissing"
+
 type SiderProps = {
   activeSessionId?: string
   activeRecordId?: string | number | null
@@ -57,6 +67,10 @@ type SiderProps = {
   focusSessionKey?: number
   onSelectSession?: (session: ChatSessionListItem) => void
   onDeleteSession: (session: ChatSessionListItem) => Promise<void>
+  selectedProvider: ModelProvider
+  onProviderChange: (provider: ModelProvider) => void
+  providerSwitchDisabled?: boolean
+  sessionIndicatorStates: ReadonlyMap<string, SessionIndicatorState>
   refreshKey?: number
 }
 
@@ -146,7 +160,19 @@ const SearchBox = ({
   </div>
 )
 
-const UserInfo = ({ user, onLogout }: { user: SiderUser; onLogout: () => void }) => (
+const UserInfo = ({
+  user,
+  onLogout,
+  selectedProvider,
+  onProviderChange,
+  providerSwitchDisabled = false,
+}: {
+  user: SiderUser
+  onLogout: () => void
+  selectedProvider: ModelProvider
+  onProviderChange: (provider: ModelProvider) => void
+  providerSwitchDisabled?: boolean
+}) => (
   <div className="flex w-full items-center gap-3 px-6 py-4 text-left">
     <UserRound className="h-5 w-5 shrink-0 text-slate-950" strokeWidth={1.8} aria-hidden="true" />
     <span className="min-w-0 flex-1">
@@ -165,8 +191,41 @@ const UserInfo = ({ user, onLogout }: { user: SiderUser; onLogout: () => void })
         align="end"
         side="top"
         sideOffset={10}
-        className="z-[9999] w-40 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)]"
+        className="z-[9999] w-48 overflow-visible rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)]"
       >
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger
+            disabled={providerSwitchDisabled}
+            className="h-11 rounded-lg px-3 text-sm text-slate-700 focus:bg-slate-100 data-[state=open]:bg-slate-100"
+          >
+            <Network className="h-4 w-4 text-slate-500" aria-hidden="true" />
+            模型提供商
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent
+            sideOffset={8}
+            className="z-[10000] w-40 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)]"
+          >
+            <DropdownMenuRadioGroup
+              value={selectedProvider}
+              onValueChange={(value) => {
+                if (isModelProvider(value)) {
+                  onProviderChange(value)
+                }
+              }}
+            >
+              {MODEL_PROVIDERS.map((provider) => (
+                <DropdownMenuRadioItem
+                  key={provider.id}
+                  value={provider.id}
+                  className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100"
+                >
+                  {provider.name}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator className="mx-1 bg-slate-100" />
         <DropdownMenuItem
           onSelect={onLogout}
           className="rounded-lg text-sm text-red-600 focus:bg-red-50 focus:text-red-600"
@@ -241,36 +300,68 @@ const DeleteConversationButton = ({ name, onConfirm }: { name: string; onConfirm
 const SectionsList = ({
   items,
   activeHref,
+  activeSessionId,
   onSelect,
   onDelete,
+  sessionIndicatorStates,
 }: {
   items: NavItem[]
   activeHref: string
+  activeSessionId?: string
   onSelect: (item: NavItem) => void
   onDelete: (item: NavItem) => void
+  sessionIndicatorStates: ReadonlyMap<string, SessionIndicatorState>
 }) => (
   <div className="px-4 text-slate-600 md:px-8">
     <ul>
-      {items.map((item) => (
-        <li
-          key={item.href}
-          className="group flex items-center"
-          data-session-id={item.sessionId}
-          data-record-id={item.recordId === undefined ? undefined : String(item.recordId)}
-        >
-          <NavLink
-            href={item.href}
-            active={activeHref === item.href}
-            activeClassName="border-[#4f39f7] text-[#0f1828]"
-            className="block min-w-0 flex-1 border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828]"
-            onSelect={() => onSelect(item)}
-            title={item.name}
+      {items.map((item) => {
+        const indicatorState = item.sessionId ? sessionIndicatorStates.get(item.sessionId) : undefined
+        const isRunning = indicatorState === "running"
+        const isUnread = indicatorState === "paused" && item.sessionId !== activeSessionId
+
+        return (
+          <li
+            key={item.href}
+            className="group flex items-center"
+            data-session-id={item.sessionId}
+            data-record-id={item.recordId === undefined ? undefined : String(item.recordId)}
           >
-            <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
-          </NavLink>
-          <DeleteConversationButton name={item.name} onConfirm={() => onDelete(item)} />
-        </li>
-      ))}
+            <NavLink
+              href={item.href}
+              active={activeHref === item.href}
+              activeClassName="border-[#4f39f7] text-[#0f1828]"
+              className="flex min-w-0 flex-1 items-center border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828]"
+              onSelect={() => onSelect(item)}
+              title={item.name}
+            >
+              <span className="flex min-w-0 flex-1 items-center">
+                {isRunning ? (
+                  <ShiningText text={item.name} />
+                ) : (
+                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
+                )}
+                {isUnread ? (
+                  <span
+                    data-slot="session-unread-indicator"
+                    role="status"
+                    aria-label={`${item.name} has an unread response`}
+                    className="ml-2 h-2 w-2 shrink-0 rounded-full bg-sky-300"
+                  />
+                ) : null}
+              </span>
+              {isRunning ? (
+                <span
+                  data-slot="session-loading-indicator"
+                  role="status"
+                  aria-label={`${item.name} is generating`}
+                  className="sr-only"
+                />
+              ) : null}
+            </NavLink>
+            <DeleteConversationButton name={item.name} onConfirm={() => onDelete(item)} />
+          </li>
+        )
+      })}
     </ul>
   </div>
 )
@@ -284,6 +375,10 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       focusSessionKey = 0,
       onSelectSession,
       onDeleteSession,
+      selectedProvider,
+      onProviderChange,
+      providerSwitchDisabled = false,
+      sessionIndicatorStates,
       refreshKey = 0,
     },
     ref,
@@ -478,8 +573,10 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
                   <SectionsList
                     items={section.items}
                     activeHref={activeHref}
+                    activeSessionId={activeSessionId}
                     onSelect={handleSelectItem}
                     onDelete={handleDeleteItem}
+                    sessionIndicatorStates={sessionIndicatorStates}
                   />
                 </div>
               ))
@@ -511,7 +608,13 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
           />
         </div>
         <div className="shrink-0 border-t border-slate-100 bg-white/95">
-          <UserInfo user={user} onLogout={handleLogout} />
+          <UserInfo
+            user={user}
+            onLogout={handleLogout}
+            selectedProvider={selectedProvider}
+            onProviderChange={onProviderChange}
+            providerSwitchDisabled={providerSwitchDisabled}
+          />
         </div>
       </nav>
     )

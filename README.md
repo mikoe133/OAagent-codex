@@ -14,7 +14,7 @@ agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`
 
 ```bash
 npm install
-cp .env.example .env   # 填入 NEXTTOKEN_API_KEY
+cp .env.example .env   # 填入 NEXTTOKEN_API_KEY 和 OPENROUTER_API_KEY
 npm run dev -- "我想查一下周报列表,应该调用哪个接口?"
 ```
 
@@ -56,7 +56,7 @@ curl -N -X POST http://127.0.0.1:3000/v1/sessions/demo/messages/stream \
 
 所有 `/v1/*` 请求都必须携带 OA token。token 缺失或被 OA 拒绝时返回 `401`;OA 验证服务不可用时返回 `503`,不会降级放行。
 
-启动前校验:缺少 `NEXTTOKEN_API_KEY` 或作为兜底的 `agent/openapi/openapi.json` 直接失败。运行任务时优先读取 `OA_OPENAPI_URL`;远程不可用或内容非法时自动使用本地文件。未配置 `OA_API_BASE_URL` 时服务仍可启动,但 `/v1/*` 会因无法验证 OA token 返回 `503`,一次性 CLI 只做接口分析。
+启动前校验:缺少 `NEXTTOKEN_API_KEY`、`OPENROUTER_API_KEY` 或作为兜底的 `agent/openapi/openapi.json` 直接失败。运行任务时优先读取 `OA_OPENAPI_URL`;远程不可用或内容非法时自动使用本地文件。未配置 `OA_API_BASE_URL` 时服务仍可启动,但 `/v1/*` 会因无法验证 OA token 返回 `503`,一次性 CLI 只做接口分析。
 
 ## 脚本
 
@@ -99,7 +99,7 @@ browser -> web:3000 -> agent:3000 (Docker 内部网络)
 
 ```bash
 cp .env.example .env
-# 必填:NEXTTOKEN_API_KEY
+# 必填:NEXTTOKEN_API_KEY、OPENROUTER_API_KEY
 ```
 
 同机部署 OA 时保留:

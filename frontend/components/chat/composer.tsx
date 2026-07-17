@@ -16,22 +16,7 @@ import {
 import Image from "next/image"
 import { AudioWaveform } from "./audio-waveform"
 import TextType from "@/components/text/TextType"
-
-export const AI_MODELS = [
-  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", icon: "/images/gpt.png" },
-  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", icon: "/images/gpt.png" },
-  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", icon: "/images/gpt.png" },
-  { id: "gpt-5.5", name: "GPT-5.5", icon: "/images/gpt.png" },
-  { id: "gpt-5.4", name: "GPT-5.4", icon: "/images/gpt.png" },
-  { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", icon: "/images/gpt.png" },
-] as const
-
-export type AIModel = (typeof AI_MODELS)[number]["id"]
-export const DEFAULT_AI_MODEL: AIModel = AI_MODELS[0].id
-
-export function isAIModel(value: unknown): value is AIModel {
-  return typeof value === "string" && AI_MODELS.some((model) => model.id === value)
-}
+import { getModelsForProvider, type AIModel, type ModelProvider } from "@/lib/model-catalog"
 
 // Keep the existing implementations available while these composer controls are temporarily disabled.
 const SHOW_VOICE_INPUT = false
@@ -43,6 +28,7 @@ interface ComposerProps {
   isStreaming: boolean
   disabled?: boolean
   layoutRef?: React.Ref<HTMLDivElement>
+  selectedProvider: ModelProvider
   selectedModel: AIModel
   onModelChange: (model: AIModel) => void
 }
@@ -112,6 +98,7 @@ export function Composer({
   isStreaming,
   disabled,
   layoutRef,
+  selectedProvider,
   selectedModel,
   onModelChange,
 }: ComposerProps) {
@@ -352,7 +339,8 @@ export function Composer({
     setUploadedImage(null)
   }, [])
 
-  const currentModel = AI_MODELS.find((m) => m.id === selectedModel) || AI_MODELS[0]
+  const availableModels = getModelsForProvider(selectedProvider)
+  const currentModel = availableModels.find((model) => model.id === selectedModel) || availableModels[0]
   const placeholderText = isRecording ? "Listening..." : "Type a message... (Shift+Enter for new line)"
   const hasText = Boolean(value.trim())
   const canSend = Boolean(value.trim() || uploadedImage) && !disabled
@@ -551,7 +539,7 @@ export function Composer({
                   sideOffset={8}
                   className="w-40 px-2 py-2 rounded-2xl z-[9999]"
                 >
-                  {AI_MODELS.map((model) => (
+                  {availableModels.map((model) => (
                     <DropdownMenuItem
                       key={model.id}
                       onClick={() => {
