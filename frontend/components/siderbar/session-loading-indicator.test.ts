@@ -5,8 +5,11 @@ import test from "node:test"
 const siderSource = readFileSync(new URL("./Sider.tsx", import.meta.url), "utf8")
 const chatShellSource = readFileSync(new URL("../chat/chat-shell.tsx", import.meta.url), "utf8")
 
-test("renders ShiningText while running and a trailing blue dot only for unviewed completions", () => {
+test("renders ShiningText while running and a compact emerald dot for unviewed completions", () => {
   const sectionsList = siderSource.match(/const SectionsList[\s\S]*?\nconst Sider =/)?.[0]
+  const unreadIndicator = sectionsList?.match(
+    /<span\s+data-slot="session-unread-indicator"[\s\S]*?\/>/,
+  )?.[0]
 
   assert.ok(sectionsList, "expected the session list renderer")
   assert.doesNotMatch(siderSource, /Load1/)
@@ -18,7 +21,11 @@ test("renders ShiningText while running and a trailing blue dot only for unviewe
     sectionsList,
     /indicatorState === "paused" && item\.sessionId !== activeSessionId/,
   )
-  assert.match(sectionsList, /data-slot="session-unread-indicator"[\s\S]*bg-sky-300/)
+  assert.ok(unreadIndicator, "expected the unread completion indicator")
+  assert.match(unreadIndicator, /h-1\.5/)
+  assert.match(unreadIndicator, /w-1\.5/)
+  assert.match(unreadIndicator, /bg-emerald-400/)
+  assert.doesNotMatch(unreadIndicator, /bg-sky-/)
 })
 
 test("passes the live session indicator lifecycle from ChatShell into Sider", () => {
