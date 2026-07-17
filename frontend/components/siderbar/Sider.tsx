@@ -578,7 +578,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div
             ref={sessionListRef}
-            className="min-h-0 h-full space-y-7 overflow-y-auto py-20 scroll-py-20 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="min-h-0 h-full space-y-7 overflow-y-auto pb-20 pt-4 scroll-pb-20 scroll-pt-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {filteredSections.length > 0 ? (
               filteredSections.map((section) => (
@@ -601,7 +601,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             )}
           </div>
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-white/95 backdrop-blur-[2px]"
+            className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-white/95 backdrop-blur-[2px]"
             style={{
               WebkitMaskImage:
                 "linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.995) 10%, rgba(0,0,0,0.975) 20%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.82) 42%, rgba(0,0,0,0.66) 54%, rgba(0,0,0,0.46) 66%, rgba(0,0,0,0.27) 77%, rgba(0,0,0,0.12) 87%, rgba(0,0,0,0.03) 95%, transparent 100%)",
