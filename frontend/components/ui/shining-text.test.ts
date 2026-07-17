@@ -6,7 +6,9 @@ const shiningTextSource = readFileSync(new URL("./shining-text.tsx", import.meta
 
 test("uses the provided motion shimmer without changing compact sidebar typography", () => {
   assert.match(shiningTextSource, /import \{ motion \} from "motion\/react"/)
-  assert.match(shiningTextSource, /linear-gradient\(110deg,#404040,35%,#fff,50%,#404040,75%,#404040\)/)
+  assert.match(shiningTextSource, /baseColor = "#404040"/)
+  assert.match(shiningTextSource, /backgroundImage:/)
+  assert.match(shiningTextSource, /linear-gradient\(110deg, \$\{baseColor\}/)
   assert.match(shiningTextSource, /backgroundPosition: "200% 0"/)
   assert.match(shiningTextSource, /backgroundPosition: "-200% 0"/)
   assert.match(shiningTextSource, /repeat: Infinity/)
