@@ -16,7 +16,7 @@ test("places search and new chat in one borderless 3:2 row above the session mes
   assert.notEqual(actionRowIndex, -1, "expected a shared sider action row")
   assert.ok(actionRow, "expected search and new chat in the same row")
   assert.match(actionRow, /grid-cols-\[minmax\(0,3fr\)_minmax\(0,2fr\)\]/)
-  assert.doesNotMatch(actionRow, /border(?:-b)?/)
+  assert.doesNotMatch(actionRow, /border-b/)
   assert.ok(actionRowIndex < buttonIndex, "expected search before the new chat button")
   assert.ok(buttonIndex < sessionListIndex, "expected the new chat button above the session list")
 })

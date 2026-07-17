@@ -551,27 +551,27 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         aria-hidden={isCollapsed}
         className="fixed left-0 top-0 z-40 hidden h-full w-80 flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:flex">
         <div
-          data-slot="sider-search-panel"
-          className="shrink-0 border-b border-slate-200 bg-white/95 px-4 pb-5 pt-6 backdrop-blur-xl md:px-8"
+          data-slot="sider-actions"
+          className="grid shrink-0 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-center gap-2 bg-white/95 px-4 pb-4 pt-6 backdrop-blur-xl md:px-8"
         >
-          <SearchBox
-            value={query}
-            hasValue={query.trim().length > 0}
-            onChange={(event) => setQuery(event.target.value)}
-            onClear={() => setQuery("")}
-            placeholder="Search conversations"
-            aria-label="Search conversations"
-          />
-        </div>
-        <div className="shrink-0 bg-white/95 px-4 pt-4 md:px-8">
+          <div className="min-w-0">
+            <SearchBox
+              value={query}
+              hasValue={query.trim().length > 0}
+              onChange={(event) => setQuery(event.target.value)}
+              onClear={() => setQuery("")}
+              placeholder="Search"
+              aria-label="Search conversations"
+            />
+          </div>
           <button
             data-slot="new-chat-button"
             type="button"
             onClick={onNewSession}
-            className="flex h-10 w-full items-center gap-2 rounded-lg border-0 bg-[#f4f4f5] px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
+            className="flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg border-0 bg-[#f4f4f5] px-2 text-sm font-medium text-slate-700 transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
           >
-            <SquarePen className="h-4 w-4" aria-hidden="true" />
-            <span>New chat</span>
+            <SquarePen className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="truncate">New chat</span>
           </button>
         </div>
 
