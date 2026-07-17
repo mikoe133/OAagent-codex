@@ -64,6 +64,127 @@ test("GET sorts merged sessions from newest to oldest creation time", async () =
   }
 })
 
+test("GET keeps original creation order and deduplicates replacement records", async () => {
+  const originalFetch = globalThis.fetch
+  const originalOaApiBaseUrl = process.env.OA_API_BASE_URL
+  const originalAgentApiBaseUrl = process.env.AGENT_API_BASE_URL
+  process.env.OA_API_BASE_URL = "https://oa.example.test"
+  process.env.AGENT_API_BASE_URL = "https://agent.example.test"
+
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input))
+    if (url.hostname === "oa.example.test") {
+      return Response.json({
+        data: {
+          items: [
+            {
+              id: 3,
+              record: {
+                agentSessionId: "replaced-session",
+                title: "Replaced",
+                createdAt: "2026-07-10T08:00:00.000Z",
+              },
+              created_at: "2026-07-16T08:00:00.000Z",
+              updated_at: "2026-07-16T08:00:00.000Z",
+            },
+            {
+              id: 2,
+              record: {
+                agentSessionId: "newer-session",
+                title: "Newer",
+                createdAt: "2026-07-13T08:00:00.000Z",
+              },
+              created_at: "2026-07-13T08:00:00.000Z",
+              updated_at: "2026-07-13T08:00:00.000Z",
+            },
+            {
+              id: 1,
+              record: {
+                agentSessionId: "replaced-session",
+                title: "Stale replacement",
+                createdAt: "2026-07-10T08:00:00.000Z",
+              },
+              created_at: "2026-07-10T08:00:00.000Z",
+              updated_at: "2026-07-10T08:00:00.000Z",
+            },
+          ],
+          page: 1,
+          size: 100,
+          total: 3,
+        },
+      })
+    }
+
+    return Response.json({ sessions: [] })
+  }
+
+  try {
+    const response = await sessionsRoute.GET(
+      new Request("http://localhost/api/chat/sessions", {
+        headers: { cookie: "sessionid=test-session-token" },
+      }),
+    )
+    const payload = (await response.json()) as {
+      sessions: Array<{ sessionId: string; recordId?: string | number; createdAt: string }>
+    }
+
+    assert.equal(response.status, 200)
+    assert.deepEqual(
+      payload.sessions.map((session) => session.sessionId),
+      ["newer-session", "replaced-session"],
+    )
+    assert.equal(payload.sessions[1]?.recordId, 3)
+    assert.equal(payload.sessions[1]?.createdAt, "2026-07-10T08:00:00.000Z")
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreEnv("OA_API_BASE_URL", originalOaApiBaseUrl)
+    restoreEnv("AGENT_API_BASE_URL", originalAgentApiBaseUrl)
+  }
+})
+
+test("PATCH persists the immutable creation time from generated session ids", async () => {
+  const originalFetch = globalThis.fetch
+  const originalOaApiBaseUrl = process.env.OA_API_BASE_URL
+  process.env.OA_API_BASE_URL = "https://oa.example.test"
+
+  const createdAt = "2026-07-10T08:00:00.000Z"
+  const sessionId = `web-${Date.parse(createdAt)}-abcdefg`
+  let savedRecord: Record<string, unknown> | null = null
+
+  globalThis.fetch = async (_input, init) => {
+    savedRecord = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return Response.json({
+      data: {
+        id: 9,
+        record: savedRecord,
+        created_at: "2026-07-17T08:00:00.000Z",
+        updated_at: "2026-07-17T08:00:00.000Z",
+      },
+    })
+  }
+
+  try {
+    const response = await sessionsRoute.PATCH(
+      new Request("http://localhost/api/chat/sessions", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          cookie: "sessionid=test-session-token",
+        },
+        body: JSON.stringify({ sessionId, recordId: 9, messages: [] }),
+      }),
+    )
+    const payload = (await response.json()) as { session: { createdAt: string } }
+
+    assert.equal(response.status, 200)
+    assert.equal(savedRecord?.createdAt, createdAt)
+    assert.equal(payload.session.createdAt, createdAt)
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreEnv("OA_API_BASE_URL", originalOaApiBaseUrl)
+  }
+})
+
 test("DELETE removes both the OA record and agent session", async () => {
   const deleteHandler = (sessionsRoute as unknown as { DELETE?: DeleteHandler }).DELETE
   assert.equal(typeof deleteHandler, "function")

@@ -48,3 +48,21 @@ test("sorts sessions from newest to oldest creation time without using update ti
     ["older-created", "newer-created"],
   )
 })
+
+test("uses session identity as a deterministic tie-breaker for equal creation times", () => {
+  const createdAt = "2026-07-15T08:00:00.000Z"
+  const forward = [
+    { sessionId: "session-b", createdAt },
+    { sessionId: "session-a", createdAt },
+  ]
+  const reversed = [...forward].reverse()
+
+  assert.deepEqual(
+    sortSessionItemsByCreatedAt(forward).map((item) => item.sessionId),
+    ["session-a", "session-b"],
+  )
+  assert.deepEqual(
+    sortSessionItemsByCreatedAt(reversed).map((item) => item.sessionId),
+    ["session-a", "session-b"],
+  )
+})
