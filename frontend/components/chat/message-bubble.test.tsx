@@ -57,6 +57,21 @@ test("user messages render without an avatar or name in a borderless gray bubble
   assert.doesNotMatch(html, />You<\/span>/)
 })
 
+test("assistant replies show the OA Agent name without an animated avatar", () => {
+  const message = {
+    id: "assistant-without-avatar",
+    role: "assistant",
+    content: "Assistant content",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    status: "completed",
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, />OA Agent<\/span>/)
+  assert.doesNotMatch(html, /orb-circle-/)
+})
+
 test("user and assistant action controls reveal on hover or keyboard focus", () => {
   const userMessage = {
     id: "user-actions",
