@@ -550,7 +550,10 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         id="chat-sider"
         aria-hidden={isCollapsed}
         className="fixed left-0 top-0 z-40 hidden h-full w-80 flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:flex">
-        <div className="shrink-0 space-y-3 border-b border-slate-200 bg-white/95 px-4 pb-5 pt-6 backdrop-blur-xl md:px-8">
+        <div
+          data-slot="sider-search-panel"
+          className="shrink-0 border-b border-slate-200 bg-white/95 px-4 pb-5 pt-6 backdrop-blur-xl md:px-8"
+        >
           <SearchBox
             value={query}
             hasValue={query.trim().length > 0}
@@ -559,6 +562,8 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             placeholder="Search conversations"
             aria-label="Search conversations"
           />
+        </div>
+        <div className="shrink-0 bg-white/95 px-4 pt-4 md:px-8">
           <button
             data-slot="new-chat-button"
             type="button"
