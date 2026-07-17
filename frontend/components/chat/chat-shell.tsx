@@ -1280,15 +1280,6 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         >
           <SiderToggleIcon className="h-5 w-5" />
         </Button>
-        <Button
-          onClick={startNewSession}
-          variant="ghost"
-          size="icon"
-          className={FLOATING_CONTROL_BUTTON_CLASS}
-          aria-label="New chat"
-        >
-          <SquarePen className="h-5 w-5" />
-        </Button>
       </div>
       <Button
         onClick={startNewSession}
@@ -1305,6 +1296,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         activeRecordId={activeRecordId}
         isCollapsed={isSiderCollapsed}
         focusSessionKey={sessionListFocusKey}
+        onNewSession={startNewSession}
         onSelectSession={handleSelectSession}
         onDeleteSession={handleDeleteSession}
         refreshKey={sessionListRefreshKey}

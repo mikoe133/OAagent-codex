@@ -1,7 +1,7 @@
 "use client"
 
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
-import { ChevronsUpDown, LogOut, Network, Search, Trash2, UserRound, X } from "lucide-react"
+import { ChevronsUpDown, LogOut, Network, Search, SquarePen, Trash2, UserRound, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
@@ -65,6 +65,7 @@ type SiderProps = {
   activeRecordId?: string | number | null
   isCollapsed?: boolean
   focusSessionKey?: number
+  onNewSession: () => void
   onSelectSession?: (session: ChatSessionListItem) => void
   onDeleteSession: (session: ChatSessionListItem) => Promise<void>
   selectedProvider: ModelProvider
@@ -373,6 +374,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       activeRecordId = null,
       isCollapsed = false,
       focusSessionKey = 0,
+      onNewSession,
       onSelectSession,
       onDeleteSession,
       selectedProvider,
@@ -548,17 +550,24 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         id="chat-sider"
         aria-hidden={isCollapsed}
         className="fixed left-0 top-0 z-40 hidden h-full w-80 flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:flex">
-        <div className="shrink-0 space-y-6 border-b border-slate-200 bg-white/95 pb-6 backdrop-blur-xl">
-          <div className="px-4 md:px-8 mt-6">
-            <SearchBox
-              value={query}
-              hasValue={query.trim().length > 0}
-              onChange={(event) => setQuery(event.target.value)}
-              onClear={() => setQuery("")}
-              placeholder="Search conversations"
-              aria-label="Search conversations"
-            />
-          </div>
+        <div className="shrink-0 space-y-3 border-b border-slate-200 bg-white/95 px-4 pb-5 pt-6 backdrop-blur-xl md:px-8">
+          <SearchBox
+            value={query}
+            hasValue={query.trim().length > 0}
+            onChange={(event) => setQuery(event.target.value)}
+            onClear={() => setQuery("")}
+            placeholder="Search conversations"
+            aria-label="Search conversations"
+          />
+          <button
+            data-slot="new-chat-button"
+            type="button"
+            onClick={onNewSession}
+            className="flex h-10 w-full items-center gap-2 rounded-lg border-0 bg-[#f4f4f5] px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
+          >
+            <SquarePen className="h-4 w-4" aria-hidden="true" />
+            <span>New chat</span>
+          </button>
         </div>
 
         <div className="relative min-h-0 flex-1 overflow-hidden">
