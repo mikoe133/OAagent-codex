@@ -11,8 +11,9 @@ import {
   isModelProvider,
 } from "./model-catalog"
 
-test("exposes nexttoken and openrouter provider choices", () => {
-  assert.equal(DEFAULT_MODEL_PROVIDER, "nexttoken")
+test("defaults to OpenRouter while exposing both provider choices", () => {
+  assert.equal(DEFAULT_MODEL_PROVIDER, "openrouter")
+  assert.equal(getDefaultModel(DEFAULT_MODEL_PROVIDER), "z-ai/glm-5.2")
   assert.deepEqual(
     MODEL_PROVIDERS.map((provider) => provider.id),
     ["nexttoken", "openrouter"],
