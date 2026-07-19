@@ -1,5 +1,6 @@
 import { Codex, type Thread, type ThreadOptions } from "@openai/codex-sdk";
 import type { AppConfig } from "../../config/config.js";
+import type { ModelProviderId } from "../../config/modelCatalog.js";
 
 /**
  * codex 子进程只拿到运行必需的变量。.env 中的其余凭证
@@ -40,13 +41,24 @@ export function createCodexClient(
       model_providers: {
         [config.modelProvider]: {
           name: providerConfig.name,
-          base_url: providerConfig.baseUrl,
+          base_url: resolveCodexModelBaseUrl(config, config.modelProvider),
           env_key: providerConfig.envKey,
           wire_api: "responses",
         },
       },
     },
   });
+}
+
+export function resolveCodexModelBaseUrl(
+  config: AppConfig,
+  provider: ModelProviderId,
+): string {
+  if (!config.modelRelayBaseUrl) {
+    return config.modelProviders[provider].baseUrl;
+  }
+
+  return `${config.modelRelayBaseUrl.replace(/\/+$/, "")}/${provider}/v1`;
 }
 
 export function createThreadOptions(

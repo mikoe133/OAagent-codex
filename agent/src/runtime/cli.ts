@@ -1,5 +1,6 @@
 import { runCodexAgent } from "../application/runCodexAgent.js";
 import { loadConfig } from "../config/config.js";
+import { startModelRelay } from "../infrastructure/codex/modelRelay.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
 
 async function main(): Promise<void> {
@@ -10,28 +11,35 @@ async function main(): Promise<void> {
     return;
   }
 
-  let config;
+  let baseConfig;
   try {
-    config = loadConfig();
+    baseConfig = loadConfig();
   } catch (error) {
     console.error(`启动失败: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
     return;
   }
 
-  console.error(`[agent] provider=${config.modelProvider} model=${config.model}`);
+  console.error(`[agent] provider=${baseConfig.modelProvider} model=${baseConfig.model}`);
   console.error("[agent] 当前未注册 OA 调用工具;本次只做接口分析,不执行真实 OA 请求。");
 
-  const openapi = await resolveOpenApiContract(config);
+  const openapi = await resolveOpenApiContract(baseConfig);
   console.error(
     openapi.source === "remote"
-      ? `[agent] OpenAPI 使用远程地址:${config.openapiUrl}`
-      : `[agent] 远程 OpenAPI 不可用,使用本地文件:${config.openapiPath}`,
+      ? `[agent] OpenAPI 使用远程地址:${baseConfig.openapiUrl}`
+      : `[agent] 远程 OpenAPI 不可用,使用本地文件:${baseConfig.openapiPath}`,
   );
-  const result = await runCodexAgent(
-    { ...config, openapiPath: openapi.path },
-    userTask,
-  );
+  const modelRelay = await startModelRelay(baseConfig.modelProviders);
+  const config = { ...baseConfig, modelRelayBaseUrl: modelRelay.baseUrl };
+  let result;
+  try {
+    result = await runCodexAgent(
+      { ...config, openapiPath: openapi.path },
+      userTask,
+    );
+  } finally {
+    await modelRelay.close();
+  }
 
   if (result.executedCommands.length > 0) {
     console.error("[agent] 过程记录(执行过的命令):");

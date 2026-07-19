@@ -31,6 +31,8 @@ export type AppConfig = {
   modelProvider: ModelProviderId;
   /** 模型服务上的模型 ID。 */
   model: string;
+  /** 运行时创建的本地 HTTP/1.1 模型中继地址。 */
+  modelRelayBaseUrl: string | null;
   /** OA 后端地址。未配置时只做接口分析。 */
   oaApiBaseUrl: string | null;
   /** OA 数据源别名。 */
@@ -150,6 +152,7 @@ export function loadConfig(): AppConfig {
     modelProviders,
     modelProvider,
     model,
+    modelRelayBaseUrl: null,
     oaApiBaseUrl: process.env.OA_API_BASE_URL?.trim() || null,
     oaAuthAlias: process.env.OA_AUTH_ALIAS?.trim() || "default",
     oaApiTokenHeader,
