@@ -32,7 +32,7 @@ export type AIModel =
   | (typeof MODELS_BY_PROVIDER.nexttoken)[number]["id"]
   | (typeof MODELS_BY_PROVIDER.openrouter)[number]["id"]
 
-export const DEFAULT_MODEL_PROVIDER: ModelProvider = "nexttoken"
+export const DEFAULT_MODEL_PROVIDER: ModelProvider = "openrouter"
 
 const DEFAULT_MODELS = {
   nexttoken: "gpt-5.6-terra",
