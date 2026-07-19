@@ -99,6 +99,47 @@ test("rejects an invalid provider credential without contacting upstream", async
   assert.equal(upstreamRequests, 0);
 });
 
+test("returns a diagnostic 502 when the HTTP/1.1 upstream is unavailable", async (t) => {
+  const unavailableUpstream = createServer();
+  const unavailablePort = await listen(unavailableUpstream);
+  await close(unavailableUpstream);
+
+  const relay = await startModelRelay({
+    nexttoken: {
+      ...nexttoken,
+      baseUrl: `https://127.0.0.1:${unavailablePort}/v1`,
+    },
+    openrouter,
+  });
+  t.after(() => relay.close());
+
+  const result = await requestRelay(
+    `${relay.baseUrl}/nexttoken/v1/responses`,
+    "Bearer nexttoken-secret",
+    "{}",
+  );
+
+  assert.equal(result.status, 502);
+  assert.match(
+    String((JSON.parse(result.body) as { error?: unknown }).error),
+    /^model relay upstream request failed:/,
+  );
+});
+
+test("does not expose paths outside provider-specific v1 routes", async (t) => {
+  const relay = await startModelRelay({ nexttoken, openrouter });
+  t.after(() => relay.close());
+
+  const result = await requestRelay(
+    `${relay.baseUrl}/health`,
+    "Bearer nexttoken-secret",
+    "{}",
+  );
+
+  assert.equal(result.status, 404);
+  assert.deepEqual(JSON.parse(result.body), { error: "not found" });
+});
+
 test("builds provider-specific Codex base URLs when the relay is active", () => {
   const config = {
     modelRelayBaseUrl: "http://127.0.0.1:43123",
