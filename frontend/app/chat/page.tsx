@@ -5,7 +5,7 @@ import type { Metadata } from "next"
 export const dynamic = "force-dynamic"
 
 export const metadata: Metadata = {
-  title: "Chat - OA Agent",
+  title: "元始 OS-Agent",
   description: "Chat with OA Agent powered by Gemini",
 }
 
