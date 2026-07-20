@@ -360,9 +360,10 @@ export function Composer({
     >
       <div className="relative max-w-2xl mx-auto pointer-events-auto">
         <div
+          data-slot="chat-composer"
           className={cn(
-            "flex flex-col gap-3 p-4 bg-white border-stone-200 transition-all duration-200 border-none border-0 overflow-hidden relative rounded-3xl",
-            "focus-within:border-stone-300 focus-within:ring-2 focus-within:ring-stone-200",
+            "flex flex-col gap-3 p-4 bg-white border-stone-200 transition-all duration-200 border-none border-0 overflow-hidden relative rounded-3xl theme-dark:bg-zinc-900",
+            "focus-within:border-stone-300 focus-within:ring-2 focus-within:ring-stone-200 theme-dark:focus-within:ring-zinc-700",
           )}
           style={{
             boxShadow:
@@ -372,7 +373,7 @@ export function Composer({
           <div className="flex gap-2 items-center">
             {uploadedImage && (
               <div className={cn("relative shrink-0", showImageBounce && "image-bounce")}>
-                <div className="w-12 h-12 rounded-lg overflow-hidden border border-stone-200">
+                <div className="w-12 h-12 rounded-lg overflow-hidden border border-stone-200 theme-dark:border-zinc-700">
                   <Image
                     src={uploadedImage || "/placeholder.svg"}
                     alt="Uploaded image"
@@ -406,7 +407,7 @@ export function Composer({
                   cursorCharacter="|"
                   cursorBlinkDuration={0.6}
                   className={cn(
-                    "pointer-events-none absolute left-2 top-1.5 max-w-[calc(100%-1rem)] overflow-hidden text-sm leading-5 text-stone-400",
+                    "pointer-events-none absolute left-2 top-1.5 max-w-[calc(100%-1rem)] overflow-hidden text-sm leading-5 text-stone-400 theme-dark:text-zinc-500",
                     (isStreaming || disabled) && "opacity-50",
                   )}
                   style={{ whiteSpace: "nowrap" }}
@@ -425,7 +426,7 @@ export function Composer({
                 disabled={isStreaming || disabled}
                 rows={1}
                 className={cn(
-                  "relative z-10 block w-full resize-none bg-transparent px-2 py-1.5 text-sm text-stone-800",
+                  "relative z-10 block w-full resize-none bg-transparent px-2 py-1.5 text-sm text-stone-800 theme-dark:text-zinc-100",
                   "focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
                   "max-h-[56px] overflow-y-auto",
                 )}
@@ -446,7 +447,7 @@ export function Composer({
                   playClickSound()
                   onStop()
                 }}
-                className="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+                className="relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 theme-dark:focus-visible:ring-zinc-600"
                 aria-label="Stop generating"
               >
                 <span
@@ -454,7 +455,7 @@ export function Composer({
                   style={{ animationDuration: "1.1s" }}
                   aria-hidden="true"
                 >
-                  <span className="h-4 w-4 rotate-45 rounded-[4px] bg-black shadow-sm" />
+                  <span className="h-4 w-4 rotate-45 rounded-[4px] bg-black shadow-sm theme-dark:bg-zinc-100" />
                 </span>
               </button>
             ) : (
@@ -462,10 +463,10 @@ export function Composer({
                 onClick={handleSend}
                 disabled={!canSend}
                 className={cn(
-                  "relative h-9 w-9 shrink-0 rounded-full flex items-center justify-center bg-[#fafafa] text-[#d3d8dd]",
+                  "relative h-9 w-9 shrink-0 rounded-full flex items-center justify-center bg-[#fafafa] text-[#d3d8dd] theme-dark:bg-zinc-800 theme-dark:text-zinc-600",
                   "transition-[color,transform] duration-200",
                   canSend ? "cursor-pointer hover:scale-105" : "cursor-not-allowed",
-                  hasText && "text-[#7b8794]",
+                  hasText && "text-[#7b8794] theme-dark:text-zinc-300",
                 )}
                 aria-label="Send message"
               >
@@ -485,7 +486,7 @@ export function Composer({
                     "h-9 w-9 shrink-0 transition-all rounded-full relative z-10",
                     isRecording
                       ? "bg-red-500 hover:bg-red-600 text-white animate-bounce-subtle"
-                      : "bg-zinc-100 hover:bg-zinc-200 text-stone-700",
+                      : "bg-zinc-100 hover:bg-zinc-200 text-stone-700 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700",
                   )}
                   aria-label={
                     isRecording
@@ -517,7 +518,7 @@ export function Composer({
                   }}
                   disabled={isStreaming || disabled}
                   size="icon"
-                  className="h-9 w-9 shrink-0 bg-zinc-100 hover:bg-zinc-200 text-stone-700 rounded-full"
+                  className="h-9 w-9 shrink-0 bg-zinc-100 hover:bg-zinc-200 text-stone-700 rounded-full theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700"
                   aria-label="Attach image"
                 >
                   <Paperclip className="w-4 h-4" />
@@ -532,12 +533,12 @@ export function Composer({
                   variant="ghost"
                   size="sm"
                   disabled={isStreaming || disabled}
-                  className="h-9 max-w-full shrink-0 rounded-full bg-zinc-100 px-3 text-xs font-normal text-stone-600 hover:bg-zinc-200 hover:text-stone-800"
+                  className="h-9 max-w-full shrink-0 rounded-full bg-zinc-100 px-3 text-xs font-normal text-stone-600 hover:bg-zinc-200 hover:text-stone-800 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700 theme-dark:hover:text-zinc-100"
                   aria-label="Select AI model"
                   onClick={playClickSound}
                 >
                   <span className="truncate">{currentModel.name}</span>
-                  <ChevronDown className="h-4 w-4 text-stone-400" aria-hidden="true" />
+                  <ChevronDown className="h-4 w-4 text-stone-400 theme-dark:text-zinc-500" aria-hidden="true" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuPortal>
@@ -556,7 +557,7 @@ export function Composer({
                       }}
                       className={cn(
                         "flex items-center cursor-pointer gap-3 rounded-lg",
-                        selectedModel === model.id && "bg-stone-100",
+                        selectedModel === model.id && "bg-stone-100 theme-dark:bg-zinc-800",
                       )}
                     >
                       <Image

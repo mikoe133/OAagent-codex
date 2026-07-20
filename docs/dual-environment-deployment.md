@@ -217,6 +217,8 @@ docker compose --env-file .env --env-file .deploy.env -f compose.yml ps
 4. 可以发送 Agent 消息并读取 OA 数据。
 5. 测试和生产的会话互不混用。
 
+Compose 已让 `agent` 容器承担 Codex 命令的外部隔离,发布后不应额外给该容器增加 `SYS_ADMIN`、关闭 seccomp/AppArmor 或启用 privileged 模式。
+
 ## 手动回滚
 
 正常情况下失败会自动回滚。如果需要手动回滚,进入对应目录执行:

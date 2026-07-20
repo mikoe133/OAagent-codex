@@ -12,7 +12,7 @@ export function TypingIndicator() {
       aria-label="Agent is thinking"
     >
       <ShiningText text="Thinking" baseColor="#9e9fa9" />
-      <ChevronRight className="h-4 w-4 shrink-0 text-[#9e9fa9]" aria-hidden="true" />
+      <ChevronRight className="h-4 w-4 shrink-0 text-[#9e9fa9] theme-dark:text-zinc-400" aria-hidden="true" />
     </div>
   )
 }

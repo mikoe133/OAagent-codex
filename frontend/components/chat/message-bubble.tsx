@@ -81,10 +81,10 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
     >
       <div className={cn("min-w-0", isUser ? "flex flex-col items-end" : "flex-1")}>
         {!isUser && (
-          <div className="mb-1.5 flex items-center gap-2 text-xs text-stone-500">
+          <div className="mb-1.5 flex items-center gap-2 text-xs text-stone-500 theme-dark:text-zinc-400">
             <span className="font-medium">OA Agent</span>
             {assistantIsStreaming && (
-              <span role="status" aria-label="Generating response" className="flex items-center gap-1.5 text-emerald-700">
+              <span role="status" aria-label="Generating response" className="flex items-center gap-1.5 text-emerald-700 theme-dark:text-emerald-400">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
                 Working
               </span>
@@ -95,11 +95,11 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
         {isUser ? (
           <div
             data-slot="user-message-bubble"
-            className="max-w-full rounded-2xl rounded-tr-md bg-[#f5f5f5] px-4 py-3 text-stone-800"
+            className="max-w-full rounded-2xl rounded-tr-md bg-[#f5f5f5] px-4 py-3 text-stone-800 theme-dark:bg-zinc-800 theme-dark:text-zinc-100"
           >
             <div className="flex flex-col gap-2">
               {message.imageData && (
-                <div className="h-24 w-24 overflow-hidden rounded-lg border border-stone-200 bg-white">
+                <div className="h-24 w-24 overflow-hidden rounded-lg border border-stone-200 bg-white theme-dark:border-zinc-700 theme-dark:bg-zinc-900">
                   <Image
                     src={message.imageData || "/placeholder.svg"}
                     alt="Uploaded image"
@@ -132,13 +132,13 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
               </span>
             )}
             {message.status === "failed" && (
-              <div className="mt-3 flex max-w-2xl items-start gap-2 rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs leading-5 text-rose-700">
+              <div className="mt-3 flex max-w-2xl items-start gap-2 rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs leading-5 text-rose-700 theme-dark:border-rose-900 theme-dark:bg-rose-950/40 theme-dark:text-rose-300">
                 <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>{message.error || "The response was interrupted before it could finish."}</span>
               </div>
             )}
             {message.status === "stopped" && (
-              <div className="mt-3 flex items-center gap-1.5 text-xs text-stone-500">
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-stone-500 theme-dark:text-zinc-400">
                 <CircleStop className="h-3.5 w-3.5" aria-hidden="true" />
                 Generation stopped
               </div>
@@ -165,11 +165,11 @@ function UserActions({ message }: { message: Message }) {
   const showCopy = message.content.trim().length > 0
 
   return (
-    <div className="mt-1.5 flex min-h-7 items-center justify-end gap-1 text-[11px] text-stone-400">
+    <div className="mt-1.5 flex min-h-7 items-center justify-end gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
       <span>{formatTime(message.createdAt)}</span>
       {showCopy && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
-          <span className="mx-1 h-3 w-px bg-stone-200" aria-hidden="true" />
+          <span className="mx-1 h-3 w-px bg-stone-200 theme-dark:bg-zinc-700" aria-hidden="true" />
           <MessageCopyButton content={message.content} subject="message" />
         </span>
       )}
@@ -198,11 +198,11 @@ function AssistantActions({
   }
 
   return (
-    <div className="mt-2 flex min-h-7 items-center gap-1 text-[11px] text-stone-400">
+    <div className="mt-2 flex min-h-7 items-center gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
       <span>{formatTime(message.createdAt)}</span>
       {showActions && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
-          <span className="mx-1 h-3 w-px bg-stone-200" aria-hidden="true" />
+          <span className="mx-1 h-3 w-px bg-stone-200 theme-dark:bg-zinc-700" aria-hidden="true" />
           <MessageCopyButton content={message.content} subject="response" />
           <Tooltip>
             <TooltipTrigger asChild>
@@ -214,8 +214,8 @@ function AssistantActions({
                 aria-label="Like response"
                 aria-pressed={message.feedback === "like"}
                 className={cn(
-                  "h-7 w-7 rounded-md text-stone-400 hover:bg-emerald-50 hover:text-emerald-700",
-                  message.feedback === "like" && "bg-emerald-50 text-emerald-700",
+                  "h-7 w-7 rounded-md text-stone-400 hover:bg-emerald-50 hover:text-emerald-700 theme-dark:text-zinc-500 theme-dark:hover:bg-emerald-950/50 theme-dark:hover:text-emerald-400",
+                  message.feedback === "like" && "bg-emerald-50 text-emerald-700 theme-dark:bg-emerald-950/50 theme-dark:text-emerald-400",
                 )}
               >
                 <ThumbsUp className={cn("h-3.5 w-3.5", message.feedback === "like" && "fill-current")} />
@@ -233,8 +233,8 @@ function AssistantActions({
                 aria-label="Dislike response"
                 aria-pressed={message.feedback === "dislike"}
                 className={cn(
-                  "h-7 w-7 rounded-md text-stone-400 hover:bg-rose-50 hover:text-rose-700",
-                  message.feedback === "dislike" && "bg-rose-50 text-rose-700",
+                  "h-7 w-7 rounded-md text-stone-400 hover:bg-rose-50 hover:text-rose-700 theme-dark:text-zinc-500 theme-dark:hover:bg-rose-950/50 theme-dark:hover:text-rose-400",
+                  message.feedback === "dislike" && "bg-rose-50 text-rose-700 theme-dark:bg-rose-950/50 theme-dark:text-rose-400",
                 )}
               >
                 <ThumbsDown className={cn("h-3.5 w-3.5", message.feedback === "dislike" && "fill-current")} />
@@ -248,7 +248,7 @@ function AssistantActions({
                 asChild
                 variant="ghost"
                 size="icon-sm"
-                className="h-7 w-7 rounded-md text-stone-400 hover:bg-sky-50 hover:text-sky-700"
+                className="h-7 w-7 rounded-md text-stone-400 hover:bg-sky-50 hover:text-sky-700 theme-dark:text-zinc-500 theme-dark:hover:bg-sky-950/50 theme-dark:hover:text-sky-400"
               >
                 <a
                   href={oaNavigationUrl}
@@ -307,7 +307,7 @@ function MessageCopyButton({ content, subject }: { content: string; subject: "me
           size="icon-sm"
           onClick={handleCopy}
           aria-label={ariaLabel}
-          className="h-7 w-7 rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+          className="h-7 w-7 rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700 theme-dark:text-zinc-500 theme-dark:hover:bg-zinc-800 theme-dark:hover:text-zinc-200"
         >
           {copyState === "copied" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
         </Button>
@@ -381,8 +381,8 @@ function ToolTimeline({
                   isTraceActive
                     ? "text-white"
                     : failedCount
-                      ? "bg-rose-50 text-rose-700"
-                      : "bg-stone-100 text-stone-600",
+                      ? "bg-rose-50 text-rose-700 theme-dark:bg-rose-950/50 theme-dark:text-rose-300"
+                      : "bg-stone-100 text-stone-600 theme-dark:bg-zinc-800 theme-dark:text-zinc-300",
                 )}
                 aria-hidden="true"
               >
@@ -394,12 +394,12 @@ function ToolTimeline({
                 <GitCompareArrows className="relative z-10 h-4 w-4 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)]" />
               </div>
               <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-[15px] font-semibold leading-5 text-stone-800">Trace</span>
-                <span className="truncate text-[13px] font-normal leading-5 text-stone-500">{summary}</span>
+                <span className="text-[15px] font-semibold leading-5 text-stone-800 theme-dark:text-zinc-100">Trace</span>
+                <span className="truncate text-[13px] font-normal leading-5 text-stone-500 theme-dark:text-zinc-400">{summary}</span>
               </span>
             </div>
             <Plus
-              className="h-4 w-4 shrink-0 text-stone-400 transition-transform duration-200"
+              className="h-4 w-4 shrink-0 text-stone-400 transition-transform duration-200 theme-dark:text-zinc-500"
               strokeWidth={2}
               aria-hidden="true"
             />
@@ -477,15 +477,15 @@ function StreamingMessageTrace({
     >
       <span
         data-slot="trace-message-icon"
-        className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md bg-stone-50"
+        className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md bg-stone-50 theme-dark:bg-zinc-900"
       >
-        <MessageSquareText className="h-3.5 w-3.5 text-stone-400" aria-hidden="true" />
+        <MessageSquareText className="h-3.5 w-3.5 text-stone-400 theme-dark:text-zinc-500" aria-hidden="true" />
       </span>
       <div className="min-w-0 pt-0.5 opacity-80" aria-label="Agent thinking">
         <MarkdownRenderer
           content={message.content}
           isStreaming={isActive}
-          className="font-light italic text-xs leading-5 text-stone-400 [&_blockquote]:text-stone-400 [&_h1]:text-stone-500 [&_h2]:text-stone-500 [&_h3]:text-stone-500 [&_strong]:font-normal [&_strong]:text-stone-500"
+          className="font-light italic text-xs leading-5 text-stone-400 theme-dark:text-zinc-500 [&_blockquote]:text-stone-400 theme-dark:[&_blockquote]:text-zinc-500 [&_h1]:text-stone-500 theme-dark:[&_h1]:text-zinc-400 [&_h2]:text-stone-500 theme-dark:[&_h2]:text-zinc-400 [&_h3]:text-stone-500 theme-dark:[&_h3]:text-zinc-400 [&_strong]:font-normal [&_strong]:text-stone-500 theme-dark:[&_strong]:text-zinc-400"
         />
       </div>
     </div>
@@ -499,13 +499,13 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
     <div className="relative grid grid-cols-[1.75rem_minmax(0,1fr)] gap-2.5">
       <span
         data-slot="trace-tool-icon"
-        className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white"
+        className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white theme-dark:bg-zinc-950"
       >
         <ToolIcon step={step} />
       </span>
       <div className="min-w-0 pt-0.5">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-xs font-semibold text-stone-800">{step.title}</span>
+          <span className="text-xs font-semibold text-stone-800 theme-dark:text-zinc-200">{step.title}</span>
           <span
             data-slot="trace-tool-status"
             className={cn("text-[10px] font-medium uppercase", statusClass(step.status))}
@@ -513,14 +513,14 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
             {statusLabel(step.status)}
           </span>
         </div>
-        <p className="mt-0.5 break-words text-xs leading-5 text-stone-500">{step.description}</p>
+        <p className="mt-0.5 break-words text-xs leading-5 text-stone-500 theme-dark:text-zinc-400">{step.description}</p>
         {hasDetails && (
           <details className="group mt-1.5" open={step.status === "running"}>
-            <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-stone-500 transition-colors hover:text-stone-800">
+            <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-stone-500 transition-colors hover:text-stone-800 theme-dark:text-zinc-400 theme-dark:hover:text-zinc-200">
               <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" aria-hidden="true" />
               Details
             </summary>
-            <div className="mt-2 space-y-2 border-l border-stone-200 pl-3">
+            <div className="mt-2 space-y-2 border-l border-stone-200 pl-3 theme-dark:border-zinc-700">
               {step.input && <ToolDetail label="Input" value={step.input} />}
               {step.output && <ToolDetail label={step.status === "failed" ? "Error" : "Output"} value={step.output} />}
             </div>
@@ -534,7 +534,7 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
 function ToolDetail({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="mb-1 text-[10px] font-semibold uppercase text-stone-400">{label}</div>
+      <div className="mb-1 text-[10px] font-semibold uppercase text-stone-400 theme-dark:text-zinc-500">{label}</div>
       <pre className="max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-stone-950 px-3 py-2 font-mono text-[11px] leading-5 text-stone-100">
         {value}
       </pre>
@@ -550,18 +550,18 @@ function ToolIcon({ step }: { step: ToolStep }) {
     return <CheckCircle2 className="h-3.5 w-3.5 text-[#00BFFF]" aria-hidden="true" />
   }
   if (step.status === "failed") {
-    return <CircleAlert className="h-3.5 w-3.5 text-rose-600" aria-hidden="true" />
+    return <CircleAlert className="h-3.5 w-3.5 text-rose-600 theme-dark:text-rose-400" aria-hidden="true" />
   }
   if (step.type === "command_execution") {
-    return <Terminal className="h-3.5 w-3.5 text-stone-500" aria-hidden="true" />
+    return <Terminal className="h-3.5 w-3.5 text-stone-500 theme-dark:text-zinc-400" aria-hidden="true" />
   }
   if (step.type === "web_search") {
-    return <Globe2 className="h-3.5 w-3.5 text-stone-500" aria-hidden="true" />
+    return <Globe2 className="h-3.5 w-3.5 text-stone-500 theme-dark:text-zinc-400" aria-hidden="true" />
   }
   if (step.type === "mcp_tool_call") {
-    return <SearchCode className="h-3.5 w-3.5 text-stone-500" aria-hidden="true" />
+    return <SearchCode className="h-3.5 w-3.5 text-stone-500 theme-dark:text-zinc-400" aria-hidden="true" />
   }
-  return <Wrench className="h-3.5 w-3.5 text-stone-500" aria-hidden="true" />
+  return <Wrench className="h-3.5 w-3.5 text-stone-500 theme-dark:text-zinc-400" aria-hidden="true" />
 }
 
 function statusLabel(status: ToolStepStatus): string {
@@ -572,10 +572,10 @@ function statusLabel(status: ToolStepStatus): string {
 }
 
 function statusClass(status: ToolStepStatus): string {
-  if (status === "running") return "text-[#c6e5ec]"
-  if (status === "completed") return "text-[#00619a]"
-  if (status === "failed") return "text-rose-700"
-  return "text-stone-400"
+  if (status === "running") return "text-[#c6e5ec] theme-dark:text-cyan-300"
+  if (status === "completed") return "text-[#00619a] theme-dark:text-sky-400"
+  if (status === "failed") return "text-rose-700 theme-dark:text-rose-400"
+  return "text-stone-400 theme-dark:text-zinc-500"
 }
 
 async function copyText(value: string): Promise<void> {

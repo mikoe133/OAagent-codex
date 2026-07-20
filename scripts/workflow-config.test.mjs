@@ -57,3 +57,11 @@ test("limits container resources and log growth on the shared server", async () 
   assert.equal(compose.match(/^        max-size: 10m$/gm)?.length, 2)
   assert.equal(compose.match(/^        max-file: "3"$/gm)?.length, 2)
 })
+
+test("uses Docker as the Codex command isolation boundary", async () => {
+  const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
+
+  assert.match(compose, /^      CODEX_SANDBOX_MODE: danger-full-access$/m)
+  assert.match(compose, /^      - no-new-privileges:true$/m)
+  assert.match(compose, /^    cap_drop:\n      - ALL$/m)
+})
