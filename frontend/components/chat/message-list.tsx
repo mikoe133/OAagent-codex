@@ -171,14 +171,14 @@ export function MessageList({
     >
       <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-7 px-4 pb-40 pt-24 sm:px-8 lg:px-12">
         {messages.length === 0 && !error && !isStreaming && (
-          <div className="flex min-h-[calc(100dvh-16rem)] flex-col items-center justify-center text-center text-stone-400">
+          <div className="flex min-h-[calc(100dvh-16rem)] flex-col items-center justify-center text-center text-stone-400 theme-dark:text-zinc-500">
             <div className={`mb-4 ${hasAnimated ? "orb-intro" : ""}`}>
               <AnimatedOrb size={128} />
             </div>
-            <p className={`text-lg font-medium text-gray-500 ${hasAnimated ? "text-blur-intro" : ""}`}>
+            <p className={`text-lg font-medium text-gray-500 theme-dark:text-zinc-400 ${hasAnimated ? "text-blur-intro" : ""}`}>
               Hi, my name is RWKVOS
             </p>
-            <p className={`mt-1 text-sm text-gray-400 ${hasAnimated ? "text-blur-intro-delay" : ""}`}>
+            <p className={`mt-1 text-sm text-gray-400 theme-dark:text-zinc-500 ${hasAnimated ? "text-blur-intro-delay" : ""}`}>
               Send a message to begin chatting with OA Agent
             </p>
           </div>
@@ -213,18 +213,18 @@ export function MessageList({
           <Alert
             status="danger"
             role="alert"
-            className="items-center border border-red-200/80 bg-red-50/90 shadow-[0_4px_18px_rgba(127,29,29,0.06)]"
+            className="items-center border border-red-200/80 bg-red-50/90 shadow-[0_4px_18px_rgba(127,29,29,0.06)] theme-dark:border-red-900/70 theme-dark:bg-red-950/45"
           >
             <Alert.Indicator />
             <Alert.Content className="min-w-0 flex-1">
-              <Alert.Title className="text-red-800">Something went wrong</Alert.Title>
-              <Alert.Description className="break-words text-red-600">{error}</Alert.Description>
+              <Alert.Title className="text-red-800 theme-dark:text-red-300">Something went wrong</Alert.Title>
+              <Alert.Description className="break-words text-red-600 theme-dark:text-red-400">{error}</Alert.Description>
             </Alert.Content>
             <Button
               variant="ghost"
               size="sm"
               onClick={onRetry}
-              className="text-red-600 transition-colors hover:bg-red-100 hover:text-red-700"
+              className="text-red-600 transition-colors hover:bg-red-100 hover:text-red-700 theme-dark:text-red-400 theme-dark:hover:bg-red-950/70 theme-dark:hover:text-red-300"
               aria-label="Retry sending message"
             >
               <RefreshCw className="mr-1 h-4 w-4" aria-hidden="true" />
@@ -245,7 +245,7 @@ export function MessageList({
             onClick={scrollToLatest}
             aria-label="Scroll to latest message"
             title="Scroll to latest"
-            className="pointer-events-auto h-9 w-9 rounded-full border-stone-200 bg-white text-stone-600 shadow-md hover:bg-stone-50"
+            className="pointer-events-auto h-9 w-9 rounded-full border-stone-200 bg-white text-stone-600 shadow-md hover:bg-stone-50 theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-800"
           >
             <ArrowDown className="h-4 w-4" />
           </Button>

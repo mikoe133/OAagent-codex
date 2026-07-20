@@ -22,6 +22,7 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       AGENT_SESSION_STORE: /app/.context/agent-sessions.json
+      CODEX_SANDBOX_MODE: danger-full-access
       OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
       OA_AUTH_ALIAS: ${OA_AUTH_ALIAS:-default}
     extra_hosts:

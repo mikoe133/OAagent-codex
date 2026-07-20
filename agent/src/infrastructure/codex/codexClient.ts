@@ -66,12 +66,15 @@ export function createThreadOptions(
   model: string = config.model,
 ): ThreadOptions {
   const oaToolEnabled = Boolean(config.oaApiBaseUrl);
+  const sandboxMode =
+    config.codexSandboxMode ?? (oaToolEnabled ? "workspace-write" : "read-only");
   return {
     model,
-    sandboxMode: oaToolEnabled ? "workspace-write" : "read-only",
+    sandboxMode,
     workingDirectory: config.projectRoot,
     skipGitRepoCheck: true,
-    networkAccessEnabled: oaToolEnabled,
+    networkAccessEnabled:
+      sandboxMode === "workspace-write" ? oaToolEnabled : undefined,
     webSearchMode: "disabled",
   };
 }

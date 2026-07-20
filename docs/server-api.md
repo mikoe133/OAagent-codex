@@ -23,6 +23,7 @@
 | `OPENROUTER_API_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter OpenAI-compatible API 地址 |
 | `CODEX_MODEL_PROVIDER` | `nexttoken` | CLI 和省略 `provider` 时使用的默认 provider |
 | `CODEX_MODEL` | `gpt-5.6-terra` | 默认 provider 使用的模型 ID |
+| `CODEX_SANDBOX_MODE` | 自动 | Codex 命令沙箱。未配置时,无 OA 工具使用 `read-only`,启用 OA 工具使用 `workspace-write`;`danger-full-access` 仅用于已有独立外部沙箱的进程 |
 | `OA_OPENAPI_URL` | `https://api-oa.rwkvos.com/openapi_json` | 优先读取的 OA OpenAPI 地址。请求失败、非 2xx 或内容非法时回退本地契约 |
 | `OA_API_BASE_URL` | 空 | OA 后端地址。HTTP 服务用它验证用户 OA token,受控工具也通过该地址调用 OA |
 | `OA_AUTH_ALIAS` | `default` | OA 登录和 token 验证使用的数据源 alias |
@@ -605,7 +606,8 @@ CLI 参数:
 - 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认。
 - 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作需要 agent 先取得用户确认,再传 `--confirmed true`。
 - 工具执行过程会作为 Codex 的 `command_execution` 事件出现在流式响应中。
-- 配置 `OA_API_BASE_URL` 时,Codex thread 会使用 `workspace-write` 沙箱并开启 `network_access`,用于让 `agent` 工作目录下的 `scripts/callOaApi.mjs` 访问本机内部工具端点。
+- 原生运行且未配置 `CODEX_SANDBOX_MODE` 时,配置 `OA_API_BASE_URL` 会让 Codex thread 使用 `workspace-write` 沙箱并开启 `network_access`,用于让 `agent` 工作目录下的 `scripts/callOaApi.mjs` 访问本机内部工具端点。
+- Docker Compose 显式设置 `CODEX_SANDBOX_MODE=danger-full-access`,由非 root、`cap_drop: ALL`、`no-new-privileges`、Docker seccomp/AppArmor 和独立网络共同构成外部隔离边界,避免 Codex 在受限容器内再次通过 `bwrap` 创建 namespace。不要在没有等价外部隔离的原生进程中使用该模式。
 
 内部端点 `POST /__internal/call-oa-api` 只接受本机请求和内部 bearer token,不是对外 API。请求体与 CLI 参数一一对应:
 

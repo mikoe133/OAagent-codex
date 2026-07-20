@@ -127,7 +127,9 @@ curl -fsS http://127.0.0.1:3000/login >/dev/null
 docker compose exec agent node -e "fetch('http://127.0.0.1:3000/health').then(async r=>console.log(r.status,await r.text()))"
 ```
 
-Compose 只向宿主机发布 web 端口,agent 仅在内部网络暴露。`agent_sessions` 保存 session 映射,`agent_codex_home` 保存 Codex thread 状态;普通 `docker compose down` 不会删除它们。不要在有数据时执行 `docker compose down -v`。
+Compose 只向宿主机发布 web 端口,agent 仅在内部网络暴露。`agent` 容器通过 `CODEX_SANDBOX_MODE=danger-full-access` 将 Docker 作为 Codex 命令的隔离边界,并继续使用非 root、`cap_drop: ALL`、`no-new-privileges` 和 Docker 默认 seccomp/AppArmor;不要为运行 Codex 内层 `bwrap` 而给容器增加 `SYS_ADMIN` 或关闭这些保护。原生运行不设置该变量,仍使用 Codex 自身的 `read-only/workspace-write` 沙箱。
+
+`agent_sessions` 保存 session 映射,`agent_codex_home` 保存 Codex thread 状态;普通 `docker compose down` 不会删除它们。不要在有数据时执行 `docker compose down -v`。
 
 如果 OA 在另一台机器,把 `OA_DOCKER_API_BASE_URL` 改为 OA 的 HTTPS API 地址。生产环境应在 web 前配置 HTTPS 反向代理,因为登录 cookie 在 production 模式带 `Secure` 属性;直接通过服务器 IP 的 HTTP 地址访问会导致登录态不可用。
 

@@ -1,7 +1,8 @@
 "use client"
 
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
-import { ChevronsUpDown, LogOut, Network, Search, SquarePen, Trash2, UserRound, X } from "lucide-react"
+import { ChevronsUpDown, LogOut, Network, Search, SquarePen, SunMoon, Trash2, UserRound, X } from "lucide-react"
+import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
@@ -92,6 +93,13 @@ type NavLinkProps = {
 
 const DEFAULT_TITLE = "New Section"
 const TITLE_LENGTH = 18
+const THEME_MODES = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色模式" },
+  { value: "dark", label: "暗色模式" },
+] as const
+
+type ThemeMode = (typeof THEME_MODES)[number]["value"]
 
 const defaultItem: NavItem = {
   name: DEFAULT_TITLE,
@@ -143,22 +151,22 @@ const SearchBox = ({
 }) => (
   <div
     data-slot="sider-search"
-    className="group/search relative flex h-10 w-full items-center rounded-lg bg-[#f4f4f5] transition-[background-color,box-shadow] duration-200 hover:bg-slate-100 focus-within:bg-white focus-within:shadow-[0_6px_20px_rgba(15,23,42,0.08)]"
+    className="group/search relative flex h-10 w-full items-center rounded-lg bg-[#f4f4f5] transition-[background-color,box-shadow] duration-200 hover:bg-slate-100 focus-within:bg-white focus-within:shadow-[0_6px_20px_rgba(15,23,42,0.08)] theme-dark:bg-zinc-800 theme-dark:hover:bg-zinc-700 theme-dark:focus-within:bg-zinc-800 theme-dark:focus-within:shadow-[0_6px_20px_rgba(0,0,0,0.28)]"
   >
     <Search
-      className="pointer-events-none absolute left-3.5 h-4 w-4 text-slate-400 transition-colors duration-200 group-focus-within/search:text-slate-600"
+      className="pointer-events-none absolute left-3.5 h-4 w-4 text-slate-400 transition-colors duration-200 group-focus-within/search:text-slate-600 theme-dark:text-zinc-500 theme-dark:group-focus-within/search:text-zinc-300"
       aria-hidden="true"
     />
     <input
       {...props}
       type="search"
-      className="h-full w-full appearance-none rounded-lg bg-transparent pl-10 pr-10 text-[13px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+      className="h-full w-full appearance-none rounded-lg bg-transparent pl-10 pr-10 text-[13px] leading-5 text-slate-700 outline-none placeholder:text-slate-400 theme-dark:text-zinc-100 theme-dark:placeholder:text-zinc-500 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
     />
     {hasValue ? (
       <button
         type="button"
         aria-label="Clear search"
-        className="absolute right-2 flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-[background-color,color,box-shadow] duration-150 hover:bg-white hover:text-slate-700 hover:shadow-[0_1px_3px_rgba(15,23,42,0.08)] focus-visible:bg-white focus-visible:text-slate-700 focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(15,23,42,0.08)]"
+        className="absolute right-2 flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-[background-color,color,box-shadow] duration-150 hover:bg-white hover:text-slate-700 hover:shadow-[0_1px_3px_rgba(15,23,42,0.08)] focus-visible:bg-white focus-visible:text-slate-700 focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_rgba(15,23,42,0.08)] theme-dark:text-zinc-500 theme-dark:hover:bg-zinc-700 theme-dark:hover:text-zinc-100 theme-dark:focus-visible:bg-zinc-700 theme-dark:focus-visible:text-zinc-100"
         onClick={onClear}
       >
         <X className="h-4 w-4" aria-hidden="true" />
@@ -181,15 +189,15 @@ const UserInfo = ({
   providerSwitchDisabled?: boolean
 }) => (
   <div className="flex w-full items-center gap-3 px-6 py-4 text-left">
-    <UserRound className="h-5 w-5 shrink-0 text-slate-950" strokeWidth={1.8} aria-hidden="true" />
+    <UserRound className="h-5 w-5 shrink-0 text-slate-950 theme-dark:text-zinc-100" strokeWidth={1.8} aria-hidden="true" />
     <span className="min-w-0 flex-1">
-      <span className="block truncate text-sm font-medium leading-5 text-slate-950">{user.name}</span>
-      <span className="block truncate text-xs leading-4 text-slate-500">{user.email}</span>
+      <span className="block truncate text-sm font-medium leading-5 text-slate-950 theme-dark:text-zinc-100">{user.name}</span>
+      <span className="block truncate text-xs leading-4 text-slate-500 theme-dark:text-zinc-400">{user.email}</span>
     </span>
     <DropdownMenu>
       <DropdownMenuTrigger
         type="button"
-        className="h-8 w-8 shrink-0 rounded-md text-slate-950 transition-colors duration-150 hover:bg-slate-100 data-[state=open]:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
+        className="h-8 w-8 shrink-0 rounded-md text-slate-950 transition-colors duration-150 hover:bg-slate-100 data-[state=open]:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:text-zinc-100 theme-dark:hover:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800 theme-dark:focus-visible:ring-white/15"
         aria-label="Open user menu"
       >
         <ChevronsUpDown className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
@@ -198,19 +206,19 @@ const UserInfo = ({
         align="end"
         side="top"
         sideOffset={10}
-        className="z-[9999] w-48 overflow-visible rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)]"
+        className="z-[9999] w-48 overflow-visible rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
       >
         <DropdownMenuSub>
           <DropdownMenuSubTrigger
             disabled={providerSwitchDisabled}
-            className="h-11 rounded-lg px-3 text-sm text-slate-700 focus:bg-slate-100 data-[state=open]:bg-slate-100"
+            className="h-11 rounded-lg px-3 text-sm text-slate-700 focus:bg-slate-100 data-[state=open]:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800"
           >
-            <Network className="h-4 w-4 text-slate-500" aria-hidden="true" />
+            <Network className="h-4 w-4 text-slate-500 theme-dark:text-zinc-400" aria-hidden="true" />
             模型提供商
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent
             sideOffset={8}
-            className="z-[10000] w-40 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)]"
+            className="z-[10000] w-40 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
           >
             <DropdownMenuRadioGroup
               value={selectedProvider}
@@ -224,7 +232,7 @@ const UserInfo = ({
                 <DropdownMenuRadioItem
                   key={provider.id}
                   value={provider.id}
-                  className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100"
+                  className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
                 >
                   {provider.name}
                 </DropdownMenuRadioItem>
@@ -232,18 +240,49 @@ const UserInfo = ({
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        <DropdownMenuSeparator className="mx-1 bg-slate-100" />
+        <ThemeModeMenu />
+        <DropdownMenuSeparator className="mx-1 bg-slate-100 theme-dark:bg-zinc-800" />
         <DropdownMenuItem
           onSelect={onLogout}
-          className="rounded-lg text-sm text-red-600 focus:bg-red-50 focus:text-red-600"
+          className="rounded-lg text-sm text-red-600 focus:bg-red-50 focus:text-red-600 theme-dark:text-red-400 theme-dark:focus:bg-red-950/50 theme-dark:focus:text-red-300"
         >
-          <LogOut className="h-4 w-4 text-red-600" aria-hidden="true" />
+          <LogOut className="h-4 w-4 text-red-600 theme-dark:text-red-400" aria-hidden="true" />
           退出登录
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   </div>
 )
+
+const ThemeModeMenu = () => {
+  const { theme, setTheme } = useTheme()
+  const selectedTheme = isThemeMode(theme) ? theme : "light"
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="h-11 rounded-lg px-3 text-sm text-slate-700 focus:bg-slate-100 data-[state=open]:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800">
+        <SunMoon className="h-4 w-4 text-slate-500 theme-dark:text-zinc-400" aria-hidden="true" />
+        主题模式
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent
+        sideOffset={8}
+        className="z-[10000] w-40 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
+      >
+        <DropdownMenuRadioGroup value={selectedTheme} onValueChange={setTheme}>
+          {THEME_MODES.map((mode) => (
+            <DropdownMenuRadioItem
+              key={mode.value}
+              value={mode.value}
+              className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+            >
+              {mode.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
 
 const DeleteConversationButton = ({ name, onConfirm }: { name: string; onConfirm: () => void }) => {
   const [open, setOpen] = useState(false)
@@ -261,7 +300,7 @@ const DeleteConversationButton = ({ name, onConfirm }: { name: string; onConfirm
         <button
           type="button"
           aria-label={`Delete ${name}`}
-          className="ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#f5f5f5] opacity-0 transition-[opacity,background-color] duration-150 hover:bg-[#eeeeee] focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f56565]/25 group-hover:opacity-100 data-[state=open]:bg-[#eeeeee] data-[state=open]:opacity-100"
+          className="ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#f5f5f5] opacity-0 transition-[opacity,background-color] duration-150 hover:bg-[#eeeeee] focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f56565]/25 group-hover:opacity-100 data-[state=open]:bg-[#eeeeee] data-[state=open]:opacity-100 theme-dark:bg-zinc-800 theme-dark:hover:bg-zinc-700 theme-dark:data-[state=open]:bg-zinc-700"
           onClick={(event) => event.stopPropagation()}
         >
           <Trash2 className="size-3.5 text-[#f56565]" aria-hidden="true" />
@@ -275,18 +314,18 @@ const DeleteConversationButton = ({ name, onConfirm }: { name: string; onConfirm
         role="alertdialog"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        className="z-[100] w-60 rounded-lg border-slate-200 bg-white p-3 text-slate-950 shadow-[0_12px_32px_rgba(15,23,42,0.14)]"
+        className="z-[100] w-60 rounded-lg border-slate-200 bg-white p-3 text-slate-950 shadow-[0_12px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:text-zinc-100 theme-dark:shadow-[0_12px_32px_rgba(0,0,0,0.4)]"
       >
         <p id={titleId} className="text-sm font-semibold">
           删除此对话？
         </p>
-        <p id={descriptionId} className="mt-1 text-xs leading-5 text-slate-500">
+        <p id={descriptionId} className="mt-1 text-xs leading-5 text-slate-500 theme-dark:text-zinc-400">
           删除后将无法恢复。
         </p>
         <div className="mt-3 flex justify-end gap-2">
           <button
             type="button"
-            className="h-8 rounded-md px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
+            className="h-8 rounded-md px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-800 theme-dark:hover:text-white theme-dark:focus-visible:ring-white/15"
             onClick={() => setOpen(false)}
           >
             取消
@@ -319,7 +358,7 @@ const SectionsList = ({
   onDelete: (item: NavItem) => void
   sessionIndicatorStates: ReadonlyMap<string, SessionIndicatorState>
 }) => (
-  <div className="px-4 text-slate-600 md:px-8">
+  <div className="px-4 text-slate-600 theme-dark:text-zinc-400 md:px-8">
     <ul>
       {items.map((item) => {
         const indicatorState = item.sessionId ? sessionIndicatorStates.get(item.sessionId) : undefined
@@ -336,8 +375,8 @@ const SectionsList = ({
             <NavLink
               href={item.href}
               active={activeHref === item.href}
-              activeClassName="border-[#4f39f7] text-[#0f1828]"
-              className="flex min-w-0 flex-1 items-center border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828]"
+              activeClassName="border-[#4f39f7] text-[#0f1828] theme-dark:border-violet-400 theme-dark:text-zinc-50"
+              className="flex min-w-0 flex-1 items-center border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828] theme-dark:border-zinc-700 theme-dark:hover:border-violet-400 theme-dark:hover:text-zinc-50"
               onSelect={() => onSelect(item)}
               title={item.name}
             >
@@ -555,10 +594,10 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         ref={ref}
         id="chat-sider"
         aria-hidden={isCollapsed}
-        className="fixed left-0 top-0 z-40 hidden h-full w-80 flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:flex">
+        className="fixed left-0 top-0 z-40 hidden h-full w-80 flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.06)] backdrop-blur-xl theme-dark:border-zinc-800 theme-dark:bg-zinc-950/95 theme-dark:shadow-[16px_0_60px_rgba(0,0,0,0.24)] sm:flex">
         <div
           data-slot="sider-actions"
-          className="grid shrink-0 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-center gap-2 bg-white/95 px-4 pb-4 pt-6 backdrop-blur-xl md:px-8"
+          className="grid shrink-0 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-center gap-2 bg-white/95 px-4 pb-4 pt-6 backdrop-blur-xl theme-dark:bg-zinc-950/95 md:px-8"
         >
           <div className="min-w-0">
             <SearchBox
@@ -574,7 +613,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             data-slot="new-chat-button"
             type="button"
             onClick={onNewSession}
-            className="flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg border-0 bg-[#f4f4f5] px-2 text-sm font-medium text-slate-700 transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10"
+            className="flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg border-0 bg-[#f4f4f5] px-2 text-sm font-medium text-slate-700 transition-colors hover:bg-[#e4e4e7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:bg-zinc-800 theme-dark:text-zinc-200 theme-dark:hover:bg-zinc-700 theme-dark:focus-visible:ring-white/15"
           >
             <SquarePen className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span className="truncate">New</span>
@@ -601,13 +640,13 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
                 </div>
               ))
             ) : (
-              <p className="px-8 text-sm text-slate-400">
+              <p className="px-8 text-sm text-slate-400 theme-dark:text-zinc-500">
                 {query.trim() ? `No conversations matching "${query.trim()}"` : "No conversations"}
               </p>
             )}
           </div>
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-white/95 backdrop-blur-[2px]"
+            className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-white/95 backdrop-blur-[2px] theme-dark:bg-zinc-950/95"
             style={{
               WebkitMaskImage:
                 "linear-gradient(to bottom, #000 0%, rgba(0,0,0,0.995) 10%, rgba(0,0,0,0.975) 20%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.82) 42%, rgba(0,0,0,0.66) 54%, rgba(0,0,0,0.46) 66%, rgba(0,0,0,0.27) 77%, rgba(0,0,0,0.12) 87%, rgba(0,0,0,0.03) 95%, transparent 100%)",
@@ -617,7 +656,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             aria-hidden="true"
           />
           <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-white/95 backdrop-blur-[2px]"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-white/95 backdrop-blur-[2px] theme-dark:bg-zinc-950/95"
             style={{
               WebkitMaskImage:
                 "linear-gradient(to top, #000 0%, rgba(0,0,0,0.995) 10%, rgba(0,0,0,0.975) 20%, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0.82) 42%, rgba(0,0,0,0.66) 54%, rgba(0,0,0,0.46) 66%, rgba(0,0,0,0.27) 77%, rgba(0,0,0,0.12) 87%, rgba(0,0,0,0.03) 95%, transparent 100%)",
@@ -627,7 +666,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             aria-hidden="true"
           />
         </div>
-        <div className="shrink-0 border-t border-slate-100 bg-white/95">
+        <div className="shrink-0 border-t border-slate-100 bg-white/95 theme-dark:border-zinc-800 theme-dark:bg-zinc-950/95">
           <UserInfo
             user={user}
             onLogout={handleLogout}
@@ -644,6 +683,10 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
 Sider.displayName = "Sider"
 
 export default Sider
+
+function isThemeMode(value: string | undefined): value is ThemeMode {
+  return THEME_MODES.some((mode) => mode.value === value)
+}
 
 function resolveSessionItems(
   value: unknown,

@@ -31,6 +31,8 @@ export type AppConfig = {
   modelProvider: ModelProviderId;
   /** 模型服务上的模型 ID。 */
   model: string;
+  /** Codex 命令沙箱。为空时根据 OA 工具是否启用自动选择。 */
+  codexSandboxMode: CodexSandboxMode | null;
   /** 运行时创建的本地 HTTP/1.1 模型中继地址。 */
   modelRelayBaseUrl: string | null;
   /** OA 后端地址。未配置时只做接口分析。 */
@@ -54,6 +56,11 @@ export type AppConfig = {
   /** 后台服务 session 映射持久化文件。 */
   sessionStorePath: string;
 };
+
+export type CodexSandboxMode =
+  | "read-only"
+  | "workspace-write"
+  | "danger-full-access";
 
 export type ModelProviderConfig = {
   name: string;
@@ -152,6 +159,7 @@ export function loadConfig(): AppConfig {
     modelProviders,
     modelProvider,
     model,
+    codexSandboxMode: parseCodexSandboxMode(process.env.CODEX_SANDBOX_MODE),
     modelRelayBaseUrl: null,
     oaApiBaseUrl: process.env.OA_API_BASE_URL?.trim() || null,
     oaAuthAlias: process.env.OA_AUTH_ALIAS?.trim() || "default",
@@ -165,6 +173,25 @@ export function loadConfig(): AppConfig {
     serverHost,
     sessionStorePath,
   };
+}
+
+export function parseCodexSandboxMode(
+  value: string | undefined,
+): CodexSandboxMode | null {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+  if (
+    normalized === "read-only" ||
+    normalized === "workspace-write" ||
+    normalized === "danger-full-access"
+  ) {
+    return normalized;
+  }
+  throw new Error(
+    "CODEX_SANDBOX_MODE 必须是 read-only、workspace-write 或 danger-full-access。",
+  );
 }
 
 function parsePort(value: string): number {

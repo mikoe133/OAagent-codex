@@ -63,7 +63,7 @@ const TYPEWRITER_INTERVAL_MS = 18
 const SESSION_INDICATOR_VIEWED_HOLD_MS = 1500
 const SESSION_INDICATOR_FADE_MS = 500
 const FLOATING_CONTROL_BUTTON_CLASS =
-  "h-10 w-10 rounded-full bg-zinc-100 text-stone-600 hover:bg-zinc-200"
+  "h-10 w-10 rounded-full bg-zinc-100 text-stone-600 hover:bg-zinc-200 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700"
 
 type ChatSessionRecord = {
   sessionId: string
@@ -1262,7 +1262,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
   return (
     <div
-      className="relative h-dvh bg-stone-50"
+      data-slot="chat-shell"
+      className="relative h-dvh bg-stone-50 theme-dark:bg-zinc-950"
       style={{
         boxShadow:
           "rgba(14, 63, 126, 0.04) 0px 0px 0px 1px, rgba(42, 51, 69, 0.04) 0px 1px 1px -0.5px, rgba(42, 51, 70, 0.04) 0px 3px 3px -1.5px, rgba(42, 51, 70, 0.04) 0px 6px 6px -3px, rgba(14, 63, 126, 0.04) 0px 12px 12px -6px, rgba(14, 63, 126, 0.04) 0px 24px 24px -12px",

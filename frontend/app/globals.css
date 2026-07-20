@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+/* HeroUI's bundled dark variant also follows the OS media query. */
+@custom-variant theme-dark (&:is(.dark *));
 
 :root {
   --background: oklch(1 0 0);
@@ -40,6 +42,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.145 0 0);
@@ -72,6 +75,18 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+}
+
+.dark [data-slot="chat-shell"] {
+  box-shadow:
+    rgba(0, 0, 0, 0.28) 0 0 0 1px,
+    rgba(0, 0, 0, 0.2) 0 12px 28px -12px !important;
+}
+
+.dark [data-slot="chat-composer"] {
+  box-shadow:
+    rgba(0, 0, 0, 0.45) 0 0 0 1px,
+    rgba(0, 0, 0, 0.4) 0 18px 42px -18px !important;
 }
 
 @theme inline {

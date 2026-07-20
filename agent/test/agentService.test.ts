@@ -11,6 +11,7 @@ import {
   resolveRequestedProvider,
   resolveRequestedModel,
 } from "../src/config/modelCatalog.js";
+import { parseCodexSandboxMode } from "../src/config/config.js";
 import { createThreadOptions } from "../src/infrastructure/codex/codexClient.js";
 
 describe("model provider selection", () => {
@@ -72,6 +73,44 @@ describe("model provider selection", () => {
     assert.equal(
       createThreadOptions(config, "gpt-5.6-terra").model,
       "gpt-5.6-terra",
+    );
+  });
+
+  it("keeps the Codex sandbox by default", () => {
+    const readOnlyConfig = {
+      oaApiBaseUrl: null,
+      codexSandboxMode: null,
+      projectRoot: "/tmp/agent",
+    } as AppConfig;
+    const oaToolConfig = {
+      oaApiBaseUrl: "https://oa.example.test",
+      codexSandboxMode: null,
+      projectRoot: "/tmp/agent",
+    } as AppConfig;
+
+    assert.equal(createThreadOptions(readOnlyConfig).sandboxMode, "read-only");
+    assert.equal(createThreadOptions(oaToolConfig).sandboxMode, "workspace-write");
+    assert.equal(createThreadOptions(oaToolConfig).networkAccessEnabled, true);
+  });
+
+  it("uses the Docker boundary when full access is explicitly configured", () => {
+    const config = {
+      oaApiBaseUrl: "https://oa.example.test",
+      codexSandboxMode: "danger-full-access",
+      projectRoot: "/tmp/agent",
+    } as AppConfig;
+
+    const options = createThreadOptions(config);
+    assert.equal(options.sandboxMode, "danger-full-access");
+    assert.equal(options.networkAccessEnabled, undefined);
+  });
+
+  it("rejects unknown Codex sandbox modes", () => {
+    assert.equal(parseCodexSandboxMode(undefined), null);
+    assert.equal(parseCodexSandboxMode(" workspace-write "), "workspace-write");
+    assert.throws(
+      () => parseCodexSandboxMode("disabled"),
+      /CODEX_SANDBOX_MODE/,
     );
   });
 });
