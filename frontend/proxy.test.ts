@@ -82,6 +82,14 @@ test("fails closed when OA token validation is unavailable", async () => {
   }
 })
 
+test("protects SSO account selection and completion pages", async () => {
+  for (const path of ["/auth/sso/choose", "/auth/sso/complete"]) {
+    const response = await proxy(new NextRequest(`http://localhost${path}`))
+    assert.equal(response.status, 307)
+    assert.equal(new URL(response.headers.get("location") || "").pathname, "/login")
+  }
+})
+
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) {
     delete process.env[key]

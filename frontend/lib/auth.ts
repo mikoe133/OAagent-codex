@@ -2,6 +2,8 @@ export const SESSION_COOKIE_NAME = "sessionid"
 export const AUTH_TOKEN_STORAGE_KEY = "oa-auth-token"
 export const AUTH_USER_STORAGE_KEY = "oa-auth-user"
 
+const ACCOUNT_SCOPED_STORAGE_KEYS = ["chat-agent-session-id", "chat-messages"]
+
 export type AuthUser = {
   id: number | string
   email: string
@@ -97,6 +99,22 @@ export function persistLoginSession(session: LoginSession, remember: boolean): v
   // Clear any legacy client-side copies so scripts cannot read the token.
   primaryStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
   secondaryStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+}
+
+export function persistSsoSession(user: AuthUser): void {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    storage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    storage.removeItem(AUTH_USER_STORAGE_KEY)
+    for (const key of ACCOUNT_SCOPED_STORAGE_KEYS) {
+      storage.removeItem(key)
+    }
+  }
+
+  window.localStorage.setItem(AUTH_USER_STORAGE_KEY, JSON.stringify(user))
 }
 
 async function readJson<T>(response: Response): Promise<T> {

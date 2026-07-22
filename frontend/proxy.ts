@@ -34,5 +34,5 @@ function redirectToLogin(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/chat/:path*"],
+  matcher: ["/chat/:path*", "/auth/sso/choose", "/auth/sso/complete"],
 }
