@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 import { resolveOaSessionToken } from "@/lib/server/oa-session"
+import { createSsoRedirectUrl } from "@/lib/server/sso-redirect-url"
 import {
   SSO_PENDING_COOKIE_NAME,
   clearPendingSsoCookie,
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
 
   if (decision === "keep-current") {
     discardPendingSsoHandoff(pendingId)
-    const response = noStoreRedirect(new URL("/chat", request.url))
+    const response = noStoreRedirect(createSsoRedirectUrl(request, "/chat"))
     clearPendingSsoCookie(response)
     return response
   }
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
     return redirectWithError(request, "invalid_or_expired")
   }
 
-  const response = noStoreRedirect(new URL("/auth/sso/complete", request.url))
+  const response = noStoreRedirect(createSsoRedirectUrl(request, "/auth/sso/complete"))
   setAgentSessionCookie(response, consumed.token)
   clearPendingSsoCookie(response)
   return response
@@ -81,7 +82,7 @@ function isDecision(value: unknown): value is Decision {
 }
 
 function redirectWithError(request: NextRequest, error: string): NextResponse {
-  const url = new URL("/login", request.url)
+  const url = createSsoRedirectUrl(request, "/login")
   url.searchParams.set("sso_error", error)
   const response = noStoreRedirect(url)
   clearPendingSsoCookie(response)

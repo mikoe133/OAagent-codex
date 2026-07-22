@@ -99,11 +99,16 @@ test("callback automatically activates the incoming account when Agent is logged
   const { code } = seedHandoff(INCOMING_TOKEN, { id: 1, email: "incoming@example.test" })
 
   const response = await callback(
-    new NextRequest(`http://localhost/auth/sso/callback?code=${encodeURIComponent(code)}`),
+    new NextRequest(`http://0.0.0.0:3000/auth/sso/callback?code=${encodeURIComponent(code)}`, {
+      headers: forwardedProductionHeaders(),
+    }),
   )
 
   assert.equal(response.status, 307)
-  assert.equal(new URL(response.headers.get("location") || "").pathname, "/auth/sso/complete")
+  assert.equal(
+    response.headers.get("location"),
+    "https://oa-agent.rwkvos.com/auth/sso/complete",
+  )
   const setCookie = response.headers.get("set-cookie") || ""
   assert.match(setCookie, /sessionid=incoming-oa-token/)
   assert.match(setCookie, /HttpOnly/i)
@@ -247,6 +252,13 @@ function configureAuthEnvironment(): () => void {
   return () => {
     restoreEnv("OA_AGENT_SSO_SHARED_SECRET", originalSecret)
     restoreEnv("OA_API_BASE_URL", originalBaseUrl)
+  }
+}
+
+function forwardedProductionHeaders(): Record<string, string> {
+  return {
+    "x-forwarded-host": "oa-agent.rwkvos.com",
+    "x-forwarded-proto": "https",
   }
 }
 
