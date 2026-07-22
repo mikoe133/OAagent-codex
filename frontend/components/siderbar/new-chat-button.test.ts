@@ -57,5 +57,15 @@ test("moves the desktop new chat action from floating controls into the sider", 
 
   assert.ok(desktopControls, "expected desktop sidebar controls")
   assert.doesNotMatch(desktopControls, /aria-label="New chat"/)
-  assert.match(chatShellSource, /<Sider[\s\S]*?onNewSession=\{startNewSession\}/)
+  assert.match(chatShellSource, /<Sider[\s\S]*?onNewSession=\{handleMobileNewSession\}/)
+})
+
+test("exposes the conversation list as a mobile drawer", () => {
+  assert.match(chatShellSource, /aria-label="Open conversations"/)
+  assert.match(chatShellSource, /data-slot="mobile-sider-backdrop"/)
+  assert.match(chatShellSource, /setIsMobileSiderOpen\(true\)/)
+  assert.match(siderSource, /isMobileOpen\?: boolean/)
+  assert.match(siderSource, /aria-label="Close conversations"/)
+  assert.match(siderSource, /invisible -translate-x-full pointer-events-none/)
+  assert.match(siderSource, /w-\[min\(20rem,calc\(100vw-3rem\)\)\]/)
 })

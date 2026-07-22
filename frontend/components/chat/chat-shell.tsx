@@ -390,6 +390,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
   const [sessionListFocusKey, setSessionListFocusKey] = useState(0)
   const [isSiderCollapsed, setIsSiderCollapsed] = useState(false)
+  const [isMobileSiderOpen, setIsMobileSiderOpen] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const siderRef = useRef<HTMLElement | null>(null)
   const sidebarControlsRef = useRef<HTMLDivElement | null>(null)
@@ -559,11 +560,31 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       return
     }
 
-    const handleResize = () => animateSiderLayout(false)
+    const handleResize = () => {
+      animateSiderLayout(false)
+      if (window.matchMedia(SIDEBAR_DESKTOP_QUERY).matches) {
+        setIsMobileSiderOpen(false)
+      }
+    }
 
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [animateSiderLayout])
+
+  useEffect(() => {
+    if (!isMobileSiderOpen) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileSiderOpen(false)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [isMobileSiderOpen])
 
   const handleModelChange = useCallback(
     (model: AIModel) => {
@@ -1258,6 +1279,23 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     setIsSiderCollapsed((current) => !current)
   }, [])
 
+  const closeMobileSider = useCallback(() => {
+    setIsMobileSiderOpen(false)
+  }, [])
+
+  const handleMobileNewSession = useCallback(() => {
+    closeMobileSider()
+    startNewSession()
+  }, [closeMobileSider, startNewSession])
+
+  const handleMobileSelectSession = useCallback(
+    (session: ChatSessionListItem) => {
+      closeMobileSider()
+      void handleSelectSession(session)
+    },
+    [closeMobileSider, handleSelectSession],
+  )
+
   const SiderToggleIcon = isSiderCollapsed ? PanelLeftOpen : PanelLeftClose
 
   return (
@@ -1283,6 +1321,17 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         </Button>
       </div>
       <Button
+        onClick={() => setIsMobileSiderOpen(true)}
+        variant="ghost"
+        size="icon"
+        className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-4 z-20 sm:hidden`}
+        aria-controls="chat-sider"
+        aria-expanded={isMobileSiderOpen}
+        aria-label="Open conversations"
+      >
+        <PanelLeftOpen className="h-5 w-5" />
+      </Button>
+      <Button
         onClick={startNewSession}
         variant="ghost"
         size="icon"
@@ -1291,14 +1340,25 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       >
         <SquarePen className="h-5 w-5" />
       </Button>
+      {isMobileSiderOpen && (
+        <button
+          data-slot="mobile-sider-backdrop"
+          type="button"
+          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] sm:hidden"
+          onClick={closeMobileSider}
+          aria-label="Dismiss conversations"
+        />
+      )}
       <Sider
         ref={siderRef}
         activeSessionId={agentSessionId}
         activeRecordId={activeRecordId}
         isCollapsed={isSiderCollapsed}
+        isMobileOpen={isMobileSiderOpen}
         focusSessionKey={sessionListFocusKey}
-        onNewSession={startNewSession}
-        onSelectSession={handleSelectSession}
+        onMobileClose={closeMobileSider}
+        onNewSession={handleMobileNewSession}
+        onSelectSession={handleMobileSelectSession}
         onDeleteSession={handleDeleteSession}
         refreshKey={sessionListRefreshKey}
         selectedProvider={selectedProvider}

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { resolveStableSessionOrder, sortSessionItemsByCreatedAt } from "./session-list-order"
+import {
+  resolveStableSessionOrder,
+  sortSessionItemsByCreatedAt,
+  sortSessionItemsByPinnedOrder,
+} from "./session-list-order"
 
 test("keeps creation-time order unchanged when the active session changes", () => {
   const items = [
@@ -64,5 +68,36 @@ test("uses session identity as a deterministic tie-breaker for equal creation ti
   assert.deepEqual(
     sortSessionItemsByCreatedAt(reversed).map((item) => item.sessionId),
     ["session-a", "session-b"],
+  )
+})
+
+test("moves pinned sessions ahead of the existing creation-time order", () => {
+  const items = [
+    { sessionId: "newest" },
+    { sessionId: "middle" },
+    { sessionId: "oldest" },
+  ]
+
+  const sorted = sortSessionItemsByPinnedOrder(items, ["oldest", "middle"])
+
+  assert.deepEqual(
+    sorted.map((item) => item.sessionId),
+    ["oldest", "middle", "newest"],
+  )
+  assert.deepEqual(
+    items.map((item) => item.sessionId),
+    ["newest", "middle", "oldest"],
+  )
+})
+
+test("ignores stale pinned identities without disturbing session order", () => {
+  const items = [
+    { sessionId: "newest" },
+    { sessionId: "oldest" },
+  ]
+
+  assert.deepEqual(
+    sortSessionItemsByPinnedOrder(items, ["missing"]).map((item) => item.sessionId),
+    ["newest", "oldest"],
   )
 })

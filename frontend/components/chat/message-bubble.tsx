@@ -48,6 +48,7 @@ function formatTime(date: Date): string {
 
 const MESSAGE_ACTION_CONTROLS_CLASS =
   "flex items-center transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none pointer-fine:pointer-events-none pointer-fine:translate-y-0.5 pointer-fine:opacity-0 pointer-fine:group-hover/message:pointer-events-auto pointer-fine:group-hover/message:translate-y-0 pointer-fine:group-hover/message:opacity-100 pointer-fine:group-focus-within/message:pointer-events-auto pointer-fine:group-focus-within/message:translate-y-0 pointer-fine:group-focus-within/message:opacity-100"
+const TRACE_SUMMARY_MAX_CHARS = 48
 
 export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavigationUrl }: MessageBubbleProps) {
   const isUser = message.role === "user"
@@ -80,18 +81,6 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
       aria-label={isUser ? "Your message" : "OA Agent response"}
     >
       <div className={cn("min-w-0", isUser ? "flex flex-col items-end" : "flex-1")}>
-        {!isUser && (
-          <div className="mb-1.5 flex items-center gap-2 text-xs text-stone-500 theme-dark:text-zinc-400">
-            <span className="font-medium">OA Agent</span>
-            {assistantIsStreaming && (
-              <span role="status" aria-label="Generating response" className="flex items-center gap-1.5 text-emerald-700 theme-dark:text-emerald-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
-                Working
-              </span>
-            )}
-          </div>
-        )}
-
         {isUser ? (
           <div
             data-slot="user-message-bubble"
@@ -119,17 +108,19 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
                 steps={toolSteps}
                 isStreaming={assistantIsStreaming}
                 streamingMessages={streamingMessages}
+                fallbackText={message.content}
+                status={message.status}
               />
+            )}
+            {assistantIsStreaming && (
+              <span className="sr-only" role="status">
+                Generating response
+              </span>
             )}
             {hasAssistantText && !assistantIsStreaming && (
               <div data-slot="assistant-response">
                 <MarkdownRenderer content={message.content} className={cn(toolSteps.length > 0 && "mt-4")} />
               </div>
-            )}
-            {!hasAssistantText && assistantIsStreaming && toolSteps.length > 0 && (
-              <span className="sr-only" role="status">
-                Generating response
-              </span>
             )}
             {message.status === "failed" && (
               <div className="mt-3 flex max-w-2xl items-start gap-2 rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs leading-5 text-rose-700 theme-dark:border-rose-900 theme-dark:bg-rose-950/40 theme-dark:text-rose-300">
@@ -330,15 +321,18 @@ function ToolTimeline({
   steps,
   isStreaming,
   streamingMessages,
+  fallbackText,
+  status,
 }: {
   steps: ToolStep[]
   isStreaming: boolean
   streamingMessages: TraceMessage[]
+  fallbackText: string
+  status: Message["status"]
 }) {
   const hasRunningStep = steps.some((step) => step.status === "running")
   const failedCount = steps.filter((step) => step.status === "failed").length
   const timelineItems = buildTraceTimelineItems(steps, streamingMessages)
-  const traceItemCount = timelineItems.length
   const activeMessageId = streamingMessages[streamingMessages.length - 1]?.id
   const isTraceActive = isStreaming || hasRunningStep
   const wasTraceActiveRef = useRef(isTraceActive)
@@ -350,11 +344,13 @@ function ToolTimeline({
     setIsOpen((currentOpen) => resolveTraceOpenState(currentOpen, { wasActive, isActive: isTraceActive }))
   }, [isTraceActive])
 
-  const summary = isStreaming || hasRunningStep
-    ? `${traceItemCount} ${traceItemCount === 1 ? "item" : "items"} active`
-    : failedCount > 0
-      ? `${failedCount} ${failedCount === 1 ? "step" : "steps"} failed`
-      : `${traceItemCount} ${traceItemCount === 1 ? "item" : "items"} completed`
+  const summaryText = isTraceActive
+    ? resolveTraceSummaryText(streamingMessages, fallbackText, steps)
+    : status === "failed" || failedCount > 0
+      ? "Failed"
+      : status === "stopped"
+        ? "Stopped"
+        : "Completed"
 
   return (
     <Accordion
@@ -372,14 +368,14 @@ function ToolTimeline({
             className="flex min-h-14 flex-1 items-center justify-between gap-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 [&>svg>path:last-child]:origin-center [&>svg>path:last-child]:transition-all [&>svg>path:last-child]:duration-200 [&[data-state=open]>svg>path:last-child]:rotate-90 [&[data-state=open]>svg>path:last-child]:opacity-0 [&[data-state=open]>svg]:rotate-180"
             aria-label="Toggle agent trace"
           >
-            <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               <div
                 data-slot="trace-summary-icon"
                 data-trace-state={isTraceActive ? "active" : failedCount ? "failed" : "idle"}
                 className={cn(
                   "relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full",
                   isTraceActive
-                    ? "text-white"
+                    ? ""
                     : failedCount
                       ? "bg-rose-50 text-rose-700 theme-dark:bg-rose-950/50 theme-dark:text-rose-300"
                       : "bg-stone-100 text-stone-600 theme-dark:bg-zinc-800 theme-dark:text-zinc-300",
@@ -391,11 +387,10 @@ function ToolTimeline({
                     <AnimatedOrb size={40} />
                   </div>
                 )}
-                <GitCompareArrows className="relative z-10 h-4 w-4 drop-shadow-[0_1px_1px_rgba(255,255,255,0.85)]" />
+                {!isTraceActive && <GitCompareArrows className="h-4 w-4" />}
               </div>
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-[15px] font-semibold leading-5 text-stone-800 theme-dark:text-zinc-100">Trace</span>
-                <span className="truncate text-[13px] font-normal leading-5 text-stone-500 theme-dark:text-zinc-400">{summary}</span>
+              <span className="block min-w-0 flex-1 truncate text-[13px] font-normal leading-5 text-stone-500 theme-dark:text-zinc-400">
+                {summaryText}
               </span>
             </div>
             <Plus
@@ -429,6 +424,45 @@ function ToolTimeline({
       </AccordionItem>
     </Accordion>
   )
+}
+
+export function resolveTraceSummaryText(
+  messages: TraceMessage[],
+  fallbackText: string,
+  steps: ToolStep[],
+): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const content = messages[index]?.content.trim()
+    if (content) {
+      return truncateTraceSummaryText(content)
+    }
+  }
+
+  const fallback = fallbackText.trim()
+  if (fallback) {
+    return truncateTraceSummaryText(fallback)
+  }
+
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]
+    const content = step?.description.trim() || step?.title.trim()
+    if (content) {
+      return truncateTraceSummaryText(content)
+    }
+  }
+
+  return ""
+}
+
+export function truncateTraceSummaryText(value: string): string {
+  const text = value.replace(/\s+/g, " ").trim()
+  const characters = Array.from(text)
+
+  if (characters.length <= TRACE_SUMMARY_MAX_CHARS) {
+    return text
+  }
+
+  return `${characters.slice(0, TRACE_SUMMARY_MAX_CHARS).join("")}...`
 }
 
 type TraceTimelineItem =

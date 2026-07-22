@@ -1,14 +1,14 @@
 "use client"
 
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
-import { ChevronsUpDown, LogOut, Network, Search, SquarePen, SunMoon, Trash2, UserRound, X } from "lucide-react"
+import { ChevronsUpDown, LogOut, Network, Pin, Search, SquarePen, SunMoon, Trash2, UserRound, X } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ShiningText } from "@/components/ui/shining-text"
-import { matchesSessionIdentity, resolveStableSessionOrder } from "./session-list-order"
+import { matchesSessionIdentity, resolveStableSessionOrder, sortSessionItemsByPinnedOrder } from "./session-list-order"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,7 +65,9 @@ type SiderProps = {
   activeSessionId?: string
   activeRecordId?: string | number | null
   isCollapsed?: boolean
+  isMobileOpen?: boolean
   focusSessionKey?: number
+  onMobileClose?: () => void
   onNewSession: () => void
   onSelectSession?: (session: ChatSessionListItem) => void
   onDeleteSession: (session: ChatSessionListItem) => Promise<void>
@@ -93,6 +95,7 @@ type NavLinkProps = {
 
 const DEFAULT_TITLE = "New Section"
 const TITLE_LENGTH = 18
+const PINNED_SESSIONS_STORAGE_KEY = "oa-agent-pinned-session-ids"
 const THEME_MODES = [
   { value: "system", label: "跟随系统" },
   { value: "light", label: "浅色模式" },
@@ -284,6 +287,37 @@ const ThemeModeMenu = () => {
   )
 }
 
+const PinConversationButton = ({
+  name,
+  isPinned,
+  onToggle,
+}: {
+  name: string
+  isPinned: boolean
+  onToggle: () => void
+}) => (
+  <button
+    data-slot="session-pin-button"
+    type="button"
+    aria-label={`${isPinned ? "Unpin" : "Pin"} ${name}`}
+    aria-pressed={isPinned}
+    title={isPinned ? "取消置顶" : "置顶"}
+    className={cn(
+      "ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-[opacity,background-color,color] duration-150 focus:opacity-100 group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/25 theme-dark:focus-visible:ring-zinc-500/30",
+      isPinned
+        ? "bg-transparent text-[#cfd5df] opacity-100 hover:bg-transparent hover:text-slate-700 theme-dark:bg-transparent theme-dark:text-[#cfd5df] theme-dark:hover:bg-transparent theme-dark:hover:text-zinc-200"
+        : "bg-[#f5f5f5] text-slate-400 opacity-0 hover:bg-[#f5f5f5] hover:text-slate-700 theme-dark:bg-zinc-800 theme-dark:text-zinc-500 theme-dark:hover:bg-zinc-800 theme-dark:hover:text-zinc-300",
+    )}
+    onClick={(event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      onToggle()
+    }}
+  >
+    <Pin className={cn("size-3.5", isPinned && "fill-current")} aria-hidden="true" />
+  </button>
+)
+
 const DeleteConversationButton = ({ name, onConfirm }: { name: string; onConfirm: () => void }) => {
   const [open, setOpen] = useState(false)
   const titleId = useId()
@@ -348,14 +382,18 @@ const SectionsList = ({
   activeHref,
   activeSessionId,
   onSelect,
+  onTogglePinned,
   onDelete,
+  pinnedSessionIds,
   sessionIndicatorStates,
 }: {
   items: NavItem[]
   activeHref: string
   activeSessionId?: string
   onSelect: (item: NavItem) => void
+  onTogglePinned: (item: NavItem) => void
   onDelete: (item: NavItem) => void
+  pinnedSessionIds: readonly string[]
   sessionIndicatorStates: ReadonlyMap<string, SessionIndicatorState>
 }) => (
   <div className="px-4 text-slate-600 theme-dark:text-zinc-400 md:px-8">
@@ -364,6 +402,7 @@ const SectionsList = ({
         const indicatorState = item.sessionId ? sessionIndicatorStates.get(item.sessionId) : undefined
         const isRunning = indicatorState === "running"
         const isUnread = indicatorState === "paused" && item.sessionId !== activeSessionId
+        const isPinned = item.sessionId ? pinnedSessionIds.includes(item.sessionId) : false
 
         return (
           <li
@@ -375,8 +414,14 @@ const SectionsList = ({
             <NavLink
               href={item.href}
               active={activeHref === item.href}
-              activeClassName="border-[#4f39f7] text-[#0f1828] theme-dark:border-violet-400 theme-dark:text-zinc-50"
-              className="flex min-w-0 flex-1 items-center border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828] theme-dark:border-zinc-700 theme-dark:hover:border-violet-400 theme-dark:hover:text-zinc-50"
+              activeClassName={cn(
+                "text-[#0f1828] theme-dark:text-zinc-50",
+                isPinned ? "border-[#ec4899]" : "border-[#4f39f7] theme-dark:border-violet-400",
+              )}
+              className={cn(
+                "flex min-w-0 flex-1 items-center border-l border-slate-200 px-4 py-2.5 text-sm font-medium transition duration-150 hover:border-[#4f39f7] hover:text-[#0f1828] theme-dark:border-zinc-700 theme-dark:hover:border-violet-400 theme-dark:hover:text-zinc-50",
+                isPinned && "border-[#ec4899] hover:border-[#ec4899] theme-dark:border-[#ec4899] theme-dark:hover:border-[#ec4899]",
+              )}
               onSelect={() => onSelect(item)}
               title={item.name}
             >
@@ -404,6 +449,13 @@ const SectionsList = ({
                 />
               ) : null}
             </NavLink>
+            {item.sessionId ? (
+              <PinConversationButton
+                name={item.name}
+                isPinned={isPinned}
+                onToggle={() => onTogglePinned(item)}
+              />
+            ) : null}
             <DeleteConversationButton name={item.name} onConfirm={() => onDelete(item)} />
           </li>
         )
@@ -418,7 +470,9 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       activeSessionId,
       activeRecordId = null,
       isCollapsed = false,
+      isMobileOpen = false,
       focusSessionKey = 0,
+      onMobileClose,
       onNewSession,
       onSelectSession,
       onDeleteSession,
@@ -434,25 +488,29 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
     const [activeHref, setActiveHref] = useState(defaultItem.href)
     const [query, setQuery] = useState("")
     const [user, setUser] = useState<SiderUser>(() => buildFallbackUser())
+    const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>([])
+    const pinnedSessionIdsRef = useRef<string[]>([])
     const sessionListRef = useRef<HTMLDivElement>(null)
     const handledFocusSessionKeyRef = useRef(focusSessionKey)
     const deletedSessionIdsRef = useRef(new Set<string>())
 
     async function handleDeleteItem(item: NavItem) {
-      if (!item.sessionId) {
+      const sessionId = item.sessionId
+      if (!sessionId) {
         removeSessionItem(item.href)
         return
       }
 
-      deletedSessionIdsRef.current.add(item.sessionId)
+      deletedSessionIdsRef.current.add(sessionId)
       try {
         await onDeleteSession({
-          sessionId: item.sessionId,
+          sessionId,
           ...(item.recordId !== undefined ? { recordId: item.recordId } : {}),
         })
+        updatePinnedSessionIds((currentIds) => currentIds.filter((currentId) => currentId !== sessionId))
         removeSessionItem(item.href)
       } catch (error) {
-        deletedSessionIdsRef.current.delete(item.sessionId)
+        deletedSessionIdsRef.current.delete(sessionId)
         console.error("Failed to delete chat session:", error)
       }
     }
@@ -480,6 +538,31 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       }
     }
 
+    function handleTogglePinnedItem(item: NavItem) {
+      const sessionId = item.sessionId
+      if (!sessionId) {
+        return
+      }
+
+      updatePinnedSessionIds((currentIds) =>
+        currentIds.includes(sessionId)
+          ? currentIds.filter((currentId) => currentId !== sessionId)
+          : [sessionId, ...currentIds],
+      )
+    }
+
+    function updatePinnedSessionIds(update: (currentIds: string[]) => string[]) {
+      const nextIds = update(pinnedSessionIdsRef.current)
+      pinnedSessionIdsRef.current = nextIds
+      setPinnedSessionIds(nextIds)
+
+      try {
+        window.localStorage.setItem(PINNED_SESSIONS_STORAGE_KEY, JSON.stringify(nextIds))
+      } catch (error) {
+        console.error("Failed to persist pinned chat sessions:", error)
+      }
+    }
+
     async function handleLogout() {
       clearStoredAuth()
 
@@ -498,6 +581,9 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
 
     useEffect(() => {
       setUser(readStoredUser())
+      const storedPinnedSessionIds = readPinnedSessionIds()
+      pinnedSessionIdsRef.current = storedPinnedSessionIds
+      setPinnedSessionIds(storedPinnedSessionIds)
     }, [])
 
     useEffect(() => {
@@ -545,18 +631,19 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
     const filteredSections = useMemo(() => {
       const normalizedQuery = normalizeSearchText(query)
 
-      if (!normalizedQuery) {
-        return sections
-      }
-
       const queryTerms = normalizedQuery.split(" ").filter(Boolean)
       return sections
         .map((section) => ({
           ...section,
-          items: section.items.filter((item) => matchesSessionQuery(item, queryTerms)),
+          items: sortSessionItemsByPinnedOrder(
+            normalizedQuery
+              ? section.items.filter((item) => matchesSessionQuery(item, queryTerms))
+              : section.items,
+            pinnedSessionIds,
+          ),
         }))
         .filter((section) => section.items.length > 0)
-    }, [query, sections])
+    }, [pinnedSessionIds, query, sections])
 
     useEffect(() => {
       if (handledFocusSessionKeyRef.current === focusSessionKey || !activeSessionId) {
@@ -593,11 +680,24 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       <nav
         ref={ref}
         id="chat-sider"
-        aria-hidden={isCollapsed}
-        className="fixed left-0 top-0 z-40 hidden h-full w-80 flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.06)] backdrop-blur-xl theme-dark:border-zinc-800 theme-dark:bg-zinc-950/95 theme-dark:shadow-[16px_0_60px_rgba(0,0,0,0.24)] sm:flex">
+        aria-label="Conversations"
+        aria-hidden={isCollapsed && !isMobileOpen}
+        className={cn(
+          "fixed left-0 top-0 z-40 flex h-dvh w-[min(20rem,calc(100vw-3rem))] flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.12)] backdrop-blur-xl transition-[transform,visibility] duration-300 ease-out theme-dark:border-zinc-800 theme-dark:bg-zinc-950/95 theme-dark:shadow-[16px_0_60px_rgba(0,0,0,0.32)] sm:visible sm:h-full sm:w-80 sm:translate-x-0 sm:pointer-events-auto sm:transition-none",
+          isMobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none",
+        )}
+      >
+        <button
+          type="button"
+          onClick={onMobileClose}
+          className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-stone-600 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700 theme-dark:focus-visible:ring-white/15 sm:hidden"
+          aria-label="Close conversations"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
         <div
           data-slot="sider-actions"
-          className="grid shrink-0 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-center gap-2 bg-white/95 px-4 pb-4 pt-6 backdrop-blur-xl theme-dark:bg-zinc-950/95 md:px-8"
+          className="grid shrink-0 grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-center gap-2 bg-white/95 px-4 pb-4 pt-14 backdrop-blur-xl theme-dark:bg-zinc-950/95 sm:pt-6 md:px-8"
         >
           <div className="min-w-0">
             <SearchBox
@@ -634,7 +734,9 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
                     activeHref={activeHref}
                     activeSessionId={activeSessionId}
                     onSelect={handleSelectItem}
+                    onTogglePinned={handleTogglePinnedItem}
                     onDelete={handleDeleteItem}
+                    pinnedSessionIds={pinnedSessionIds}
                     sessionIndicatorStates={sessionIndicatorStates}
                   />
                 </div>
@@ -686,6 +788,22 @@ export default Sider
 
 function isThemeMode(value: string | undefined): value is ThemeMode {
   return THEME_MODES.some((mode) => mode.value === value)
+}
+
+function readPinnedSessionIds(): string[] {
+  try {
+    const storedValue = JSON.parse(window.localStorage.getItem(PINNED_SESSIONS_STORAGE_KEY) || "[]")
+    if (!Array.isArray(storedValue)) {
+      return []
+    }
+
+    const normalizedIds = storedValue.flatMap((value) =>
+      typeof value === "string" && value.trim() ? [value.trim()] : [],
+    )
+    return Array.from(new Set(normalizedIds))
+  } catch {
+    return []
+  }
 }
 
 function resolveSessionItems(

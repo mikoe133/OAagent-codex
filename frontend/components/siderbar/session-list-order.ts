@@ -39,6 +39,41 @@ export function sortSessionItemsByCreatedAt<T extends SessionCreatedAt>(items: T
     .map(({ item }) => item)
 }
 
+export function sortSessionItemsByPinnedOrder<T extends SessionItemIdentity>(
+  items: T[],
+  pinnedSessionIds: readonly string[],
+): T[] {
+  const pinnedOrder = new Map<string, number>()
+  pinnedSessionIds.forEach((sessionId, index) => {
+    if (!pinnedOrder.has(sessionId)) {
+      pinnedOrder.set(sessionId, index)
+    }
+  })
+
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      pinnedIndex: item.sessionId ? pinnedOrder.get(item.sessionId) : undefined,
+    }))
+    .sort((left, right) => {
+      const leftIsPinned = left.pinnedIndex !== undefined
+      const rightIsPinned = right.pinnedIndex !== undefined
+
+      if (left.pinnedIndex !== undefined && right.pinnedIndex !== undefined) {
+        return left.pinnedIndex - right.pinnedIndex
+      }
+      if (leftIsPinned) {
+        return -1
+      }
+      if (rightIsPinned) {
+        return 1
+      }
+      return left.index - right.index
+    })
+    .map(({ item }) => item)
+}
+
 function normalizeRecordId(value: string | number | null | undefined): string | null {
   if (value === null || value === undefined) {
     return null

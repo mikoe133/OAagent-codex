@@ -3,7 +3,12 @@ import test from "node:test"
 
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { MessageBubble, resolveTraceOpenState } from "./message-bubble"
+import {
+  MessageBubble,
+  resolveTraceOpenState,
+  resolveTraceSummaryText,
+  truncateTraceSummaryText,
+} from "./message-bubble"
 import type { Message } from "./chat-shell"
 
 const OA_NAVIGATION_URL = "https://rwkv-oa.vercel.app/"
@@ -57,7 +62,7 @@ test("user messages render without an avatar or name in a borderless gray bubble
   assert.doesNotMatch(html, />You<\/span>/)
 })
 
-test("assistant replies show the OA Agent name without an animated avatar", () => {
+test("assistant replies render without a visible agent header or animated avatar", () => {
   const message = {
     id: "assistant-without-avatar",
     role: "assistant",
@@ -68,8 +73,32 @@ test("assistant replies show the OA Agent name without an animated avatar", () =
 
   const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
-  assert.match(html, />OA Agent<\/span>/)
+  assert.doesNotMatch(html, />OA Agent<\/span>/)
+  assert.doesNotMatch(html, />Working<\/span>/)
   assert.doesNotMatch(html, /orb-circle-/)
+})
+
+test("trace summaries prefer the last non-empty text message", () => {
+  assert.equal(
+    resolveTraceSummaryText(
+      [
+        { id: "first", content: "First update" },
+        { id: "empty", content: "  " },
+        { id: "last", content: "Latest update" },
+      ],
+      "Final response",
+      [],
+    ),
+    "Latest update",
+  )
+})
+
+test("long trace summaries end with an explicit ellipsis", () => {
+  const summary = truncateTraceSummaryText(
+    "This is a deliberately long trace message that should be shortened before it reaches the header.",
+  )
+
+  assert.equal(summary, "This is a deliberately long trace message that s...")
 })
 
 test("user and assistant action controls reveal on hover or keyboard focus", () => {
@@ -129,7 +158,7 @@ test("streaming assistant replies announce live output without feedback controls
   const message = {
     id: "assistant-2",
     role: "assistant",
-    content: "Working",
+    content: "Inspecting the request",
     createdAt: new Date("2026-07-10T10:00:00.000Z"),
     status: "streaming",
   } satisfies Message
@@ -139,6 +168,8 @@ test("streaming assistant replies announce live output without feedback controls
   )
 
   assert.match(html, /Generating response/)
+  assert.doesNotMatch(html, />OA Agent<\/span>/)
+  assert.doesNotMatch(html, />Working<\/span>/)
   assert.match(html, /data-slot="agent-trace"/)
   assert.match(html, /data-slot="agent-trace-trigger"/)
   assert.match(html, /data-state="open"/)
@@ -187,9 +218,12 @@ test("streaming agent messages render as separate subdued trace steps in event o
   const traceMessages = html.match(/data-slot="streaming-message-trace"/g) ?? []
   const firstMessageIndex = html.indexOf("I will inspect the records.")
   const toolIndex = html.indexOf("Fetch records")
-  const secondMessageIndex = html.indexOf("Now I will summarize the result.")
+  const secondMessageIndex = html.lastIndexOf("Now I will summarize the result.")
 
   assert.equal(traceMessages.length, 2)
+  assert.match(html, />Now I will summarize the result\.<\/span>/)
+  assert.match(html, /flex-1 truncate text-\[13px\] font-normal/)
+  assert.match(html, /text-stone-500/)
   assert.ok(firstMessageIndex < toolIndex)
   assert.ok(toolIndex < secondMessageIndex)
   assert.match(html, /data-trace-message-id="message-1"/)
@@ -198,29 +232,28 @@ test("streaming agent messages render as separate subdued trace steps in event o
   assert.match(html, /fetch --all/)
   assert.match(html, /Records fetched/)
   assert.doesNotMatch(html, /data-slot="assistant-response"/)
-  assert.match(html, /lucide-git-compare-arrows/)
+  assert.doesNotMatch(html, /lucide-git-compare-arrows/)
+  assert.doesNotMatch(html, /2 items active/)
   assert.doesNotMatch(html, /left-\[13px\] top-7 h-\[calc\(100%\+0\.25rem\)\] w-px bg-stone-200/)
 
   const traceItem = html.match(/<div[^>]*data-slot="agent-trace-item"[^>]*>/)?.[0]
   const summaryIcon = html.match(/<div data-slot="trace-summary-icon"[^>]*>/)?.[0]
   const messageIcon = html.match(/<span data-slot="trace-message-icon"[^>]*>/)?.[0]
-  const toolIcon = html.match(/<span data-slot="trace-tool-icon"[^>]*>/)?.[0]
-  const toolStatus = html.match(/<span data-slot="trace-tool-status"[^>]*>/)?.[0]
   assert.ok(traceItem, "expected a trace accordion item")
   assert.ok(summaryIcon, "expected a trace summary icon")
   assert.ok(messageIcon, "expected a trace message icon")
-  assert.ok(toolIcon, "expected a trace tool icon")
-  assert.ok(toolStatus, "expected a trace tool status")
+  assert.match(html, /data-slot="trace-tool-icon"/)
+  assert.match(html, /data-slot="trace-tool-status"/)
   assert.match(traceItem, /\bborder-0\b/)
   assert.doesNotMatch(traceItem, /border-stone/)
   assert.match(summaryIcon, /data-trace-state="active"/)
-  assert.match(summaryIcon, /\btext-white\b/)
+  assert.doesNotMatch(summaryIcon, /\btext-white\b/)
   assert.doesNotMatch(summaryIcon, /bg-emerald-50/)
   assert.doesNotMatch(summaryIcon, /\bborder(?:-|\b)/)
   assert.match(html, /data-slot="trace-summary-orb"/)
   assert.doesNotMatch(messageIcon, /\bborder(?:-|\b)/)
-  assert.doesNotMatch(toolIcon, /\bborder(?:-|\b)/)
-  assert.match(toolStatus, /text-\[#00619a\]/)
+  assert.doesNotMatch(html, /data-slot="trace-tool-icon"[^>]*\bborder(?:-|\b)/)
+  assert.match(html, /data-slot="trace-tool-status"[^>]*text-\[#00619a\]/)
   assert.match(html, /lucide-circle-check[^>]*text-\[#00BFFF\]/)
 })
 
@@ -248,7 +281,7 @@ test("running trace nodes use the mint icon color", () => {
   assert.match(html, /lucide-loader-circle[^>]*text-\[#b4fbde\]/)
 })
 
-test("completed assistant traces keep collapsed details out of the rendered page", () => {
+test("completed assistant traces show a completed status", () => {
   const message = {
     id: "assistant-3",
     role: "assistant",
@@ -270,8 +303,9 @@ test("completed assistant traces keep collapsed details out of the rendered page
 
   const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
-  assert.match(html, /Trace/)
-  assert.match(html, /1 item completed/)
+  assert.match(html, />Completed<\/span>/)
+  assert.doesNotMatch(html, />Trace<\/span>/)
+  assert.doesNotMatch(html, /1 item completed/)
   assert.match(html, /data-slot="agent-trace-trigger"/)
   assert.match(html, /data-state="closed"/)
   assert.doesNotMatch(html, /data-slot="trace-summary-orb"/)

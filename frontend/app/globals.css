@@ -90,8 +90,8 @@
 }
 
 @theme inline {
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --font-sans: sans-serif;
+  --font-mono: sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -133,6 +133,18 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+  html,
+  button,
+  input,
+  optgroup,
+  select,
+  textarea,
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: sans-serif;
   }
   body {
     @apply bg-background text-foreground;
