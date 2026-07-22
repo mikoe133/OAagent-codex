@@ -4,7 +4,7 @@ import type React from "react"
 
 import { ArrowRight, Loader2, LockKeyhole, Mail } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Alert } from "@/components/ui/hero-alert"
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,10 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    setErrorMessage(resolveSsoError(new URLSearchParams(window.location.search).get("sso_error")))
+  }, [])
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -232,5 +236,24 @@ function getSafeNextPath(): string {
     return `${url.pathname}${url.search}${url.hash}` || "/chat"
   } catch {
     return "/chat"
+  }
+}
+
+function resolveSsoError(value: string | null): string | null {
+  switch (value) {
+    case "invalid_or_expired":
+      return "This OA login handoff has expired. Please open OA Agent again from OA."
+    case "oa_unavailable":
+      return "OA authentication is temporarily unavailable. Please try again later."
+    case "incoming_session_invalid":
+      return "The OA login session is no longer valid. Please sign in again in OA."
+    case "oa_session_missing":
+      return "Your OA session is missing. Please sign in to OA and open OA Agent again."
+    case "oa_session_invalid":
+      return "Your OA session has expired. Please sign in to OA again."
+    case "sso_unavailable":
+      return "OA Agent sign-in is temporarily unavailable. Please try again later."
+    default:
+      return null
   }
 }

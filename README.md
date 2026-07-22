@@ -30,6 +30,11 @@ npm run dev:server
 npm run dev:frontend
 ```
 
+OA Web 可通过服务端 SSO 启动路由打开 OA Agent。两边 Web 服务端配置相同的
+`OA_AGENT_SSO_SHARED_SECRET`；OA Web 设置 `OA_AGENT_SSO_URL=https://oa-agent.rwkvos.com`。
+SSO code 默认在 Agent 进程内存中保存 60 秒并只能消费一次，单实例部署适用；多实例部署
+需要将票据存储迁移到共享 Redis。
+
 默认监听 `http://127.0.0.1:3000`,并把 `sessionId -> Codex threadId` 映射持久化到 `.context/agent-sessions.json`。完整接口说明见 [docs/server-api.md](docs/server-api.md)。
 
 后台服务不包含按关键词硬编码的 OA 直连分支。所有消息都会进入 Codex agent,由 agent 基于远程优先、本地兜底选中的 OpenAPI 契约分析接口能力;配置 `OA_API_BASE_URL` 后,agent 可通过受控 `callOaApi` 工具调用 OpenAPI 中声明的 OA 接口。Web 和 agent 使用同一枚用户 OA token,并分别通过 OA 的已登录用户接口验证。

@@ -70,6 +70,8 @@ services:
       AGENT_API_BASE_URL: http://agent:3000
       OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
       OA_AUTH_ALIAS: ${OA_AUTH_ALIAS:-default}
+      OA_AGENT_SSO_SHARED_SECRET: ${OA_AGENT_SSO_SHARED_SECRET:-}
+      OA_AGENT_SSO_TTL_SECONDS: ${OA_AGENT_SSO_TTL_SECONDS:-60}
     extra_hosts:
       - host.docker.internal:host-gateway
     depends_on:
