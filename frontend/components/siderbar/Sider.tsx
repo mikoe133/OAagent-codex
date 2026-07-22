@@ -55,6 +55,10 @@ type SessionsResponse = {
   sessions?: unknown
 }
 
+type CurrentUserResponse = {
+  user?: unknown
+}
+
 type SiderUser = Pick<AuthUser, "email"> & {
   name: string
 }
@@ -317,7 +321,6 @@ const PinConversationButton = ({
     <Pin className={cn("size-3.5", isPinned && "fill-current")} aria-hidden="true" />
   </button>
 )
-
 const DeleteConversationButton = ({ name, onConfirm }: { name: string; onConfirm: () => void }) => {
   const [open, setOpen] = useState(false)
   const titleId = useId()
@@ -580,10 +583,38 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
     }
 
     useEffect(() => {
+      const abortController = new AbortController()
       setUser(readStoredUser())
       const storedPinnedSessionIds = readPinnedSessionIds()
       pinnedSessionIdsRef.current = storedPinnedSessionIds
       setPinnedSessionIds(storedPinnedSessionIds)
+
+      async function syncCurrentUser() {
+        try {
+          const response = await fetch("/api/auth/me", {
+            method: "GET",
+            credentials: "same-origin",
+            cache: "no-store",
+            signal: abortController.signal,
+          })
+          if (!response.ok) {
+            return
+          }
+
+          const payload = (await response.json()) as CurrentUserResponse
+          const resolvedUser = normalizeUser(payload.user)
+          if (resolvedUser) {
+            setUser(resolvedUser)
+          }
+        } catch (error) {
+          if (!(error instanceof Error && error.name === "AbortError")) {
+            console.error("Failed to sync current user:", error)
+          }
+        }
+      }
+
+      void syncCurrentUser()
+      return () => abortController.abort()
     }, [])
 
     useEffect(() => {
@@ -805,7 +836,6 @@ function readPinnedSessionIds(): string[] {
     return []
   }
 }
-
 function resolveSessionItems(
   value: unknown,
   deletedSessionIds: ReadonlySet<string> = new Set(),
@@ -975,25 +1005,33 @@ function normalizeStoredUser(value: string | null): SiderUser | null {
   }
 
   try {
-    const parsed = JSON.parse(value) as Partial<AuthUser>
-    if (typeof parsed.email !== "string" || !parsed.email.trim()) {
-      return null
-    }
-
-    const email = parsed.email.trim()
-    return {
-      email,
-      name: resolveUserDisplayName(email),
-    }
+    return normalizeUser(JSON.parse(value) as unknown)
   } catch {
     return null
   }
 }
 
+function normalizeUser(value: unknown): SiderUser | null {
+  if (!value || typeof value !== "object") {
+    return null
+  }
+
+  const user = value as Partial<AuthUser>
+  if (typeof user.email !== "string" || !user.email.trim()) {
+    return null
+  }
+
+  const email = user.email.trim()
+  return {
+    email,
+    name: resolveUserDisplayName(email),
+  }
+}
+
 function buildFallbackUser(): SiderUser {
   return {
-    name: "KL",
-    email: "kl@example.com",
+    name: "OA",
+    email: "正在同步账号信息",
   }
 }
 
