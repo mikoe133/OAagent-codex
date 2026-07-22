@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
 import { resolveOaSessionToken } from "@/lib/server/oa-session"
+import { createSsoRedirectUrl } from "@/lib/server/sso-redirect-url"
 import {
   clearPendingSsoCookie,
   setAgentSessionCookie,
@@ -45,10 +46,10 @@ export async function GET(request: NextRequest) {
 
   if (current.user.email === claimed.handoff.user.email) {
     discardPendingSsoHandoff(claimed.pendingId)
-    return noStoreRedirect(new URL("/chat", request.url))
+    return noStoreRedirect(createSsoRedirectUrl(request, "/chat"))
   }
 
-  const response = noStoreRedirect(new URL("/auth/sso/choose", request.url))
+  const response = noStoreRedirect(createSsoRedirectUrl(request, "/auth/sso/choose"))
   const maxAge = Math.max(1, Math.ceil((claimed.handoff.expiresAt - Date.now()) / 1_000))
   setPendingSsoCookie(response, claimed.pendingId, maxAge)
   return response
@@ -60,14 +61,14 @@ function activateIncomingSession(request: NextRequest, pendingId: string): NextR
     return redirectWithError(request, "invalid_or_expired")
   }
 
-  const response = noStoreRedirect(new URL("/auth/sso/complete", request.url))
+  const response = noStoreRedirect(createSsoRedirectUrl(request, "/auth/sso/complete"))
   setAgentSessionCookie(response, handoff.token)
   clearPendingSsoCookie(response)
   return response
 }
 
 function redirectWithError(request: NextRequest, error: string): NextResponse {
-  const url = new URL("/login", request.url)
+  const url = createSsoRedirectUrl(request, "/login")
   url.searchParams.set("sso_error", error)
   return noStoreRedirect(url)
 }
