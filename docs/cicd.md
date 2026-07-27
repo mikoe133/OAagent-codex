@@ -46,12 +46,21 @@ Repository Variables:
 | `DEPLOY_PORT` | SSH 端口,默认 `22` |
 | `DEPLOY_PLATFORM` | 默认 `linux/amd64`;ARM 使用 `linux/arm64` |
 
+Environment Secrets:
+
+| Environment | Secret | 用途 |
+| --- | --- | --- |
+| `test` | `OA_AGENT_SSO_SHARED_SECRET` | 测试 OA 与 OA Agent 共用的 SSO 签名密钥 |
+| `production` | `OA_AGENT_SSO_SHARED_SECRET` | 生产 OA 与 OA Agent 共用的 SSO 签名密钥 |
+
 Environment Variables:
 
 | Environment | Variable | 用途 |
 | --- | --- | --- |
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
+| `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),必须是正整数 |
+| `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),必须是正整数 |
 | 两者可选 | `OA_AUTH_ALIAS` | OA 数据源 alias,默认 `default` |
 | 两者可选 | `NEXTTOKEN_API_BASE_URL` | Nexttoken API 地址,默认 `https://next-token.cc` |
 | 两者可选 | `OPENROUTER_API_BASE_URL` | OpenRouter API 地址,默认 `https://openrouter.ai/api/v1` |

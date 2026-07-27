@@ -21,7 +21,7 @@ function reject_multiline() {
 
 readonly output_path="${1:?usage: render-runtime-env.sh OUTPUT_PATH}"
 
-for name in COMPOSE_PROJECT_NAME NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL WEB_PORT; do
+for name in COMPOSE_PROJECT_NAME NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS WEB_PORT; do
   require_value "$name"
 done
 
@@ -36,6 +36,8 @@ for name in \
   OPENROUTER_API_KEY \
   OA_DOCKER_API_BASE_URL \
   OA_AUTH_ALIAS \
+  OA_AGENT_SSO_SHARED_SECRET \
+  OA_AGENT_SSO_TTL_SECONDS \
   WEB_BIND_ADDRESS \
   NEXTTOKEN_API_BASE_URL \
   OPENROUTER_API_BASE_URL \
@@ -53,6 +55,8 @@ done
   || fail "OPENROUTER_API_BASE_URL must be an HTTP(S) URL"
 [[ "$oa_auth_alias" =~ ^[A-Za-z0-9_-]+$ ]] \
   || fail "OA_AUTH_ALIAS contains unsupported characters"
+[[ "$OA_AGENT_SSO_TTL_SECONDS" =~ ^[1-9][0-9]*$ ]] \
+  || fail "OA_AGENT_SSO_TTL_SECONDS must be a positive integer"
 [[ "$web_bind_address" =~ ^[A-Za-z0-9:._-]+$ ]] \
   || fail "WEB_BIND_ADDRESS contains unsupported characters"
 [[ "$WEB_PORT" =~ ^[0-9]+$ ]] \
@@ -76,6 +80,8 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'OA_API_TOKEN_HEADER=Cookie\n'
   printf 'OA_API_TOKEN_PREFIX=sessionid=\n'
   printf 'OA_AUTH_ALIAS=%s\n' "$oa_auth_alias"
+  printf 'OA_AGENT_SSO_SHARED_SECRET=%s\n' "$OA_AGENT_SSO_SHARED_SECRET"
+  printf 'OA_AGENT_SSO_TTL_SECONDS=%s\n' "$OA_AGENT_SSO_TTL_SECONDS"
   printf 'OA_USER_TOKEN_HEADER=Authorization\n'
   printf 'OA_USER_TOKEN_PREFIX=Bearer\n'
   printf 'WEB_BIND_ADDRESS=%s\n' "$web_bind_address"

@@ -149,8 +149,6 @@ describe("resolveStreamRecovery", () => {
       response: [
         "已成功执行修改操作。",
         "结果:系统 weekly_num=101, content 已更新为 `6666`",
-        "接口依据:",
-        "- weekly_report_weekly_report_report_post, POST /weekly-report/report",
       ].join("\n"),
     });
   });

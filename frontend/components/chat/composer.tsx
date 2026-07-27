@@ -548,28 +548,38 @@ export function Composer({
                   sideOffset={8}
                   className="w-40 px-2 py-2 rounded-2xl z-[9999]"
                 >
-                  {availableModels.map((model) => (
-                    <DropdownMenuItem
-                      key={model.id}
-                      onClick={() => {
-                        playClickSound()
-                        onModelChange(model.id)
-                      }}
-                      className={cn(
-                        "flex items-center cursor-pointer gap-3 rounded-lg",
-                        selectedModel === model.id && "bg-stone-100 theme-dark:bg-zinc-800",
-                      )}
-                    >
-                      <Image
-                        src={model.icon || "/placeholder.svg"}
-                        alt={model.name}
-                        width={20}
-                        height={20}
-                        className="rounded-sm object-contain w-4 h-4"
-                      />
-                      <span className="text-sm">{model.name}</span>
-                    </DropdownMenuItem>
-                  ))}
+                  {availableModels.map((model) => {
+                    const modelDisabled = "disabled" in model && model.disabled
+
+                    return (
+                      <DropdownMenuItem
+                        key={model.id}
+                        disabled={modelDisabled}
+                        title={modelDisabled ? "暂不支持" : undefined}
+                        onClick={() => {
+                          if (modelDisabled) return
+                          playClickSound()
+                          onModelChange(model.id)
+                        }}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg",
+                          modelDisabled
+                            ? "cursor-not-allowed text-stone-400 data-[disabled]:pointer-events-auto data-[disabled]:opacity-60 [&_img]:grayscale theme-dark:text-zinc-500"
+                            : "cursor-pointer",
+                          selectedModel === model.id && "bg-stone-100 theme-dark:bg-zinc-800",
+                        )}
+                      >
+                        <Image
+                          src={model.icon || "/placeholder.svg"}
+                          alt={model.name}
+                          width={20}
+                          height={20}
+                          className="rounded-sm object-contain w-4 h-4"
+                        />
+                        <span className="text-sm">{model.name}</span>
+                      </DropdownMenuItem>
+                    )
+                  })}
                 </DropdownMenuContent>
               </DropdownMenuPortal>
             </DropdownMenu>

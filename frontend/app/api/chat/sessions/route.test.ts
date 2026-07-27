@@ -149,6 +149,16 @@ test("PATCH persists the immutable creation time from generated session ids", as
 
   const createdAt = "2026-07-10T08:00:00.000Z"
   const sessionId = `web-${Date.parse(createdAt)}-abcdefg`
+  const messages = [
+    {
+      id: "assistant-1",
+      role: "assistant",
+      content: "Done",
+      createdAt,
+      durationMs: 12_340,
+      status: "completed",
+    },
+  ]
   const savedRecords: Array<Record<string, unknown>> = []
 
   globalThis.fetch = async (_input, init) => {
@@ -172,13 +182,14 @@ test("PATCH persists the immutable creation time from generated session ids", as
           "content-type": "application/json",
           cookie: "sessionid=test-session-token",
         },
-        body: JSON.stringify({ sessionId, recordId: 9, messages: [] }),
+        body: JSON.stringify({ sessionId, recordId: 9, messages }),
       }),
     )
     const payload = (await response.json()) as { session: { createdAt: string } }
 
     assert.equal(response.status, 200)
     assert.equal(savedRecords[0]?.createdAt, createdAt)
+    assert.deepEqual(savedRecords[0]?.messages, messages)
     assert.equal(payload.session.createdAt, createdAt)
   } finally {
     globalThis.fetch = originalFetch

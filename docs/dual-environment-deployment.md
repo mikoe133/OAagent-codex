@@ -76,7 +76,7 @@ ssh-keyscan -p 22 -H <服务器IP或域名>
 GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 ```
 
-只添加这 3 个 Secret:
+添加以下 Repository Secret:
 
 | Secret | 填写内容 | 获取方式 |
 | --- | --- | --- |
@@ -132,6 +132,10 @@ GitHub 仓库 -> Settings -> Environments
 | --- | --- | --- |
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
+| `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),例如 `300` |
+| `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),例如 `300` |
+
+再分别为两个 Environment 添加 Secret `OA_AGENT_SSO_SHARED_SECRET`。该值必须与对应 OA 服务端完全一致;测试与生产应使用不同的高强度随机密钥。
 
 如果 OA 和本项目在同一台服务器,并发布宿主机 `8010` 端口,填写:
 

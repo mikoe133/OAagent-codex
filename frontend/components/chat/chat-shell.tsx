@@ -18,6 +18,7 @@ import {
   type AIModel,
   type ModelProvider,
 } from "@/lib/model-catalog"
+import { calculateResponseDurationMs, normalizeResponseDuration } from "@/lib/response-duration"
 import {
   drainChatSseBuffer,
   isToolTimelineEvent,
@@ -39,6 +40,7 @@ export interface Message {
   role: "user" | "assistant"
   content: string
   createdAt: Date
+  durationMs?: number
   imageData?: string
   toolSteps?: ToolStep[]
   traceMessages?: TraceMessage[]
@@ -76,6 +78,7 @@ type StoredMessage = {
   role?: unknown
   content?: unknown
   createdAt?: unknown
+  durationMs?: unknown
   imageData?: unknown
   toolSteps?: unknown
   status?: unknown
@@ -306,12 +309,14 @@ function normalizeStoredMessage(value: unknown): Message | null {
   const status = normalizeStoredMessageStatus(message.status, message.role)
   const feedback = message.feedback === "like" || message.feedback === "dislike" ? message.feedback : null
   const messageError = stringValue(message.error)
+  const durationMs = normalizeResponseDuration(message.durationMs)
 
   return {
     id: typeof message.id === "string" && message.id ? message.id : generateId(),
     role: message.role,
     content: message.content,
     createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
+    ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof message.imageData === "string" ? { imageData: message.imageData } : {}),
     ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
     ...(status ? { status } : {}),
@@ -720,6 +725,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
 
       setError(null)
+      const responseStartedAt = performance.now()
       const conversationMessages = messagesRef.current
 
       const userMessage: Message = {
@@ -1024,6 +1030,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           appendAssistantContent(decoder.decode())
         }
 
+        const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
         await waitForTypewriterFlush()
         cancelTypewriter()
         currentToolSteps = currentToolSteps.map((step) =>
@@ -1037,6 +1044,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             ...assistantMessage,
             content: accumulatedContent,
             status: "completed",
+            durationMs,
             ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
           },
         ]
@@ -1049,6 +1057,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
         const wasStopped = e instanceof Error && e.name === "AbortError"
         const errorMessage = e instanceof Error ? e.message : "An error occurred"
+        const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
         currentToolSteps = currentToolSteps.map((step) =>
           step.status === "running"
             ? { ...step, status: wasStopped ? ("info" as const) : ("failed" as const) }
@@ -1062,6 +1071,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             ...assistantMessage,
             content: accumulatedContent || visibleContent,
             status: wasStopped ? "stopped" : "failed",
+            durationMs,
             ...(!wasStopped ? { error: errorMessage } : {}),
             ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
           },

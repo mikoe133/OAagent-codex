@@ -33,6 +33,9 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.match(workflow, /NEXTTOKEN_API_KEY: \$\{\{ secrets\.NEXTTOKEN_API_KEY \}\}/)
   assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
+  assert.equal(workflow.match(/OA_AGENT_SSO_SHARED_SECRET: \$\{\{ secrets\.OA_AGENT_SSO_SHARED_SECRET \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/OA_AGENT_SSO_TTL_SECONDS: \$\{\{ vars\.OA_AGENT_SSO_TTL_SECONDS \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS; do/g)?.length, 2)
   assert.match(workflow, /bash scripts\/render-runtime-env\.sh/)
   assert.match(workflow, /push: \$\{\{ github\.event_name != 'pull_request' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/test'\) \}\}/)
   assert.match(workflow, /uses: actions\/upload-artifact@v4/)
@@ -46,6 +49,16 @@ test("publishes release images and transfers private deployment artifacts", asyn
 test("allows the server env to isolate Compose projects", async () => {
   const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
   assert.match(compose, /^name: \$\{COMPOSE_PROJECT_NAME:-oa-agent\}$/m)
+})
+
+test("injects SSO configuration into the web container at runtime", async () => {
+  const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
+  const dockerfile = await readFile(path.join(repoRoot, "Dockerfile"), "utf8")
+  const webService = compose.slice(compose.indexOf("  web:"), compose.indexOf("\nvolumes:"))
+
+  assert.match(webService, /^      OA_AGENT_SSO_SHARED_SECRET: \$\{OA_AGENT_SSO_SHARED_SECRET\}$/m)
+  assert.match(webService, /^      OA_AGENT_SSO_TTL_SECONDS: \$\{OA_AGENT_SSO_TTL_SECONDS\}$/m)
+  assert.doesNotMatch(dockerfile, /OA_AGENT_SSO_(?:SHARED_SECRET|TTL_SECONDS)/)
 })
 
 test("limits container resources and log growth on the shared server", async () => {
@@ -64,4 +77,14 @@ test("uses Docker as the Codex command isolation boundary", async () => {
   assert.match(compose, /^      CODEX_SANDBOX_MODE: danger-full-access$/m)
   assert.match(compose, /^      - no-new-privileges:true$/m)
   assert.match(compose, /^    cap_drop:\n      - ALL$/m)
+})
+
+test("provides Python for Codex commands in the agent runtime image", async () => {
+  const dockerfile = await readFile(path.join(repoRoot, "Dockerfile"), "utf8")
+  const agentRuntime = dockerfile.slice(
+    dockerfile.indexOf("FROM ${NODE_IMAGE} AS agent-runtime"),
+    dockerfile.indexOf("FROM manifests AS web-build"),
+  )
+
+  assert.match(agentRuntime, /apt-get install[\s\S]*\bpython3\b/)
 })

@@ -158,6 +158,8 @@ jobs:
       OPENROUTER_API_BASE_URL: ${{ vars.OPENROUTER_API_BASE_URL || 'https://openrouter.ai/api/v1' }}
       OA_DOCKER_API_BASE_URL: ${{ vars.OA_DOCKER_API_BASE_URL }}
       OA_AUTH_ALIAS: ${{ vars.OA_AUTH_ALIAS || 'default' }}
+      OA_AGENT_SSO_SHARED_SECRET: ${{ secrets.OA_AGENT_SSO_SHARED_SECRET }}
+      OA_AGENT_SSO_TTL_SECONDS: ${{ vars.OA_AGENT_SSO_TTL_SECONDS }}
       DEPLOY_PATH: /opt/rwkv/apps/oa-agent-test
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
       COMPOSE_PROJECT_NAME: oa-agent-test
@@ -177,7 +179,7 @@ jobs:
       - name: Validate deployment configuration
         shell: bash
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS; do
             if [[ -z "${!name}" ]]; then
               echo "Missing test deployment configuration: $name" >&2
               exit 1
@@ -264,6 +266,8 @@ jobs:
       OPENROUTER_API_BASE_URL: ${{ vars.OPENROUTER_API_BASE_URL || 'https://openrouter.ai/api/v1' }}
       OA_DOCKER_API_BASE_URL: ${{ vars.OA_DOCKER_API_BASE_URL }}
       OA_AUTH_ALIAS: ${{ vars.OA_AUTH_ALIAS || 'default' }}
+      OA_AGENT_SSO_SHARED_SECRET: ${{ secrets.OA_AGENT_SSO_SHARED_SECRET }}
+      OA_AGENT_SSO_TTL_SECONDS: ${{ vars.OA_AGENT_SSO_TTL_SECONDS }}
       DEPLOY_PATH: /opt/rwkv/apps/oa-agent-prod
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
       COMPOSE_PROJECT_NAME: oa-agent-prod
@@ -283,7 +287,7 @@ jobs:
       - name: Validate deployment configuration
         shell: bash
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS; do
             if [[ -z "${!name}" ]]; then
               echo "Missing production deployment configuration: $name" >&2
               exit 1

@@ -34,6 +34,16 @@ describe("resolveOpenApiContract", () => {
       JSON.parse(await readFile(resolved.path, "utf8")),
       remoteContract,
     );
+    assert.equal(resolved.index.operations[0]?.operationId, "remote_operation");
+    assert.equal(
+      JSON.parse(
+        await readFile(
+          path.join(fixture.config.projectRoot, ".context", "openapi-index.json"),
+          "utf8",
+        ),
+      ).documentHash,
+      resolved.index.documentHash,
+    );
   });
 
   it("uses the local contract when the remote request fails", async () => {
@@ -86,7 +96,7 @@ describe("resolveOpenApiContract", () => {
 });
 
 describe("buildRuntimeContext", () => {
-  it("points the agent at the resolved OpenAPI snapshot", () => {
+  it("provides compact candidates and permits at most one exact schema read", () => {
     const config = {
       projectRoot: "/tmp/agent",
       openapiPath: "/tmp/agent/.context/openapi/remote.json",
@@ -95,10 +105,28 @@ describe("buildRuntimeContext", () => {
       oaApiBaseUrl: null,
     } as AppConfig;
 
-    assert.match(
-      buildRuntimeContext(config),
-      /接口文档: \.\/\.context\/openapi\/remote\.json/,
-    );
+    const runtimeContext = buildRuntimeContext(config, {
+      openApiCandidates: [
+        {
+          operationId: "user_info_user_user_list_get",
+          method: "GET",
+          path: "/user/user-list",
+          summary: "User Info",
+          tags: ["user"],
+          permissionLevel: "user",
+          parameters: [
+            { name: "is_active", in: "query", required: false, type: "boolean" },
+          ],
+          mainResponseFields: ["data[].full_name"],
+        },
+      ],
+    });
+
+    assert.match(runtimeContext, /候选接口索引/);
+    assert.match(runtimeContext, /user_info_user_user_list_get/);
+    assert.match(runtimeContext, /最多允许读取一次选定 operation 的完整 schema/);
+    assert.doesNotMatch(runtimeContext, /先用 .*确认 operationId/);
+    assert.doesNotMatch(runtimeContext, /grep|sed/);
   });
 });
 

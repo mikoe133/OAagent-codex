@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
+import { normalizeResponseDuration } from "@/lib/response-duration"
 
 const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
 const COPILOT_RECORD_SCHEMA = "oa-agent-chat/v1"
@@ -51,6 +52,7 @@ type NormalizedMessage = {
   role: "user" | "assistant"
   content: string
   createdAt: string
+  durationMs?: number
   imageData?: string
   toolSteps?: NormalizedToolStep[]
   status?: "streaming" | "completed" | "stopped" | "failed"
@@ -780,12 +782,14 @@ function normalizeMessage(value: unknown): NormalizedMessage | null {
   const status = normalizeMessageStatus(item.status)
   const messageError = stringField(item, "error")
   const feedback = item.feedback === "like" || item.feedback === "dislike" ? item.feedback : null
+  const durationMs = normalizeResponseDuration(item.durationMs)
 
   return {
     id: stringField(item, "id") || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     role,
     content,
     createdAt,
+    ...(durationMs !== undefined ? { durationMs } : {}),
     ...(imageData ? { imageData } : {}),
     ...(toolSteps.length > 0 ? { toolSteps } : {}),
     ...(status ? { status } : {}),

@@ -1,4 +1,9 @@
-import { Codex, type Thread, type ThreadOptions } from "@openai/codex-sdk";
+import {
+  Codex,
+  type ModelReasoningEffort,
+  type Thread,
+  type ThreadOptions,
+} from "@openai/codex-sdk";
 import type { AppConfig } from "../../config/config.js";
 import type { ModelProviderId } from "../../config/modelCatalog.js";
 
@@ -64,12 +69,14 @@ export function resolveCodexModelBaseUrl(
 export function createThreadOptions(
   config: AppConfig,
   model: string = config.model,
+  modelReasoningEffort: ModelReasoningEffort = "medium",
 ): ThreadOptions {
   const oaToolEnabled = Boolean(config.oaApiBaseUrl);
   const sandboxMode =
     config.codexSandboxMode ?? (oaToolEnabled ? "workspace-write" : "read-only");
   return {
     model,
+    modelReasoningEffort,
     sandboxMode,
     workingDirectory: config.projectRoot,
     skipGitRepoCheck: true,
@@ -84,8 +91,9 @@ export function startOrResumeThread(
   config: AppConfig,
   threadId: string | null,
   model: string = config.model,
+  modelReasoningEffort: ModelReasoningEffort = "medium",
 ): Thread {
-  const options = createThreadOptions(config, model);
+  const options = createThreadOptions(config, model, modelReasoningEffort);
   return threadId
     ? codex.resumeThread(threadId, options)
     : codex.startThread(options);

@@ -10,6 +10,11 @@ import {
   truncateTraceSummaryText,
 } from "./message-bubble"
 import type { Message } from "./chat-shell"
+import {
+  calculateResponseDurationMs,
+  formatResponseDuration,
+  normalizeResponseDuration,
+} from "@/lib/response-duration"
 
 const OA_NAVIGATION_URL = "https://rwkv-oa.vercel.app/"
 
@@ -76,6 +81,33 @@ test("assistant replies render without a visible agent header or animated avatar
   assert.doesNotMatch(html, />OA Agent<\/span>/)
   assert.doesNotMatch(html, />Working<\/span>/)
   assert.doesNotMatch(html, /orb-circle-/)
+})
+
+test("completed assistant replies show their response duration instead of a clock time", () => {
+  const message = {
+    id: "assistant-with-duration",
+    role: "assistant",
+    content: "Assistant content",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    durationMs: 12_340,
+    status: "completed",
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, /本次回复耗时: 12\.3 秒/)
+})
+
+test("response durations under one second are shown in milliseconds", () => {
+  assert.equal(formatResponseDuration(850), "850 毫秒")
+})
+
+test("response duration calculation uses monotonic elapsed milliseconds", () => {
+  assert.equal(calculateResponseDurationMs(100.2, 1_334.7), 1_235)
+})
+
+test("invalid persisted response durations are ignored", () => {
+  assert.equal(normalizeResponseDuration(-1), undefined)
 })
 
 test("trace summaries prefer the last non-empty text message", () => {
@@ -311,4 +343,30 @@ test("completed assistant traces show a completed status", () => {
   assert.doesNotMatch(html, /data-slot="trace-summary-orb"/)
   assert.doesNotMatch(html, /npm run build/)
   assert.doesNotMatch(html, /Build complete/)
+})
+
+test("completed assistant traces report warnings when an intermediate command fails", () => {
+  const message = {
+    id: "assistant-completed-with-warning",
+    role: "assistant",
+    content: "The requested result was still produced.",
+    createdAt: new Date("2026-07-10T10:01:00.000Z"),
+    status: "completed",
+    toolSteps: [
+      {
+        id: "command-failed",
+        type: "command_execution",
+        status: "failed",
+        title: "Command",
+        description: "python3 is unavailable",
+        input: "python3 inspect.py",
+        output: "python3: command not found",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, />Completed with warnings<\/span>/)
+  assert.match(html, /data-trace-state="warning"/)
 })

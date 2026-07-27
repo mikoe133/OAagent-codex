@@ -28,7 +28,10 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     AGENT_SESSION_STORE=/app/.context/agent-sessions.json
-RUN mkdir -p /app/.context /home/node/.codex \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/.context /home/node/.codex \
     && chown -R node:node /app /home/node/.codex
 COPY --from=agent-production-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=agent-build --chown=node:node /app/agent/dist ./agent/dist

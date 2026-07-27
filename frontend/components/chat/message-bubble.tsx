@@ -26,6 +26,7 @@ import {
 import { Accordion, AccordionContent, AccordionItem } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { formatResponseDuration } from "@/lib/response-duration"
 import { cn } from "@/lib/utils"
 import type { Message } from "./chat-shell"
 import type { ToolStep, ToolStepStatus, TraceMessage } from "./chat-stream"
@@ -179,6 +180,7 @@ function AssistantActions({
   onFeedback?: MessageBubbleProps["onFeedback"]
   oaNavigationUrl: string
 }) {
+  const responseDuration = formatResponseDuration(message.durationMs)
   const showActions =
     !isStreaming &&
     message.content.trim().length > 0 &&
@@ -190,7 +192,7 @@ function AssistantActions({
 
   return (
     <div className="mt-2 flex min-h-7 items-center gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
-      <span>{formatTime(message.createdAt)}</span>
+      {responseDuration && <span>{`本次回复耗时: ${responseDuration}`}</span>}
       {showActions && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
           <span className="mx-1 h-3 w-px bg-stone-200 theme-dark:bg-zinc-700" aria-hidden="true" />
@@ -335,6 +337,13 @@ function ToolTimeline({
   const timelineItems = buildTraceTimelineItems(steps, streamingMessages)
   const activeMessageId = streamingMessages[streamingMessages.length - 1]?.id
   const isTraceActive = isStreaming || hasRunningStep
+  const traceState = isTraceActive
+    ? "active"
+    : status === "failed"
+      ? "failed"
+      : failedCount > 0
+        ? "warning"
+        : "idle"
   const wasTraceActiveRef = useRef(isTraceActive)
   const [isOpen, setIsOpen] = useState(isTraceActive)
 
@@ -346,11 +355,13 @@ function ToolTimeline({
 
   const summaryText = isTraceActive
     ? resolveTraceSummaryText(streamingMessages, fallbackText, steps)
-    : status === "failed" || failedCount > 0
+    : status === "failed"
       ? "Failed"
       : status === "stopped"
         ? "Stopped"
-        : "Completed"
+        : failedCount > 0
+          ? "Completed with warnings"
+          : "Completed"
 
   return (
     <Accordion
@@ -371,14 +382,16 @@ function ToolTimeline({
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <div
                 data-slot="trace-summary-icon"
-                data-trace-state={isTraceActive ? "active" : failedCount ? "failed" : "idle"}
+                data-trace-state={traceState}
                 className={cn(
                   "relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full",
-                  isTraceActive
+                  traceState === "active"
                     ? ""
-                    : failedCount
+                    : traceState === "failed"
                       ? "bg-rose-50 text-rose-700 theme-dark:bg-rose-950/50 theme-dark:text-rose-300"
-                      : "bg-stone-100 text-stone-600 theme-dark:bg-zinc-800 theme-dark:text-zinc-300",
+                      : traceState === "warning"
+                        ? "bg-amber-50 text-amber-700 theme-dark:bg-amber-950/50 theme-dark:text-amber-300"
+                        : "bg-stone-100 text-stone-600 theme-dark:bg-zinc-800 theme-dark:text-zinc-300",
                 )}
                 aria-hidden="true"
               >

@@ -63,7 +63,16 @@ export async function callOaApiTool(
     return operation;
   }
 
-  const validationError = validateOperationInput(operation.operation, input);
+  const query = applyConfiguredOaAlias(
+    operation.operation,
+    objectField(input.query),
+    config.oaAuthAlias,
+  );
+  const normalizedInput = { ...input, query };
+  const validationError = validateOperationInput(
+    operation.operation,
+    normalizedInput,
+  );
   if (validationError) {
     return validationError;
   }
@@ -85,7 +94,7 @@ export async function callOaApiTool(
     return path;
   }
 
-  const normalizedQuery = normalizeQueryForTool(objectField(input.query));
+  const normalizedQuery = normalizeQueryForTool(query);
   const response = await requestOa(config, {
     method: operation.method.toUpperCase(),
     path: path.value,
@@ -438,6 +447,24 @@ function normalizeQueryForTool(query: Record<string, unknown>): {
   }
 
   return { value: normalized, warnings };
+}
+
+function applyConfiguredOaAlias(
+  operation: Record<string, unknown>,
+  query: Record<string, unknown>,
+  alias: string,
+): Record<string, unknown> {
+  const parameters = Array.isArray(operation.parameters)
+    ? operation.parameters
+    : [];
+  const declaresAlias = parameters.some(
+    (parameter) =>
+      isRecord(parameter) &&
+      stringField(parameter.in) === "query" &&
+      stringField(parameter.name) === "alias",
+  );
+
+  return declaresAlias ? { ...query, alias } : query;
 }
 
 function isPaginationSizeKey(key: string): boolean {
