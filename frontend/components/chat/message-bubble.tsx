@@ -192,7 +192,7 @@ function AssistantActions({
 
   return (
     <div className="mt-2 flex min-h-7 items-center gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
-      {responseDuration && <span>{`本次回复耗时: ${responseDuration}`}</span>}
+      {responseDuration && <span>{`已处理: ${responseDuration}`}</span>}
       {showActions && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
           <span className="mx-1 h-3 w-px bg-stone-200 theme-dark:bg-zinc-700" aria-hidden="true" />
