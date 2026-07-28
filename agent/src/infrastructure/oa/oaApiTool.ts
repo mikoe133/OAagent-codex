@@ -1,5 +1,10 @@
 import type { AppConfig } from "../../config/config.js";
 import { resolveOpenApiContract } from "./openApiContract.js";
+import {
+  getActiveOaQueryPolicy,
+  recordOaApiCallResult,
+  reserveOaApiCall,
+} from "./oaQueryPolicy.js";
 
 export type OaApiToolInput = {
   sessionId?: unknown;
@@ -50,6 +55,7 @@ export async function callOaApiTool(
   input: OaApiToolInput,
   sessionOaApiToken: string | null = null,
 ): Promise<OaApiToolResult> {
+  const sessionId = stringField(input.sessionId);
   if (!config.oaApiBaseUrl || !sessionOaApiToken) {
     return toolError(
       "oa_not_configured",
@@ -74,6 +80,7 @@ export async function callOaApiTool(
     normalizedInput,
   );
   if (validationError) {
+    recordOaApiCallResult(sessionId, validationError);
     return validationError;
   }
 
@@ -91,10 +98,18 @@ export async function callOaApiTool(
 
   const path = renderPath(operation.pathTemplate, objectField(input.pathParams));
   if (isToolResult(path)) {
+    recordOaApiCallResult(sessionId, path);
     return path;
   }
 
   const normalizedQuery = normalizeQueryForTool(query);
+  const reservation = reserveOaApiCall(sessionId);
+  if (!reservation.allowed) {
+    return toolError(
+      "oa_call_budget_exceeded",
+      "当前查询的首次结果完整,本 turn 不再执行额外 OA 查询。请直接基于已有结果回答。",
+    );
+  }
   const response = await requestOa(config, {
     method: operation.method.toUpperCase(),
     path: path.value,
@@ -102,7 +117,11 @@ export async function callOaApiTool(
     body: input.body,
     oaApiToken: sessionOaApiToken,
   });
-  const limitedData = limitToolOutput(response.data);
+  const exactPersonName = getActiveOaQueryPolicy(sessionId)?.exactPersonName;
+  const focusedData = exactPersonName
+    ? focusExactPersonResult(response.data, exactPersonName)
+    : response.data;
+  const limitedData = limitToolOutput(focusedData);
   const warnings = [
     ...normalizedQuery.warnings,
     ...(limitedData.truncated
@@ -112,7 +131,7 @@ export async function callOaApiTool(
       : []),
   ];
 
-  return {
+  const result: OaApiToolResult = {
     ok: response.ok,
     status: response.status,
     operationId: operation.operationId,
@@ -121,6 +140,8 @@ export async function callOaApiTool(
     ...(warnings.length > 0 ? { warnings } : {}),
     data: limitedData.value,
   };
+  recordOaApiCallResult(sessionId, result);
+  return result;
 }
 
 function resolveOperation(
@@ -469,6 +490,77 @@ function applyConfiguredOaAlias(
 
 function isPaginationSizeKey(key: string): boolean {
   return /^(size|limit|pageSize|page_size|perPage|per_page)$/i.test(key);
+}
+
+function focusExactPersonResult(value: unknown, exactName: string): unknown {
+  const matches: Record<string, unknown>[] = [];
+  const seen = new Set<object>();
+  collectExactPersonMatches(value, normalizePersonName(exactName), matches, seen);
+  if (matches.length === 0) {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return matches;
+  }
+
+  const metadata = Object.fromEntries(
+    Object.entries(value).filter(
+      ([key, item]) =>
+        (item === null || typeof item !== "object") &&
+        !/^(?:total|total_?count|page|page_?size|next|next_?page|has_?next)$/i.test(
+          key,
+        ),
+    ),
+  );
+  return { ...metadata, data: matches };
+}
+
+function collectExactPersonMatches(
+  value: unknown,
+  exactName: string,
+  matches: Record<string, unknown>[],
+  seen: Set<object>,
+  depth = 0,
+): void {
+  if (
+    depth > MAX_TOOL_OUTPUT_DEPTH ||
+    value === null ||
+    typeof value !== "object" ||
+    matches.length >= MAX_TOOL_ARRAY_ITEMS ||
+    seen.has(value)
+  ) {
+    return;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectExactPersonMatches(item, exactName, matches, seen, depth + 1);
+    }
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+  const hasExactName = Object.entries(record).some(
+    ([key, item]) =>
+      /^(?:full_?name|real_?name|display_?name|employee_?name|chinese_?name|name)$/i.test(
+        key,
+      ) &&
+      typeof item === "string" &&
+      normalizePersonName(item) === exactName,
+  );
+  if (hasExactName) {
+    matches.push(record);
+    return;
+  }
+
+  for (const item of Object.values(record)) {
+    collectExactPersonMatches(item, exactName, matches, seen, depth + 1);
+  }
+}
+
+function normalizePersonName(value: string): string {
+  return value.replace(/[\s·•]/g, "").toLocaleLowerCase("zh-CN");
 }
 
 function positiveIntegerValue(value: unknown): number | null {

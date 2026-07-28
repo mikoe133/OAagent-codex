@@ -23,6 +23,11 @@ import type {
 } from "../infrastructure/persistence/sessionStore.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
 import { selectOpenApiCandidates } from "../infrastructure/oa/openApiIndex.js";
+import {
+  beginOaTurn,
+  finishOaTurn,
+  resolveOaQueryPolicy,
+} from "../infrastructure/oa/oaQueryPolicy.js";
 import { resolveTaskReasoningEffort } from "./taskReasoningPolicy.js";
 
 export type SendMessageInput = {
@@ -162,6 +167,7 @@ export class AgentService {
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
       openApiCandidates: resolvedRun.openApiCandidates,
+      oaQueryPolicy: resolvedRun.oaQueryPolicy,
     };
     const codex = createCodexClient(runConfig, input.sessionId);
     const thread = startOrResumeThread(
@@ -177,7 +183,14 @@ export class AgentService {
       input.message,
       runtimeContext,
     );
-    const turn = await thread.run(prompt);
+    beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
+    const turn = await (async () => {
+      try {
+        return await thread.run(prompt);
+      } finally {
+        finishOaTurn(input.sessionId);
+      }
+    })();
 
     if (!turn.finalResponse.trim()) {
       const itemTypes = turn.items.map((item) => item.type).join(", ") || "无";
@@ -227,6 +240,7 @@ export class AgentService {
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
       openApiCandidates: resolvedRun.openApiCandidates,
+      oaQueryPolicy: resolvedRun.oaQueryPolicy,
     };
     const codex = createCodexClient(runConfig, input.sessionId);
     const thread = startOrResumeThread(
@@ -242,7 +256,6 @@ export class AgentService {
       input.message,
       runtimeContext,
     );
-    const { events } = await thread.runStreamed(prompt, { signal });
     const state = createStreamState();
     const secrets = this.getSecrets(runtimeContext.sessionOaApiToken);
     const recoverStream = async (): Promise<boolean> => {
@@ -269,15 +282,21 @@ export class AgentService {
       return true;
     };
 
+    beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
     try {
-      for await (const event of events) {
-        throwIfAborted(signal);
-        await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+      const { events } = await thread.runStreamed(prompt, { signal });
+      try {
+        for await (const event of events) {
+          throwIfAborted(signal);
+          await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+        }
+      } catch (error) {
+        if (!(await recoverStream())) {
+          throw resolveStreamFailure(error, state.turnFailure, secrets);
+        }
       }
-    } catch (error) {
-      if (!(await recoverStream())) {
-        throw resolveStreamFailure(error, state.turnFailure, secrets);
-      }
+    } finally {
+      finishOaTurn(input.sessionId);
     }
 
     if (state.turnFailure) {
@@ -641,6 +660,7 @@ async function resolveRunConfig(
     config: { ...config, modelProvider, model, openapiPath: openapi.path },
     openApiCandidates: selectOpenApiCandidates(openapi.index, task),
     reasoningEffort: resolveTaskReasoningEffort(task),
+    oaQueryPolicy: resolveOaQueryPolicy(task),
   };
 }
 

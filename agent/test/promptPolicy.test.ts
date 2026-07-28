@@ -27,7 +27,8 @@ describe("OA agent prompt policy", () => {
     const prompts = `${await readPrompt("system.md")}\n${await readPrompt("document-policy.md")}`;
 
     assert.match(prompts, /候选接口索引/);
-    assert.match(prompts, /最多读取一次选定 operation 的完整 schema/);
+    assert.match(prompts, /高置信度单步查询最多读取一次选定 operation/);
+    assert.match(prompts, /复杂或不确定查询可按需读取多个相关 operation/);
     assert.doesNotMatch(prompts, /必须先通过 shell 管道使用 `grep`/);
   });
 });

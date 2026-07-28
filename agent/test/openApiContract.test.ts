@@ -124,9 +124,36 @@ describe("buildRuntimeContext", () => {
 
     assert.match(runtimeContext, /候选接口索引/);
     assert.match(runtimeContext, /user_info_user_user_list_get/);
-    assert.match(runtimeContext, /最多允许读取一次选定 operation 的完整 schema/);
+    assert.match(runtimeContext, /读取完整 schema/);
     assert.doesNotMatch(runtimeContext, /先用 .*确认 operationId/);
     assert.doesNotMatch(runtimeContext, /grep|sed/);
+  });
+
+  it("describes dynamic single-step upgrades without restricting complex turns", () => {
+    const config = {
+      projectRoot: "/tmp/agent",
+      openapiPath: "/tmp/agent/.context/openapi/remote.json",
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+      oaApiBaseUrl: null,
+    } as AppConfig;
+
+    const singleStep = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "single_step", exactPersonName: "薛屹阳" },
+    });
+    const multiStep = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "multi_step", exactPersonName: null },
+    });
+    const unknown = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "unknown", exactPersonName: null },
+    });
+
+    assert.match(singleStep, /目标数据完整时最多调用一次 OA API/);
+    assert.match(singleStep, /最多读取一次选定 operation 的精确 schema/);
+    assert.match(singleStep, /自动把本 turn 升级为多步/);
+    assert.match(multiStep, /保留自主多步能力/);
+    assert.match(multiStep, /每个 operation 最多读取一次/);
+    assert.match(unknown, /不设置单次调用硬限制/);
   });
 });
 

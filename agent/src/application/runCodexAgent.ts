@@ -7,6 +7,12 @@ import {
   startOrResumeThread,
 } from "../infrastructure/codex/codexClient.js";
 import { loadSystemPrompt } from "../infrastructure/prompts/promptLoader.js";
+import {
+  beginOaTurn,
+  finishOaTurn,
+  resolveOaQueryPolicy,
+  type OaQueryPolicy,
+} from "../infrastructure/oa/oaQueryPolicy.js";
 import { resolveTaskReasoningEffort } from "./taskReasoningPolicy.js";
 
 export type AgentRunResult = {
@@ -19,7 +25,7 @@ export type AgentRuntimeContext = {
   sessionId?: string | null;
   hasSessionOaApiToken?: boolean;
   openApiCandidates?: OpenApiOperationIndexEntry[];
-  oaApiCallLimit?: number | null;
+  oaQueryPolicy?: OaQueryPolicy;
 };
 
 /**
@@ -56,12 +62,7 @@ export function buildRuntimeContext(
   const hasAnyOaApiToken = Boolean(runtime.hasSessionOaApiToken);
   const openapiPath = displayOpenApiPath(config);
   const candidateContext = formatOpenApiCandidates(runtime.openApiCandidates ?? []);
-  const oaApiBudgetContext =
-    runtime.oaApiCallLimit === 1
-      ? "- 本 turn 是普通查询:最多读取一次选定 operation 的精确 schema,并且最多调用一次 OA API;调用失败后不得换接口重试。"
-      : runtime.oaApiCallLimit === null
-        ? "- 本 turn 是复杂分析或写操作:按完成任务所需的最少次数调用 OA API。"
-        : null;
+  const oaApiBudgetContext = formatOaQueryPolicy(runtime.oaQueryPolicy);
   const commandSessionArg = runtime.sessionId
     ? ` --sessionId ${runtime.sessionId}`
     : "";
@@ -74,7 +75,7 @@ export function buildRuntimeContext(
     candidateContext,
     oaApiBudgetContext,
     "- 必须优先从候选接口索引中选择 operation,不得用任何命令宽泛扫描完整 OpenAPI。",
-    `- 只有候选信息不足以确认参数或响应结构时,最多允许读取一次选定 operation 的完整 schema;读取范围必须精确限定到该 operation。`,
+    `- 只有候选信息不足以确认参数或响应结构时才读取完整 schema;具体读取次数服从本 turn 的动态查询模式,且读取范围必须精确限定到实际需要的 operation。`,
     "- 不使用额外 Skill、MCP 或自定义 function tools",
     config.oaApiBaseUrl && hasAnyOaApiToken
       ? [
@@ -142,14 +143,20 @@ export async function runCodexAgent(
 
   const resolvedRuntime = {
     ...runtime,
-    oaApiCallLimit:
-      runtime.oaApiCallLimit === undefined
-        ? resolveOaApiCallLimit(userTask)
-        : runtime.oaApiCallLimit,
+    oaQueryPolicy: runtime.oaQueryPolicy ?? resolveOaQueryPolicy(userTask),
   };
-  const turn = await thread.run(
-    buildTaskPrompt(config, userTask, resolvedRuntime),
-  );
+  if (runtime.sessionId) {
+    beginOaTurn(runtime.sessionId, resolvedRuntime.oaQueryPolicy);
+  }
+  const turn = await (async () => {
+    try {
+      return await thread.run(buildTaskPrompt(config, userTask, resolvedRuntime));
+    } finally {
+      if (runtime.sessionId) {
+        finishOaTurn(runtime.sessionId);
+      }
+    }
+  })();
 
   if (!turn.finalResponse.trim()) {
     const itemTypes = turn.items.map((item) => item.type).join(", ") || "无";
@@ -176,10 +183,6 @@ export function collectExecutedCommands(items: ThreadItem[]): string[] {
     .map((item) => item.command);
 }
 
-function resolveOaApiCallLimit(task: string): number | null {
-  return resolveTaskReasoningEffort(task) === "medium" ? 1 : null;
-}
-
 function formatOpenApiCandidates(
   candidates: OpenApiOperationIndexEntry[],
 ): string {
@@ -192,4 +195,20 @@ function formatOpenApiCandidates(
     JSON.stringify(candidates),
     "</candidate_operations>",
   ].join("\n");
+}
+
+function formatOaQueryPolicy(policy: OaQueryPolicy | undefined): string | null {
+  if (!policy) {
+    return null;
+  }
+  if (policy.mode === "single_step") {
+    return [
+      "- 本 turn 是高置信度单步查询:最多读取一次选定 operation 的精确 schema;目标数据完整时最多调用一次 OA API。",
+      "- 如果首次结果明确提示响应截断、仍有分页、缺少关联 ID/编号或必须依赖后续查询,受控工具会自动把本 turn 升级为多步;只有收到这类不完整信号后才继续调用。",
+    ].join("\n");
+  }
+  if (policy.mode === "multi_step") {
+    return "- 本 turn 是复杂查询、列表/报表或写操作:保留自主多步能力;可按需读取多个相关 operation 的精确 schema,但每个 operation 最多读取一次;按完成任务所需的最少次数调用 OA API。";
+  }
+  return "- 本 turn 的复杂度不确定:不设置单次调用硬限制;先用最少调用探索,可按需读取相关 operation 的精确 schema且每个最多一次,发现分页、依赖或关联关系时继续完成任务。";
 }
