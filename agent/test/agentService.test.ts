@@ -8,6 +8,8 @@ import {
 import type { AppConfig } from "../src/config/config.js";
 import {
   MODEL_CATALOG,
+  decodeAutomationModelParameters,
+  resolveAutomationModelSelection,
   resolveRequestedProvider,
   resolveRequestedModel,
 } from "../src/config/modelCatalog.js";
@@ -60,6 +62,38 @@ describe("model provider selection", () => {
     assert.throws(
       () => resolveRequestedModel("openrouter", "openai/gpt-5.4-nano", "z-ai/glm-5.2"),
       /不支持模型/,
+    );
+  });
+
+  it("validates automation model selections and parameters", () => {
+    assert.deepEqual(
+      resolveAutomationModelSelection(
+        {
+          modelProvider: "openrouter",
+          modelId: "moonshotai/kimi-k3",
+          modelParameters: {
+            reasoning_effort: "high",
+            max_output_tokens: 1_024,
+          },
+        },
+        { modelProvider: "nexttoken", modelId: "gpt-5.6-terra" },
+      ),
+      {
+        modelProvider: "openrouter",
+        modelId: "moonshotai/kimi-k3",
+        modelParameters: {
+          reasoning_effort: "high",
+          max_output_tokens: 1_024,
+        },
+      },
+    );
+    assert.throws(
+      () => decodeAutomationModelParameters({ temperature: 0.2 }),
+      /不支持的字段:temperature/,
+    );
+    assert.throws(
+      () => decodeAutomationModelParameters({ max_output_tokens: 100 }),
+      /256-4096/,
     );
   });
 

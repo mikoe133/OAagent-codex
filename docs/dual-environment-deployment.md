@@ -84,6 +84,8 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 | `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan` 完整输出 | 第 2 步生成并核对 |
 | `NEXTTOKEN_API_KEY` | Nexttoken Key | Nexttoken 控制台创建 |
 | `OPENROUTER_API_KEY` | OpenRouter Key | OpenRouter 控制台创建 |
+| `OA_PROJECT_SYNC_TOKEN` | OA Worker 专用 token | OA 后台创建最小权限服务身份 |
+| `PROJECT_PROGRESS_GITHUB_TOKEN` | GitHub fine-grained PAT | AI GitHub 账号创建，只授予 Metadata/Contents Read |
 
 不需要配置:
 
@@ -134,8 +136,17 @@ GitHub 仓库 -> Settings -> Environments
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),例如 `300` |
 | `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),例如 `300` |
+| `test` / `production` | `OA_PROJECT_SYNC_TOKEN_HEADER` | 通常为 `Authorization`；session 测试可填 `Cookie` |
+| `test` / `production` | `OA_PROJECT_SYNC_TOKEN_PREFIX` | 通常为 `Bearer`；session 测试可填 `sessionid=` |
 
-再分别为两个 Environment 添加 Secret `OA_AGENT_SSO_SHARED_SECRET`。该值必须与对应 OA 服务端完全一致;测试与生产应使用不同的高强度随机密钥。
+再分别为两个 Environment 添加以下 Secret：
+
+| Environment | Secret | 用途 |
+| --- | --- | --- |
+| `test` / `production` | `OA_AGENT_SSO_SHARED_SECRET` | OA 与 OAagent 的用户 SSO 签名；两端一致 |
+| `test` / `production` | `OA_AGENT_AUTOMATION_TOKEN` | OA 后端读取模型目录和校验任务模型；两端一致 |
+
+两个环境必须使用不同的高强度随机值。`OA_AGENT_AUTOMATION_TOKEN` 不得复用 SSO 密钥、用户 session、GitHub token 或模型 Key。
 
 如果 OA 和本项目在同一台服务器,并发布宿主机 `8010` 端口,填写:
 

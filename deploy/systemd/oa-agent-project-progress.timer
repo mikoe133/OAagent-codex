@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll OA automation jobs for OA Agent project progress work
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=1min
+Persistent=false
+AccuracySec=10s
+Unit=oa-agent-project-progress.service
+
+[Install]
+WantedBy=timers.target

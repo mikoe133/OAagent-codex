@@ -22,6 +22,8 @@
     "start:server": "npm run start:server -w agent",
     "sync:project-progress": "npm run sync:project-progress -w agent --",
     "sync:project-progress:test-write": "npm run sync:project-progress:test-write -w agent --",
+    "sync:project-progress:apply": "npm run sync:project-progress:apply -w agent --",
+    "run:project-progress-worker": "npm run run:project-progress-worker -w agent --",
     "test:deploy": "node --test scripts/*.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

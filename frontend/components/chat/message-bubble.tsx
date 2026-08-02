@@ -36,6 +36,7 @@ import { AnimatedOrb } from "./animated-orb"
 interface MessageBubbleProps {
   message: Message
   isStreaming?: boolean
+  showActions?: boolean
   onFeedback?: (messageId: string, feedback: Message["feedback"]) => void
   oaNavigationUrl: string
 }
@@ -51,7 +52,13 @@ const MESSAGE_ACTION_CONTROLS_CLASS =
   "flex items-center transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none pointer-fine:pointer-events-none pointer-fine:translate-y-0.5 pointer-fine:opacity-0 pointer-fine:group-hover/message:pointer-events-auto pointer-fine:group-hover/message:translate-y-0 pointer-fine:group-hover/message:opacity-100 pointer-fine:group-focus-within/message:pointer-events-auto pointer-fine:group-focus-within/message:translate-y-0 pointer-fine:group-focus-within/message:opacity-100"
 const TRACE_SUMMARY_MAX_CHARS = 48
 
-export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavigationUrl }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  isStreaming = false,
+  showActions = true,
+  onFeedback,
+  oaNavigationUrl,
+}: MessageBubbleProps) {
   const isUser = message.role === "user"
   const assistantIsStreaming = !isUser && (isStreaming || message.status === "streaming")
   const toolSteps = message.toolSteps ?? []
@@ -138,16 +145,18 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
           </div>
         )}
 
-        {isUser ? (
-          <UserActions message={message} />
-        ) : (
-          <AssistantActions
-            message={message}
-            isStreaming={assistantIsStreaming}
-            onFeedback={onFeedback}
-            oaNavigationUrl={oaNavigationUrl}
-          />
-        )}
+        {showActions ? (
+          isUser ? (
+            <UserActions message={message} />
+          ) : (
+            <AssistantActions
+              message={message}
+              isStreaming={assistantIsStreaming}
+              onFeedback={onFeedback}
+              oaNavigationUrl={oaNavigationUrl}
+            />
+          )
+        ) : null}
       </div>
     </article>
   )

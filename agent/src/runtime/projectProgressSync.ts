@@ -1,9 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import {
-  ResponsesProjectProgressSummarizer,
-} from "../application/projectProgressSummarizer.js";
+import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
 import { syncProjectProgress } from "../application/syncProjectProgress.js";
 import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
@@ -17,10 +15,25 @@ async function main(): Promise<void> {
   dotenv.config({ path: path.join(repoRoot, ".env") });
   dotenv.config({ path: path.join(agentRoot, ".env"), override: true });
   const options = parseProjectProgressOptions(process.argv.slice(2));
-  const config = loadProjectProgressConfig(process.env, repoRoot);
-  if (options.writeMode === "unsafe-test" && !config.writeEnabled) {
+  const config = loadProjectProgressConfig(process.env, repoRoot, {
+    modelProvider: options.modelProvider,
+    modelId: options.modelId,
+    modelParameters: options.modelParameters,
+  });
+  if (
+    options.writeMode === "unsafe-test" &&
+    config.writeAuthorization !== "unsafe-test"
+  ) {
     throw new Error(
       "--apply-test 需要 PROJECT_PROGRESS_WRITE_ENABLED=true 和测试写入确认变量。",
+    );
+  }
+  if (
+    options.writeMode === "production" &&
+    config.writeAuthorization !== "production"
+  ) {
+    throw new Error(
+      "--apply 需要 PROJECT_PROGRESS_WRITE_ENABLED=true 和生产写入确认变量。",
     );
   }
   const store = new ProjectProgressStore(config.stateDatabasePath);
@@ -34,18 +47,35 @@ async function main(): Promise<void> {
         fetch,
         config.githubApiBaseUrl,
       ),
-      summarizer: new ResponsesProjectProgressSummarizer(config.model),
+      summarizer: new CodexProjectProgressSummarizer({
+        model: config.model,
+        githubToken: config.githubToken,
+        githubApiBaseUrl: config.githubApiBaseUrl,
+        agent: config.agent,
+        workingDirectory: repoRoot,
+      }),
       store,
       writeMode: options.writeMode,
       ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
     });
-    console.log(JSON.stringify(report, null, 2));
+    console.log(JSON.stringify({
+      ...report,
+      model: {
+        model_provider: config.model.provider,
+        model_id: config.model.model,
+        model_parameters: config.model.parameters,
+      },
+    }, null, 2));
+    if (options.writeMode === "production" && report.retryRecommended) {
+      console.error("项目进度同步存在可重试失败，将由调度器重试。");
+      process.exitCode = 1;
+    }
   } finally {
     store.close();
   }
 }
 
 main().catch((error: unknown) => {
-  console.error(`项目进度 dry-run 失败:${error instanceof Error ? error.message : String(error)}`);
+  console.error(`项目进度同步失败:${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 });

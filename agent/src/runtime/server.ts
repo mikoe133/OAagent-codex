@@ -15,6 +15,11 @@ async function main(): Promise<void> {
   console.error(`[model-relay] listening on ${modelRelay.baseUrl} (HTTP/1.1 upstream)`);
   console.error(`[agent] session_store=${config.sessionStorePath}`);
   console.error(
+    config.automationApiToken
+      ? "[automation] 专用模型目录与校验接口已启用。"
+      : "[automation] 未配置 OA_AGENT_AUTOMATION_TOKEN，自动化接口不可用。",
+  );
+  console.error(
     config.oaApiBaseUrl
       ? "[agent] 受控 OA API 调用工具已启用;OA 登录态来自已验证的请求 token。"
       : "[agent] 未配置 OA_API_BASE_URL;本次只做接口分析,不执行真实 OA 请求。",

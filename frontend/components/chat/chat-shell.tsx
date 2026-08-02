@@ -5,6 +5,7 @@ import { PanelLeftClose, PanelLeftOpen, SquarePen } from "lucide-react"
 import { gsap } from "gsap"
 import { MessageList } from "./message-list"
 import { Composer } from "./composer"
+import { AutomatedTasksView } from "./automated-tasks-view"
 import { Button } from "@/components/ui/button"
 import Sider, {
   type ChatSessionListItem,
@@ -99,6 +100,8 @@ type SessionIndicatorTimers = {
   pause?: ReturnType<typeof setTimeout>
   dismiss?: ReturnType<typeof setTimeout>
 }
+
+type WorkspaceView = "conversation" | "automated-tasks"
 
 // Generates a unique ID for messages
 function generateId(): string {
@@ -396,6 +399,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [sessionListFocusKey, setSessionListFocusKey] = useState(0)
   const [isSiderCollapsed, setIsSiderCollapsed] = useState(false)
   const [isMobileSiderOpen, setIsMobileSiderOpen] = useState(false)
+  const [activeWorkspaceView, setActiveWorkspaceView] = useState<WorkspaceView>("conversation")
   const [isLoaded, setIsLoaded] = useState(false)
   const siderRef = useRef<HTMLElement | null>(null)
   const sidebarControlsRef = useRef<HTMLDivElement | null>(null)
@@ -558,7 +562,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   useLayoutEffect(() => {
     animateSiderLayout(hasAppliedSiderLayoutRef.current)
     hasAppliedSiderLayoutRef.current = true
-  }, [animateSiderLayout])
+  }, [activeWorkspaceView, animateSiderLayout])
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1146,6 +1150,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   )
 
   const startNewSession = useCallback(() => {
+    setActiveWorkspaceView("conversation")
     setSessionListFocusKey((value) => value + 1)
 
     if (!isStreaming && messagesRef.current.length === 0) {
@@ -1229,6 +1234,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
   const handleSelectSession = useCallback(
     async (session: ChatSessionListItem) => {
+      setActiveWorkspaceView("conversation")
       let selectedSessionId = session.sessionId
       const cachedMessages = sessionMessagesRef.current.get(session.sessionId)
       setError(null)
@@ -1306,6 +1312,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     [closeMobileSider, handleSelectSession],
   )
 
+  const handleOpenAutomatedTasks = useCallback(() => {
+    closeMobileSider()
+    setActiveWorkspaceView("automated-tasks")
+  }, [closeMobileSider])
+
   const SiderToggleIcon = isSiderCollapsed ? PanelLeftOpen : PanelLeftClose
 
   return (
@@ -1341,15 +1352,17 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       >
         <PanelLeftOpen className="h-5 w-5" />
       </Button>
-      <Button
-        onClick={startNewSession}
-        variant="ghost"
-        size="icon"
-        className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-20 z-20 sm:hidden`}
-        aria-label="New chat"
-      >
-        <SquarePen className="h-5 w-5" />
-      </Button>
+      {activeWorkspaceView === "conversation" ? (
+        <Button
+          onClick={startNewSession}
+          variant="ghost"
+          size="icon"
+          className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-20 z-20 sm:hidden`}
+          aria-label="New chat"
+        >
+          <SquarePen className="h-5 w-5" />
+        </Button>
+      ) : null}
       {isMobileSiderOpen && (
         <button
           data-slot="mobile-sider-backdrop"
@@ -1368,6 +1381,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         focusSessionKey={sessionListFocusKey}
         onMobileClose={closeMobileSider}
         onNewSession={handleMobileNewSession}
+        onOpenAutomatedTasks={handleOpenAutomatedTasks}
         onSelectSession={handleMobileSelectSession}
         onDeleteSession={handleDeleteSession}
         refreshKey={sessionListRefreshKey}
@@ -1420,26 +1434,32 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       */}
 
       <div ref={messageLayoutRef} className="absolute inset-0 sm:left-80">
-        <MessageList
-          messages={messages}
-          isStreaming={isStreaming}
-          error={error}
-          onRetry={retry}
-          onFeedback={handleMessageFeedback}
-          isLoaded={isLoaded}
-          oaNavigationUrl={oaNavigationUrl}
-        />
+        {activeWorkspaceView === "automated-tasks" ? (
+          <AutomatedTasksView oaNavigationUrl={oaNavigationUrl} />
+        ) : (
+          <MessageList
+            messages={messages}
+            isStreaming={isStreaming}
+            error={error}
+            onRetry={retry}
+            onFeedback={handleMessageFeedback}
+            isLoaded={isLoaded}
+            oaNavigationUrl={oaNavigationUrl}
+          />
+        )}
       </div>
 
-      <Composer
-        layoutRef={composerLayoutRef}
-        onSend={sendMessage}
-        onStop={stopStreaming}
-        isStreaming={isStreaming}
-        selectedProvider={selectedProvider}
-        selectedModel={selectedModel}
-        onModelChange={handleModelChange}
-      />
+      {activeWorkspaceView === "conversation" ? (
+        <Composer
+          layoutRef={composerLayoutRef}
+          onSend={sendMessage}
+          onStop={stopStreaming}
+          isStreaming={isStreaming}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          onModelChange={handleModelChange}
+        />
+      ) : null}
     </div>
   )
 }

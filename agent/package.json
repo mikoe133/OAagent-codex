@@ -15,13 +15,19 @@
     "start:server": "node dist/runtime/server.js",
     "sync:project-progress": "tsx src/runtime/projectProgressSync.ts --dry-run",
     "sync:project-progress:test-write": "tsx src/runtime/projectProgressSync.ts --apply-test",
+    "sync:project-progress:apply": "tsx src/runtime/projectProgressSync.ts --apply",
     "start:project-progress": "node dist/runtime/projectProgressSync.js --dry-run",
+    "start:project-progress:apply": "node dist/runtime/projectProgressSync.js --apply",
+    "run:project-progress-worker": "tsx src/runtime/projectProgressWorker.ts",
+    "start:project-progress-worker": "node dist/runtime/projectProgressWorker.js",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/codex-sdk": "^0.142.5",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

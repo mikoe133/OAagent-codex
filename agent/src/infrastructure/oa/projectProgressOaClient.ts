@@ -76,6 +76,7 @@ export class OaRequestError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly errorCode: string | null = null,
   ) {
     super(message);
   }
@@ -90,7 +91,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   async listProjects(): Promise<OaProject[]> {
     const projects: OaProject[] = [];
     for (let page = 1; ; page += 1) {
-      const payload = await this.request("/projects/list-by-project", {
+      const payload = await this.request("/internal/project-sync/projects", {
         page,
         size: PROJECT_PAGE_SIZE,
       });
@@ -103,12 +104,11 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   }
 
   async getProject(projectId: number): Promise<OaProject> {
-    const payload = await this.request("/projects/project", { project_id: projectId });
-    const envelope = decodeEnvelope(payload);
-    const candidate = isRecord(envelope.data) && "item" in envelope.data
-      ? envelope.data.item
-      : envelope.data;
-    return decodeProject(candidate);
+    const payload = await this.request(
+      `/internal/project-sync/projects/${encodeURIComponent(String(projectId))}`,
+      {},
+    );
+    return decodeProject(decodeEnvelope(payload).data);
   }
 
   async updateProjectStatus(
@@ -116,9 +116,9 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     status: Exclude<ProjectStatus, "archived">,
   ): Promise<void> {
     await this.request(
-      "/projects/project",
-      { project_id: projectId },
-      { method: "PUT", body: { status } },
+      `/internal/project-sync/projects/${encodeURIComponent(String(projectId))}/status`,
+      {},
+      { method: "PATCH", body: { status } },
     );
   }
 
@@ -126,7 +126,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     projectId: number,
     summaryDate: string,
   ): Promise<OaCommitSummary[]> {
-    const payload = await this.request("/projects/github-commit-summaries", {
+    const payload = await this.request("/internal/project-sync/github-commit-summaries", {
       project_id: projectId,
       summary_date: summaryDate,
       page: 1,
@@ -136,9 +136,10 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   }
 
   async getCommitSummary(summaryId: number): Promise<OaCommitSummary> {
-    const payload = await this.request("/projects/github-commit-summary", {
-      summary_id: summaryId,
-    });
+    const payload = await this.request(
+      `/internal/project-sync/github-commit-summaries/${encodeURIComponent(String(summaryId))}`,
+      {},
+    );
     return decodeCommitSummary(decodeEnvelope(payload).data);
   }
 
@@ -146,7 +147,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     input: CommitSummaryCreateInput,
   ): Promise<OaCommitSummary> {
     const payload = await this.request(
-      "/projects/github-commit-summary",
+      "/internal/project-sync/github-commit-summaries",
       {},
       {
         method: "POST",
@@ -167,10 +168,10 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     input: CommitSummaryUpdateInput,
   ): Promise<OaCommitSummary> {
     const payload = await this.request(
-      "/projects/github-commit-summary",
-      { summary_id: summaryId },
+      `/internal/project-sync/github-commit-summaries/${encodeURIComponent(String(summaryId))}`,
+      {},
       {
-        method: "PUT",
+        method: "PATCH",
         body: {
           summary: input.summary,
           ai_confidence: input.aiConfidence,
@@ -202,12 +203,12 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     path: string,
     query: Record<string, string | number>,
     options: {
-      method?: "GET" | "POST" | "PUT";
+      method?: "GET" | "POST" | "PATCH";
       body?: Record<string, unknown>;
     } = {},
   ): Promise<unknown> {
     const url = new URL(path, ensureTrailingSlash(this.config.baseUrl));
-    for (const [name, value] of Object.entries({ ...query, alias: this.config.alias })) {
+    for (const [name, value] of Object.entries(query)) {
       url.searchParams.set(name, String(value));
     }
     const response = await this.fetchImpl(url, {
@@ -220,15 +221,31 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       ...(options.body ? { body: JSON.stringify(options.body) } : {}),
       signal: AbortSignal.timeout(OA_REQUEST_TIMEOUT_MS),
     });
-    if (!response.ok) {
-      throw new OaRequestError(`OA 请求失败:HTTP ${response.status}`, response.status);
-    }
+    let payload: unknown;
     try {
-      return await response.json();
+      payload = await response.json();
     } catch {
       throw new OaContractError("OA 响应不是合法 JSON。");
     }
+    if (!response.ok) {
+      const errorCode = decodeErrorCode(payload);
+      throw new OaRequestError(
+        `OA 请求失败:HTTP ${response.status}${errorCode ? `:${errorCode}` : ""}`,
+        response.status,
+        errorCode,
+      );
+    }
+    return payload;
   }
+}
+
+function decodeErrorCode(payload: unknown): string | null {
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return null;
+  }
+  return typeof payload.data.error_code === "string"
+    ? payload.data.error_code
+    : null;
 }
 
 function decodePagination<T>(

@@ -36,6 +36,8 @@ Repository Secrets:
 | `DEPLOY_KNOWN_HOSTS` | 已核对的服务器 SSH Host Key |
 | `NEXTTOKEN_API_KEY` | Agent 模型服务凭证 |
 | `OPENROUTER_API_KEY` | OpenRouter 模型服务凭证 |
+| `OA_PROJECT_SYNC_TOKEN` | OA Worker 最小权限服务凭证 |
+| `PROJECT_PROGRESS_GITHUB_TOKEN` | AI GitHub 账号的只读 fine-grained PAT |
 
 Repository Variables:
 
@@ -52,6 +54,8 @@ Environment Secrets:
 | --- | --- | --- |
 | `test` | `OA_AGENT_SSO_SHARED_SECRET` | 测试 OA 与 OA Agent 共用的 SSO 签名密钥 |
 | `production` | `OA_AGENT_SSO_SHARED_SECRET` | 生产 OA 与 OA Agent 共用的 SSO 签名密钥 |
+| `test` | `OA_AGENT_AUTOMATION_TOKEN` | 测试 OA 调用 OAagent 自动化模型接口的专用凭证 |
+| `production` | `OA_AGENT_AUTOMATION_TOKEN` | 生产 OA 调用 OAagent 自动化模型接口的专用凭证 |
 
 Environment Variables:
 
@@ -64,15 +68,18 @@ Environment Variables:
 | 两者可选 | `OA_AUTH_ALIAS` | OA 数据源 alias,默认 `default` |
 | 两者可选 | `NEXTTOKEN_API_BASE_URL` | Nexttoken API 地址,默认 `https://next-token.cc` |
 | 两者可选 | `OPENROUTER_API_BASE_URL` | OpenRouter API 地址,默认 `https://openrouter.ai/api/v1` |
+| 两者可选 | `PROJECT_PROGRESS_WORKER_INSTANCE` | Worker 稳定实例名；默认按环境生成 |
+| 两者可选 | `PROJECT_PROGRESS_LEASE_SECONDS` | claim 租约秒数，默认 `300` |
+| 两者可选 | `PROJECT_PROGRESS_HEARTBEAT_SECONDS` | heartbeat 间隔秒数，默认 `60` 且必须小于租约 |
 
 Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份,同时通过私有 Artifact 和 SSH 把镜像加载到服务器。服务器不登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
 
 ## 固定环境参数
 
-| 环境 | 部署目录 | Compose 项目 | Web 监听 | 公网域名 |
-| --- | --- | --- | --- | --- |
-| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
-| 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
+| 环境 | 部署目录 | Compose 项目 | Agent 监听 | Web 监听 | 公网域名 |
+| --- | --- | --- | --- | --- | --- |
+| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3002` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
+| 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3011` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
 
 Workflow 会把运行配置安全写入服务器 `.env.next`;部署脚本在发布时将其提升为 `.env`。失败时会同时恢复 `.env.previous` 和 `.deploy.env.previous`。
 

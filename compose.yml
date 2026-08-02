@@ -29,6 +29,8 @@ services:
       - host.docker.internal:host-gateway
     expose:
       - "3000"
+    ports:
+      - "${AGENT_BIND_ADDRESS:-127.0.0.1}:${AGENT_PORT:-3001}:3000"
     volumes:
       - agent_sessions:/app/.context
       - agent_codex_home:/home/node/.codex
@@ -42,6 +44,41 @@ services:
       timeout: 3s
       retries: 6
       start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - app
+
+  project-progress-worker:
+    image: ${AGENT_IMAGE:-oa-agent:local}
+    build:
+      context: .
+      target: agent-runtime
+    init: true
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    env_file:
+      - .env
+    environment:
+      OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
+      OA_AUTH_ALIAS: ${OA_AUTH_ALIAS:-default}
+      PROJECT_PROGRESS_STATE_DB: /app/.context/project-progress.sqlite
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - agent_sessions:/app/.context
+    command:
+      - node
+      - agent/dist/runtime/projectProgressWorker.js
     security_opt:
       - no-new-privileges:true
     cap_drop:

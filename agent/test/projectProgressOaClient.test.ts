@@ -69,8 +69,11 @@ describe("ProjectProgressOaClient", () => {
 
     await client.updateProjectStatus(7, "maintenance");
 
-    assert.equal(request?.method, "PUT");
-    assert.equal(new URL(request?.url ?? "").pathname, "/projects/project");
+    assert.equal(request?.method, "PATCH");
+    assert.equal(
+      new URL(request?.url ?? "").pathname,
+      "/internal/project-sync/projects/7/status",
+    );
     assert.deepEqual(await request?.json(), { status: "maintenance" });
   });
 
@@ -107,6 +110,10 @@ describe("ProjectProgressOaClient", () => {
 
     assert.equal(created.id, 101);
     assert.equal(requests[1]?.method, "POST");
+    assert.equal(
+      new URL(requests[1]?.url ?? "").pathname,
+      "/internal/project-sync/github-commit-summaries",
+    );
     assert.deepEqual(await requests[1]?.json(), {
       project_id: 7,
       summary_date: "2026-07-24",
@@ -152,14 +159,14 @@ describe("ProjectProgressOaClient", () => {
     const client = createClient(async (input, init) => {
       const request = new Request(input, init);
       methods.push(request.method);
-      if (new URL(request.url).pathname === "/projects/project") {
-        return Response.json({ data: { item: {
+      if (new URL(request.url).pathname === "/internal/project-sync/projects/7") {
+        return Response.json({ data: {
           id: 7,
           project_name: "project-7",
           status: "updating",
           github_urls: [],
           version: 3,
-        } } });
+        } });
       }
       return Response.json({ data: {
         id: 101,
@@ -179,13 +186,21 @@ describe("ProjectProgressOaClient", () => {
       aiConfidence: 91,
       aiNote: "已更新。",
     })).id, 101);
-    assert.deepEqual(methods, ["GET", "GET", "PUT"]);
+    assert.deepEqual(methods, ["GET", "GET", "PATCH"]);
   });
 
   it("classifies HTTP and malformed JSON failures", async () => {
     await assert.rejects(
-      createClient(async () => new Response("unavailable", { status: 503 })).listProjects(),
-      OaRequestError,
+      createClient(async () => Response.json({
+        code: 503,
+        message: "unavailable",
+        data: { error_code: "service_unavailable" },
+        success: false,
+      }, { status: 503 })).listProjects(),
+      (error: unknown) =>
+        error instanceof OaRequestError &&
+        error.status === 503 &&
+        error.errorCode === "service_unavailable",
     );
     await assert.rejects(
       createClient(async () => new Response("not-json")).listProjects(),

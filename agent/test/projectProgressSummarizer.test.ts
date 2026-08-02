@@ -31,6 +31,10 @@ describe("ResponsesProjectProgressSummarizer", () => {
         apiBaseUrl: "https://model.example.test/v1",
         apiKey: "secret",
         model: "summary-model",
+        parameters: {
+          reasoning_effort: "high",
+          max_output_tokens: 1_024,
+        },
       },
       async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -57,6 +61,8 @@ describe("ResponsesProjectProgressSummarizer", () => {
       limitations: [],
     });
     assert.equal(requestBody?.model, "summary-model");
+    assert.deepEqual(requestBody?.reasoning, { effort: "high" });
+    assert.equal(requestBody?.max_output_tokens, 1_024);
     assert.doesNotMatch(JSON.stringify(requestBody), /secret/);
   });
 
@@ -75,6 +81,49 @@ describe("ResponsesProjectProgressSummarizer", () => {
     const result = await summarizer.summarize(input);
     assert.match(result.summary, /修复登录跳转/);
     assert.deepEqual(result.limitations, ["模型总结失败，已使用确定性兜底"]);
+  });
+
+  it("builds a sanitized AI interaction for OA auditing", async () => {
+    const summarizer = new ResponsesProjectProgressSummarizer(
+      {
+        apiBaseUrl: "https://model.example.test/v1",
+        apiKey: "secret",
+        provider: "nexttoken",
+        model: "gpt-5.6-terra",
+      },
+      async () => Response.json({
+        id: "response-01",
+        status: "completed",
+        usage: { input_tokens: 100, output_tokens: 20 },
+        output: [{ content: [{
+          type: "output_text",
+          text: JSON.stringify({
+            summary: "完成登录跳转修复。",
+            limitations: ["仅依据 commit"],
+          }),
+        }] }],
+      }),
+    );
+
+    const result = await summarizer.summarize(input);
+
+    assert.equal(result.interaction?.provider, "nexttoken");
+    assert.equal(result.interaction?.model, "gpt-5.6-terra");
+    assert.deepEqual(result.interaction?.requestPayloadSanitized, {
+      project_id: 12,
+      summary_date: "2026-07-24",
+      repository_count: 1,
+      commit_count: 1,
+      submitted_commit_count: 1,
+    });
+    assert.deepEqual(result.interaction?.responsePayloadSanitized, {
+      status: "completed",
+      output_count: 1,
+    });
+    assert.equal(result.interaction?.upstreamRequestId, "response-01");
+    assert.equal(result.interaction?.inputTokens, 100);
+    assert.equal(result.interaction?.outputTokens, 20);
+    assert.doesNotMatch(JSON.stringify(result.interaction), /example\/api|abc|secret/);
   });
 
   it("sanitizes model output before it enters OA", async () => {

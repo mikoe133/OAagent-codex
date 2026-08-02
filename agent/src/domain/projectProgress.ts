@@ -143,7 +143,7 @@ function compareCommits(
   );
 }
 
-function formatDateInTimeZone(date: Date, timeZone: string): string {
+export function formatDateInTimeZone(date: Date, timeZone: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",

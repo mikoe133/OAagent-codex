@@ -1,0 +1,84 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import type { AutomationRun } from "./automation-api"
+import {
+  hasActiveAutomationRuns,
+  resolveAutomationRunReply,
+} from "./automation-run-presentation"
+
+test("keeps polling while an automation run is active", () => {
+  assert.equal(hasActiveAutomationRuns([run({ status: "pending" })]), true)
+  assert.equal(hasActiveAutomationRuns([run({ status: "running" })]), true)
+  assert.equal(hasActiveAutomationRuns([run({ status: "succeeded" })]), false)
+})
+
+test("explains successful runs that had no commits instead of claiming AI is pending", () => {
+  assert.equal(
+    resolveAutomationRunReply(run({
+      status: "succeeded",
+      projects_total: 52,
+      ai_interaction_count: 0,
+      projects: [],
+    })),
+    "本次运行已成功完成，共检查 52 个项目；当天没有新增 Commit，因此无需调用 AI 生成总结。",
+  )
+})
+
+test("still shows the generated AI summary when one exists", () => {
+  assert.equal(
+    resolveAutomationRunReply(
+      run({ status: "succeeded", ai_interaction_count: 1 }),
+      {
+        id: 1,
+        run_project_id: 2,
+        provider: "nexttoken",
+        model: "gpt-5.6-terra",
+        prompt_version: "v1",
+        fallback_used: false,
+        input_tokens: 10,
+        output_tokens: 5,
+        latency_ms: 100,
+        status: "succeeded",
+        error_code: null,
+        error_summary: null,
+        final_summary: "完成自动化联调。",
+      },
+    ),
+    "完成自动化联调。",
+  )
+})
+
+function run(overrides: Partial<AutomationRun>): AutomationRun {
+  return {
+    id: "run-1",
+    root_run_id: "run-1",
+    parent_run_id: null,
+    job_id: 1,
+    job_key: "github-project-progress",
+    job_name: "GitHub 项目进度",
+    job_type: "github_project_progress_sync",
+    tags: [],
+    trigger_source: "manual",
+    scheduled_at: "2026-07-31T12:00:00.000Z",
+    available_at: "2026-07-31T12:00:00.000Z",
+    triggered_at: "2026-07-31T12:00:00.000Z",
+    status: "pending",
+    attempt: 1,
+    model_provider: "nexttoken",
+    model_id: "gpt-5.6-terra",
+    deadline_at: "2026-07-31T12:45:00.000Z",
+    started_at: null,
+    finished_at: null,
+    projects_total: 0,
+    projects_succeeded: 0,
+    projects_failed: 0,
+    mutations_applied: false,
+    retry_recommended: false,
+    error_code: null,
+    error_summary: null,
+    cancel_requested_at: null,
+    duration_ms: null,
+    ...overrides,
+  }
+}

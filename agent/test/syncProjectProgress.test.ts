@@ -510,6 +510,218 @@ describe("syncProjectProgress", () => {
     assert.equal(updates, 0);
     assert.match(result.projects[0]?.warnings.join(" ") ?? "", /summary_external_edit/);
   });
+
+  it("writes every active project but only the current Beijing day in production", async () => {
+    const created: Array<{ projectId: number; summaryDate: string }> = [];
+    const projects = [21, 22].map((id) => ({
+      id,
+      projectName: `project-${id}`,
+      status: "updating" as const,
+      githubUrls: [`https://github.com/alpha/project-${id}`],
+    }));
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => projects,
+        getProject: async (projectId) => projects.find((project) => project.id === projectId)!,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => {
+          created.push({ projectId: input.projectId, summaryDate: input.summaryDate });
+          return { id: 600 + input.projectId, ...input };
+        },
+        updateCommitSummary: async () => {
+          throw new Error("must not update");
+        },
+        getCommitSummary: async () => {
+          throw new Error("must not read");
+        },
+      },
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: Number(repository.repository.split("-").at(-1)),
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [
+            commit(1, repository.fullName, "old", "2026-07-23T01:00:00.000Z"),
+            commit(1, repository.fullName, "today", "2026-07-24T01:00:00.000Z"),
+          ],
+        }),
+      },
+      summarizer: { summarize: async () => ({ summary: "当天总结", limitations: [] }) },
+      store: createWritableStore(),
+    });
+
+    assert.equal(result.mode, "production-write");
+    assert.deepEqual(created, [
+      { projectId: 21, summaryDate: "2026-07-24" },
+      { projectId: 22, summaryDate: "2026-07-24" },
+    ]);
+    assert.deepEqual(result.projects.map((project) => project.summaries.length), [1, 1]);
+  });
+
+  it("adopts an exact unmanaged summary without overwriting it", async () => {
+    let summaryWrites = 0;
+    let adoptedSummaryId: number | null = null;
+    const project = {
+      id: 23,
+      projectName: "adoption",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/api"],
+    };
+    const store = createWritableStore();
+    store.markSummaryApplied = (input) => {
+      adoptedSummaryId = input.summaryId;
+    };
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [{
+          id: 701,
+          projectId: 23,
+          summaryDate: "2026-07-24",
+          summary: "AI 总结",
+          aiConfidence: 90,
+          aiNote: "基于 1 个仓库的 1 条提交。",
+        }],
+        createCommitSummary: async () => {
+          summaryWrites += 1;
+          throw new Error("must not create");
+        },
+        updateCommitSummary: async () => {
+          summaryWrites += 1;
+          throw new Error("must not update");
+        },
+        getCommitSummary: async () => {
+          throw new Error("must not read");
+        },
+      },
+      githubReader: {
+        readRepository: async () => ({
+          repositoryId: 1,
+          fullName: "alpha/api",
+          canonicalUrl: "https://github.com/alpha/api",
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(1, "alpha/api", "a", "2026-07-24T01:00:00.000Z")],
+        }),
+      },
+      summarizer: { summarize: async () => ({ summary: "AI 总结", limitations: [] }) },
+      store,
+    });
+
+    assert.equal(summaryWrites, 0);
+    assert.equal(adoptedSummaryId, 701);
+    assert.match(result.projects[0]?.warnings.join(" ") ?? "", /summary_adopted/);
+  });
+
+  it("recovers when another worker creates the same summary first", async () => {
+    let listReads = 0;
+    let adoptedSummaryId: number | null = null;
+    const project = {
+      id: 24,
+      projectName: "create-race",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/api"],
+    };
+    const store = createWritableStore();
+    store.markSummaryApplied = (input) => {
+      adoptedSummaryId = input.summaryId;
+    };
+    const existing = {
+      id: 702,
+      projectId: 24,
+      summaryDate: "2026-07-24",
+      summary: "AI 总结",
+      aiConfidence: 90,
+      aiNote: "基于 1 个仓库的 1 条提交。",
+    };
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => {
+          listReads += 1;
+          return listReads === 1 ? [] : [existing];
+        },
+        createCommitSummary: async () => {
+          throw new Error("HTTP 409");
+        },
+        updateCommitSummary: async () => {
+          throw new Error("must not update");
+        },
+        getCommitSummary: async () => {
+          throw new Error("must not read");
+        },
+      },
+      githubReader: {
+        readRepository: async () => ({
+          repositoryId: 1,
+          fullName: "alpha/api",
+          canonicalUrl: "https://github.com/alpha/api",
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(1, "alpha/api", "a", "2026-07-24T01:00:00.000Z")],
+        }),
+      },
+      summarizer: { summarize: async () => ({ summary: "AI 总结", limitations: [] }) },
+      store,
+    });
+
+    assert.equal(adoptedSummaryId, 702);
+    assert.match(result.projects[0]?.warnings.join(" ") ?? "", /summary_create_race_adopted/);
+    assert.doesNotMatch(result.projects[0]?.warnings.join(" ") ?? "", /summary_write_failed/);
+  });
+
+  it("recommends a scheduler retry after a transient project failure", async () => {
+    const project = {
+      id: 25,
+      projectName: "retry",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/api"],
+    };
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => {
+          throw new Error("OA unavailable");
+        },
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => ({ id: 703, ...input }),
+        updateCommitSummary: async (summaryId, input) => ({
+          id: summaryId,
+          projectId: 25,
+          summaryDate: "2026-07-24",
+          ...input,
+        }),
+        getCommitSummary: async () => {
+          throw new Error("must not read");
+        },
+      },
+      githubReader: {
+        readRepository: async () => {
+          throw new Error("must not read");
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+      store: createWritableStore(),
+    });
+
+    assert.equal(result.retryRecommended, true);
+  });
 });
 
 function createWritableStore() {

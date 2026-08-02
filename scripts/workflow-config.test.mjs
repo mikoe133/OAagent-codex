@@ -32,10 +32,13 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.match(workflow, /uses: docker\/setup-qemu-action@v3/)
   assert.match(workflow, /NEXTTOKEN_API_KEY: \$\{\{ secrets\.NEXTTOKEN_API_KEY \}\}/)
   assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/)
+  assert.equal(workflow.match(/OA_PROJECT_SYNC_TOKEN: \$\{\{ secrets\.OA_PROJECT_SYNC_TOKEN \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/PROJECT_PROGRESS_GITHUB_TOKEN: \$\{\{ secrets\.PROJECT_PROGRESS_GITHUB_TOKEN \}\}/g)?.length, 2)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
   assert.equal(workflow.match(/OA_AGENT_SSO_SHARED_SECRET: \$\{\{ secrets\.OA_AGENT_SSO_SHARED_SECRET \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/OA_AGENT_AUTOMATION_TOKEN: \$\{\{ secrets\.OA_AGENT_AUTOMATION_TOKEN \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_SSO_TTL_SECONDS: \$\{\{ vars\.OA_AGENT_SSO_TTL_SECONDS \}\}/g)?.length, 2)
-  assert.equal(workflow.match(/OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS; do/g)?.length, 2)
+  assert.equal(workflow.match(/OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN; do/g)?.length, 2)
   assert.match(workflow, /bash scripts\/render-runtime-env\.sh/)
   assert.match(workflow, /push: \$\{\{ github\.event_name != 'pull_request' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/test'\) \}\}/)
   assert.match(workflow, /uses: actions\/upload-artifact@v4/)
@@ -49,6 +52,7 @@ test("publishes release images and transfers private deployment artifacts", asyn
 test("allows the server env to isolate Compose projects", async () => {
   const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
   assert.match(compose, /^name: \$\{COMPOSE_PROJECT_NAME:-oa-agent\}$/m)
+  assert.match(compose, /\$\{AGENT_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{AGENT_PORT:-3001\}:3000/)
 })
 
 test("injects SSO configuration into the web container at runtime", async () => {
@@ -64,11 +68,11 @@ test("injects SSO configuration into the web container at runtime", async () => 
 test("limits container resources and log growth on the shared server", async () => {
   const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
 
-  assert.equal(compose.match(/^    cpus: /gm)?.length, 2)
-  assert.equal(compose.match(/^    mem_limit: /gm)?.length, 2)
-  assert.equal(compose.match(/^    pids_limit: /gm)?.length, 2)
-  assert.equal(compose.match(/^        max-size: 10m$/gm)?.length, 2)
-  assert.equal(compose.match(/^        max-file: "3"$/gm)?.length, 2)
+  assert.equal(compose.match(/^    cpus: /gm)?.length, 3)
+  assert.equal(compose.match(/^    mem_limit: /gm)?.length, 3)
+  assert.equal(compose.match(/^    pids_limit: /gm)?.length, 3)
+  assert.equal(compose.match(/^        max-size: 10m$/gm)?.length, 3)
+  assert.equal(compose.match(/^        max-file: "3"$/gm)?.length, 3)
 })
 
 test("uses Docker as the Codex command isolation boundary", async () => {

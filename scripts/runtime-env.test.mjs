@@ -23,6 +23,11 @@ test("renders a private runtime env for one isolated Compose environment", async
     OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
     OA_AGENT_SSO_SHARED_SECRET: "test-sso-secret",
     OA_AGENT_SSO_TTL_SECONDS: "300",
+    OA_AGENT_AUTOMATION_TOKEN: "test-automation-secret",
+    PROJECT_PROGRESS_WORKER_INSTANCE: "oaagent-test-01",
+    PROJECT_PROGRESS_LEASE_SECONDS: "300",
+    PROJECT_PROGRESS_HEARTBEAT_SECONDS: "60",
+    AGENT_PORT: "3002",
     WEB_PORT: "3001",
   })
 
@@ -34,10 +39,26 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^OPENROUTER_API_KEY=test-openrouter-secret$/m)
   assert.match(content, /^OPENROUTER_API_BASE_URL=https:\/\/openrouter\.ai\/api\/v1$/m)
   assert.match(content, /^OA_DOCKER_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
+  assert.match(content, /^OA_PROJECT_SYNC_TOKEN=test-worker-secret$/m)
+  assert.match(content, /^OA_PROJECT_SYNC_TOKEN_HEADER=Authorization$/m)
+  assert.match(content, /^OA_PROJECT_SYNC_TOKEN_PREFIX=Bearer$/m)
+  assert.match(content, /^PROJECT_PROGRESS_GITHUB_TOKEN=test-github-secret$/m)
+  assert.match(content, /^PROJECT_PROGRESS_WORKER_INSTANCE=oaagent-test-01$/m)
+  assert.match(content, /^PROJECT_PROGRESS_LEASE_SECONDS=300$/m)
+  assert.match(content, /^PROJECT_PROGRESS_HEARTBEAT_SECONDS=60$/m)
+  assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS=12$/m)
+  assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_FILES_PER_COMMIT=20$/m)
+  assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_PATCH_CHARS_PER_FILE=1200$/m)
+  assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS=12000$/m)
+  assert.match(content, /^PROJECT_PROGRESS_WRITE_ENABLED=true$/m)
+  assert.match(content, /^PROJECT_PROGRESS_PRODUCTION_WRITES=I_UNDERSTAND_PRODUCTION_WRITES$/m)
   assert.match(content, /^OA_AGENT_SSO_SHARED_SECRET=test-sso-secret$/m)
   assert.match(content, /^OA_AGENT_SSO_TTL_SECONDS=300$/m)
+  assert.match(content, /^OA_AGENT_AUTOMATION_TOKEN=test-automation-secret$/m)
   assert.match(content, /^OA_API_TOKEN_HEADER=Cookie$/m)
   assert.match(content, /^OA_API_TOKEN_PREFIX=sessionid=$/m)
+  assert.match(content, /^AGENT_BIND_ADDRESS=127\.0\.0\.1$/m)
+  assert.match(content, /^AGENT_PORT=3002$/m)
   assert.match(content, /^WEB_BIND_ADDRESS=127\.0\.0\.1$/m)
   assert.match(content, /^WEB_PORT=3001$/m)
   assert.doesNotMatch(content, /^AGENT_API_TOKEN=/m)
@@ -134,6 +155,13 @@ function runRender(outputPath, overrides) {
     env: {
       PATH: process.env.PATH,
       OA_AUTH_ALIAS: "default",
+      OA_PROJECT_SYNC_TOKEN: "test-worker-secret",
+      OA_PROJECT_SYNC_TOKEN_HEADER: "Authorization",
+      OA_PROJECT_SYNC_TOKEN_PREFIX: "Bearer",
+      PROJECT_PROGRESS_GITHUB_TOKEN: "test-github-secret",
+      OA_AGENT_AUTOMATION_TOKEN: "test-automation-secret",
+      AGENT_BIND_ADDRESS: "127.0.0.1",
+      AGENT_PORT: "3002",
       WEB_BIND_ADDRESS: "127.0.0.1",
       ...overrides,
     },

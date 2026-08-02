@@ -28,7 +28,14 @@ test("starting a new session does not abort the previous session", () => {
   const startNewSession = callbackSource("startNewSession", "handleDeleteSession")
 
   assert.doesNotMatch(startNewSession, /\.abort\(\)/)
+  assert.match(startNewSession, /setActiveWorkspaceView\("conversation"\)/)
   assert.match(startNewSession, /sessionMessagesRef\.current\.set\(nextAgentSessionId, \[\]\)/)
+})
+
+test("selecting a conversation returns from automated tasks to chat", () => {
+  const handleSelectSession = callbackSource("handleSelectSession", "toggleSider")
+
+  assert.match(handleSelectSession, /setActiveWorkspaceView\("conversation"\)/)
 })
 
 test("tracks active requests independently for each session", () => {

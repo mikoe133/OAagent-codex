@@ -71,11 +71,14 @@ OPENROUTER_API_KEY=<secret>
 OA_DOCKER_API_BASE_URL=http://host.docker.internal:8010
 OA_AGENT_SSO_SHARED_SECRET=<与对应 OA 服务端一致的密钥>
 OA_AGENT_SSO_TTL_SECONDS=300
+OA_AGENT_AUTOMATION_TOKEN=<与对应 OA 服务端一致的自动化专用密钥>
+AGENT_BIND_ADDRESS=127.0.0.1
+AGENT_PORT=3002
 WEB_BIND_ADDRESS=127.0.0.1
 WEB_PORT=3001
 ```
 
-生产环境将 `COMPOSE_PROJECT_NAME` 改为 `oa-agent-prod`,将 `WEB_PORT` 改为 `3010`,并使用生产环境自己的 SSO 密钥。不要把 `.env` 上传到 Git 或源码压缩包。
+生产环境将 `COMPOSE_PROJECT_NAME` 改为 `oa-agent-prod`，将 `AGENT_PORT` 改为 `3011`，将 `WEB_PORT` 改为 `3010`，并使用生产环境自己的 SSO 与自动化密钥。不要把 `.env` 上传到 Git 或源码压缩包。
 
 ### 3. 创建受限 BuildKit
 
@@ -196,12 +199,14 @@ case "$TARGET" in
     DEPLOY_DIR=/opt/rwkv/apps/oa-agent-test
     IMAGE_PREFIX=oa-agent-test
     PROJECT_NAME=oa-agent-test
+    AGENT_PORT=3002
     WEB_PORT=3001
     ;;
   production)
     DEPLOY_DIR=/opt/rwkv/apps/oa-agent-prod
     IMAGE_PREFIX=oa-agent-prod
     PROJECT_NAME=oa-agent-prod
+    AGENT_PORT=3011
     WEB_PORT=3010
     ;;
   *)
@@ -224,6 +229,8 @@ for name in \
   OA_DOCKER_API_BASE_URL \
   OA_AGENT_SSO_SHARED_SECRET \
   OA_AGENT_SSO_TTL_SECONDS \
+  OA_AGENT_AUTOMATION_TOKEN \
+  AGENT_PORT \
   WEB_PORT; do
   grep -q "^${name}=." "$DEPLOY_DIR/.env" || {
     echo "Missing $name in $DEPLOY_DIR/.env" >&2
@@ -238,6 +245,11 @@ grep -qx "COMPOSE_PROJECT_NAME=$PROJECT_NAME" "$DEPLOY_DIR/.env" || {
 
 grep -qx "WEB_PORT=$WEB_PORT" "$DEPLOY_DIR/.env" || {
   echo "WEB_PORT must be $WEB_PORT" >&2
+  exit 1
+}
+
+grep -qx "AGENT_PORT=$AGENT_PORT" "$DEPLOY_DIR/.env" || {
+  echo "AGENT_PORT must be $AGENT_PORT" >&2
   exit 1
 }
 

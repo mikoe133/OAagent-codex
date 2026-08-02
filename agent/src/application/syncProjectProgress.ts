@@ -1,6 +1,8 @@
 import {
   buildProjectDailyCommitGroups,
   decideProjectStatus,
+  formatDateInTimeZone,
+  PROJECT_PROGRESS_TIME_ZONE,
   type ProjectStatus,
 } from "../domain/projectProgress.js";
 import { normalizeGitHubRepositoryUrl } from "../infrastructure/github/githubUrl.js";
@@ -15,7 +17,10 @@ import type {
   ProjectProgressOaWriter,
 } from "../infrastructure/oa/projectProgressOaClient.js";
 import type { ManagedProjectSummary } from "../infrastructure/persistence/projectProgressStore.js";
-import type { ProjectProgressSummarizer } from "./projectProgressSummarizer.js";
+import type {
+  ProjectProgressAiInteraction,
+  ProjectProgressSummarizer,
+} from "./projectProgressSummarizer.js";
 
 export type ProjectProgressSummaryProposal = {
   summaryDate: string;
@@ -24,6 +29,7 @@ export type ProjectProgressSummaryProposal = {
   summary: string;
   aiConfidence: number;
   aiNote: string;
+  interaction?: ProjectProgressAiInteraction;
 };
 
 export type ProjectProgressProjectReport = {
@@ -34,12 +40,17 @@ export type ProjectProgressProjectReport = {
   outcome: "archived" | "no_github_urls" | "invalid_github_urls" | "incomplete" | "evaluated";
   warnings: string[];
   summaries: ProjectProgressSummaryProposal[];
+  repositoryCount?: number;
+  commitCount?: number;
+  mutationsApplied?: number;
 };
 
 export type ProjectProgressSyncReport = {
-  mode: "dry-run" | "unsafe-test-write";
+  mode: "dry-run" | "unsafe-test-write" | "production-write";
   observedAt: string;
   mutationsApplied: number;
+  retryRecommended: boolean;
+  cancelled: boolean;
   projects: ProjectProgressProjectReport[];
 };
 
@@ -105,16 +116,17 @@ export async function syncProjectProgress(input: {
   summarizer: ProjectProgressSummarizer;
   store?: ProjectProgressStateSink;
   projectId?: number;
-  writeMode?: "dry-run" | "unsafe-test";
+  writeMode?: "dry-run" | "unsafe-test" | "production";
+  shouldCancel?: () => boolean;
 }): Promise<ProjectProgressSyncReport> {
   const writeMode = input.writeMode ?? "dry-run";
   if (writeMode === "unsafe-test" && input.projectId === undefined) {
     throw new Error("unsafe-test 写入必须指定单个 projectId。");
   }
-  const writer = writeMode === "unsafe-test"
+  const writer = writeMode !== "dry-run"
     ? requireOaWriter(input.oaClient)
     : null;
-  const writableStore = writeMode === "unsafe-test"
+  const writableStore = writeMode !== "dry-run"
     ? requireWritableStore(input.store)
     : null;
   const listedProjects = await input.oaClient.listProjects();
@@ -124,8 +136,13 @@ export async function syncProjectProgress(input: {
   const repositoryCache = new Map<string, Promise<GitHubRepositorySnapshot>>();
   const reports: ProjectProgressProjectReport[] = [];
   let mutationsApplied = 0;
+  let cancelled = false;
 
   for (const listedProject of projects) {
+    if (input.shouldCancel?.()) {
+      cancelled = true;
+      break;
+    }
     if (listedProject.status === "archived") {
       reports.push(archivedReport(listedProject));
       continue;
@@ -219,10 +236,17 @@ export async function syncProjectProgress(input: {
           input.observedAt.toISOString(),
         );
       }
-      const groups = buildProjectDailyCommitGroups(
+      const allGroups = buildProjectDailyCommitGroups(
         snapshots.flatMap((snapshot) => snapshot.commits),
         input.observedAt,
       );
+      const currentBusinessDate = formatDateInTimeZone(
+        input.observedAt,
+        PROJECT_PROGRESS_TIME_ZONE,
+      );
+      const groups = writeMode === "production"
+        ? allGroups.filter((group) => group.summaryDate === currentBusinessDate)
+        : allGroups;
       for (const group of groups) {
         const existing = input.store?.getDailySummaryDraft?.(
           project.id,
@@ -262,6 +286,7 @@ export async function syncProjectProgress(input: {
           summary: generated.summary,
           aiConfidence,
           aiNote: `${aiNoteParts.join("；")}。`,
+          ...(generated.interaction ? { interaction: generated.interaction } : {}),
         };
         summaries.push(proposal);
         input.store?.saveDailySummaryDraft?.({
@@ -275,9 +300,13 @@ export async function syncProjectProgress(input: {
       }
     }
 
-    if (writer && writableStore && complete) {
+    let projectMutationsApplied = 0;
+    if (input.shouldCancel?.()) {
+      cancelled = true;
+      warnings.push("cancel_requested");
+    } else if (writer && writableStore && complete) {
       try {
-        const applied = await applyUnsafeTestMutations({
+        const applied = await applyMutations({
           project,
           observedAt: input.observedAt,
           targetStatus: decision.targetStatus,
@@ -285,10 +314,18 @@ export async function syncProjectProgress(input: {
           writer,
           store: writableStore,
           warnings,
+          shouldCancel: input.shouldCancel,
         });
         mutationsApplied += applied;
+        projectMutationsApplied += applied;
       } catch (error) {
-        warnings.push(`test_write_failed:${errorMessage(error)}`);
+        warnings.push(`write_failed:${errorMessage(error)}`);
+      }
+      if (input.shouldCancel?.()) {
+        cancelled = true;
+        if (!warnings.includes("cancel_requested")) {
+          warnings.push("cancel_requested");
+        }
       }
     }
 
@@ -300,18 +337,41 @@ export async function syncProjectProgress(input: {
       outcome: complete ? "evaluated" : "incomplete",
       warnings,
       summaries,
+      repositoryCount: snapshots.length,
+      commitCount: summaries.reduce((total, summary) => total + summary.commitCount, 0),
+      mutationsApplied: projectMutationsApplied,
     });
+    if (cancelled) {
+      break;
+    }
   }
 
   return {
-    mode: writeMode === "unsafe-test" ? "unsafe-test-write" : "dry-run",
+    mode: writeMode === "production"
+      ? "production-write"
+      : writeMode === "unsafe-test"
+        ? "unsafe-test-write"
+        : "dry-run",
     observedAt: input.observedAt.toISOString(),
     mutationsApplied,
+    retryRecommended: reports.some(projectNeedsRetry),
+    cancelled,
     projects: reports,
   };
 }
 
-async function applyUnsafeTestMutations(input: {
+function projectNeedsRetry(report: ProjectProgressProjectReport): boolean {
+  if (report.outcome === "incomplete") {
+    return true;
+  }
+  return report.warnings.some((warning) =>
+    warning.startsWith("write_failed:") ||
+    warning.startsWith("status_write_failed:") ||
+    warning.startsWith("summary_write_failed:")
+  );
+}
+
+async function applyMutations(input: {
   project: OaProject;
   observedAt: Date;
   targetStatus: Exclude<ProjectStatus, "archived">;
@@ -319,21 +379,26 @@ async function applyUnsafeTestMutations(input: {
   writer: ProjectProgressOaWriter;
   store: WritableProjectProgressState;
   warnings: string[];
+  shouldCancel?: () => boolean;
 }): Promise<number> {
   const latest = await input.writer.getProject(input.project.id);
   if (latest.status === "archived") {
-    input.warnings.push("test_write_cancelled:project_archived");
+    input.warnings.push("write_cancelled:project_archived");
     return 0;
   }
   if (repositorySetKey(latest.githubUrls) !== repositorySetKey(input.project.githubUrls)) {
-    input.warnings.push("test_write_cancelled:github_urls_changed");
+    input.warnings.push("write_cancelled:github_urls_changed");
     return 0;
   }
 
   let applied = 0;
+  if (input.shouldCancel?.()) {
+    input.warnings.push("cancel_requested");
+    return applied;
+  }
   if (latest.status !== input.targetStatus) {
     const intentKey = [
-      "test:status",
+      "project-progress:status",
       latest.id,
       latest.status,
       input.targetStatus,
@@ -355,8 +420,14 @@ async function applyUnsafeTestMutations(input: {
   }
 
   for (const proposal of input.summaries) {
+    if (input.shouldCancel?.()) {
+      if (!input.warnings.includes("cancel_requested")) {
+        input.warnings.push("cancel_requested");
+      }
+      break;
+    }
     try {
-      applied += await reconcileUnsafeTestSummary({
+      applied += await reconcileSummary({
         projectId: latest.id,
         proposal,
         writer: input.writer,
@@ -372,7 +443,7 @@ async function applyUnsafeTestMutations(input: {
   return applied;
 }
 
-async function reconcileUnsafeTestSummary(input: {
+async function reconcileSummary(input: {
   projectId: number;
   proposal: ProjectProgressSummaryProposal;
   writer: ProjectProgressOaWriter;
@@ -397,11 +468,28 @@ async function reconcileUnsafeTestSummary(input: {
       projectId: input.projectId,
       payload: desired,
     });
-    const created = await input.writer.createCommitSummary({
-      projectId: input.projectId,
-      summaryDate: input.proposal.summaryDate,
-      ...desired,
-    });
+    let created: OaCommitSummary;
+    try {
+      created = await input.writer.createCommitSummary({
+        projectId: input.projectId,
+        summaryDate: input.proposal.summaryDate,
+        ...desired,
+      });
+    } catch (createError) {
+      const raced = await input.writer.listCommitSummaries(
+        input.projectId,
+        input.proposal.summaryDate,
+      );
+      if (raced.length !== 1 || !summaryMatchesDesired(raced[0]!, desired)) {
+        throw createError;
+      }
+      markSummaryApplied(input, raced[0]!.id);
+      input.store.markOutboxApplied(intentKey);
+      input.warnings.push(
+        `summary_create_race_adopted:${input.proposal.summaryDate}:${raced[0]!.id}`,
+      );
+      return 0;
+    }
     markSummaryApplied(input, created.id);
     input.store.markOutboxApplied(intentKey);
     return 1;
@@ -412,6 +500,11 @@ async function reconcileUnsafeTestSummary(input: {
     input.projectId,
     input.proposal.summaryDate,
   );
+  if (!managed && summaryMatchesDesired(current, desired)) {
+    markSummaryApplied(input, current.id);
+    input.warnings.push(`summary_adopted:${input.proposal.summaryDate}:${current.id}`);
+    return 0;
+  }
   if (!managed || managed.summaryId !== current.id) {
     input.warnings.push(`summary_unmanaged:${input.proposal.summaryDate}:${current.id}`);
     return 0;
@@ -492,7 +585,7 @@ function summaryIntentKey(
   projectId: number,
   proposal: ProjectProgressSummaryProposal,
 ): string {
-  return `test:summary:${operation}:${projectId}:${proposal.summaryDate}:${proposal.sourceDigest}`;
+  return `project-progress:summary:${operation}:${projectId}:${proposal.summaryDate}:${proposal.sourceDigest}`;
 }
 
 function repositorySetKey(urls: string[]): string {
@@ -510,7 +603,7 @@ function requireOaWriter(reader: ProjectProgressOaReader): ProjectProgressOaWrit
     typeof candidate.createCommitSummary !== "function" ||
     typeof candidate.updateCommitSummary !== "function"
   ) {
-    throw new Error("unsafe-test 写入需要完整 OA writer。");
+    throw new Error("项目进度写入需要完整 OA writer。");
   }
   return reader as ProjectProgressOaWriter;
 }
@@ -525,7 +618,7 @@ function requireWritableStore(
     typeof store.getManagedSummary !== "function" ||
     typeof store.markSummaryApplied !== "function"
   ) {
-    throw new Error("unsafe-test 写入需要持久化 outbox 和 managed summary 状态。");
+    throw new Error("项目进度写入需要持久化 outbox 和 managed summary 状态。");
   }
   return store as ProjectProgressStateSink & WritableProjectProgressState;
 }

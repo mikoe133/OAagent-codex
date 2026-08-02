@@ -49,6 +49,8 @@ export type AppConfig = {
   oaUserTokenPrefix: string;
   /** Codex 子进程调用服务端受控 OA API 工具的短期 token。 */
   oaApiToolToken: string;
+  /** OA 后端调用自动化模型目录与校验接口的专用 token。 */
+  automationApiToken: string | null;
   /** 后台服务监听端口。 */
   serverPort: number;
   /** 后台服务监听地址。 */
@@ -169,6 +171,7 @@ export function loadConfig(): AppConfig {
     oaUserTokenPrefix,
     oaApiToolToken:
       process.env.AGENT_OA_TOOL_TOKEN?.trim() || randomBytes(32).toString("hex"),
+    automationApiToken: process.env.OA_AGENT_AUTOMATION_TOKEN?.trim() || null,
     serverPort,
     serverHost,
     sessionStorePath,

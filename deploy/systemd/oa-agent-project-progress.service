@@ -1,0 +1,20 @@
+[Unit]
+Description=OA Agent GitHub project progress synchronization
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+StartLimitIntervalSec=10min
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=@DEPLOY_USER@
+WorkingDirectory=@DEPLOY_DIR@
+ExecStart=/usr/bin/flock --nonblock @DEPLOY_DIR@/.project-progress.lock /usr/bin/docker compose --env-file .env --env-file .deploy.env -f compose.yml run --rm --no-deps project-progress-worker node agent/dist/runtime/projectProgressWorker.js --once
+Restart=on-failure
+RestartSec=1min
+TimeoutStartSec=45min
+SyslogIdentifier=oa-agent-project-progress
+
+[Install]
+WantedBy=multi-user.target
