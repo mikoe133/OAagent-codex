@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   AutomationLeaseLostError,
   AutomationOaClient,
+  type AutomationJobClaim,
 } from "../src/infrastructure/oa/automationOaClient.js";
 
 describe("AutomationOaClient", () => {
@@ -23,6 +24,14 @@ describe("AutomationOaClient", () => {
 
     assert.equal(claim?.runId, "run-01");
     assert.equal(claim?.modelProvider, "nexttoken");
+    assert.deepEqual(
+      (claim as AutomationJobClaim & { promptProfile?: unknown } | null)?.promptProfile,
+      {
+        promptVersion: "sha256:oa-profile-v1",
+        systemPrompt: "只总结已经完成的工程进展。",
+        requiredCapabilities: ["github_project_tracking", "rwkvos_system_calls"],
+      },
+    );
     assert.equal(request?.headers.get("authorization"), "Bearer automation-secret");
     assert.deepEqual(await request?.json(), {
       worker_instance: "worker-01",
@@ -181,6 +190,14 @@ function claimPayload(): Record<string, unknown> {
     model_id: "gpt-5.6-terra",
     model_parameters: {},
     model_catalog_version: "catalog-v1",
+    prompt_profile: {
+      prompt_version: "sha256:oa-profile-v1",
+      system_prompt: "只总结已经完成的工程进展。",
+      required_capabilities: [
+        "github_project_tracking",
+        "rwkvos_system_calls",
+      ],
+    },
     retry_policy: {
       attempt: 1,
       max_attempts: 3,
@@ -208,6 +225,7 @@ function decodeClaimForTest() {
     modelId: "gpt-5.6-terra",
     modelParameters: {},
     modelCatalogVersion: "catalog-v1",
+    promptProfile: null,
     retryPolicy: { attempt: 1, maxAttempts: 3, intervalSeconds: 300 },
     timeoutSeconds: 2_700,
     deadlineAt: "2099-07-30T12:45:00.000Z",

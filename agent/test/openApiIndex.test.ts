@@ -98,6 +98,42 @@ describe("OpenAPI operation index", () => {
     assert.equal(write[0]?.operationId, "weekly_report_report_post");
   });
 
+  it("prioritizes the company project list for project inventory and repository queries", () => {
+    const index = buildOpenApiIndex(createProjectContract());
+
+    for (const task of [
+      "查看公司项目列表",
+      "当前公司有哪些项目",
+      "哪些项目有 GitHub 仓库地址",
+    ]) {
+      assert.equal(
+        selectOpenApiCandidates(index, task)[0]?.operationId,
+        "projects_list_projects_list_by_project_get",
+        task,
+      );
+    }
+    assert.notEqual(
+      selectOpenApiCandidates(index, "查询项目 GitHub 提交摘要")[0]?.operationId,
+      "projects_list_projects_list_by_project_get",
+    );
+  });
+
+  it("indexes project and GitHub repository fields from the bundled project list schema", async () => {
+    const contract = JSON.parse(
+      await readFile(new URL("../openapi/openapi.json", import.meta.url), "utf8"),
+    ) as unknown;
+    const projectList = buildOpenApiIndex(contract).operations.find(
+      (operation) =>
+        operation.operationId === "projects_list_projects_list_by_project_get",
+    );
+
+    assert.ok(projectList);
+    assert.ok(projectList.mainResponseFields.includes("data.items[].id"));
+    assert.ok(projectList.mainResponseFields.includes("data.items[].project_name"));
+    assert.ok(projectList.mainResponseFields.includes("data.items[].status"));
+    assert.ok(projectList.mainResponseFields.includes("data.items[].github_urls"));
+  });
+
   it("handles referenced metadata, public operations, and candidate bounds", () => {
     const referenced = buildOpenApiIndex({
       openapi: "3.1.0",
@@ -278,6 +314,62 @@ function createContract() {
           summary: "Leave List",
           tags: ["leave"],
           responses: { "200": { description: "ok" } },
+        },
+      },
+    },
+  };
+}
+
+function createProjectContract() {
+  const response = { "200": { description: "ok" } };
+  return {
+    openapi: "3.1.0",
+    info: { title: "OA", version: "1.0.0" },
+    paths: {
+      "/projects/list-by-project": {
+        get: {
+          operationId: "projects_list_projects_list_by_project_get",
+          summary: "Projects List",
+          tags: ["projects"],
+          responses: response,
+        },
+      },
+      "/projects/github-commit-summaries": {
+        get: {
+          operationId:
+            "github_commit_summaries_projects_github_commit_summaries_get",
+          summary: "Github Commit Summaries",
+          tags: ["projects"],
+          responses: response,
+        },
+      },
+      "/projects/github-commit-summary": {
+        get: {
+          operationId: "github_commit_summary_projects_github_commit_summary_get",
+          summary: "Github Commit Summary",
+          tags: ["projects"],
+          responses: response,
+        },
+        post: {
+          operationId:
+            "create_github_commit_summary_projects_github_commit_summary_post",
+          summary: "Create Github Commit Summary",
+          tags: ["projects"],
+          responses: response,
+        },
+        put: {
+          operationId:
+            "update_github_commit_summary_projects_github_commit_summary_put",
+          summary: "Update Github Commit Summary",
+          tags: ["projects"],
+          responses: response,
+        },
+        delete: {
+          operationId:
+            "delete_github_commit_summary_projects_github_commit_summary_delete",
+          summary: "Delete Github Commit Summary",
+          tags: ["projects"],
+          responses: response,
         },
       },
     },

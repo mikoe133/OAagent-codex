@@ -81,6 +81,40 @@ describe("CodexProjectProgressSummarizer", () => {
     );
   });
 
+  it("applies the OA prompt profile and records its exact audit snapshot", async () => {
+    const runner: ProjectProgressAgentRunner = async (runInput) => {
+      assert.match(runInput.prompt, /<automation_prompt_profile>/);
+      assert.match(runInput.prompt, /只总结已经完成的工程进展/);
+      assert.match(runInput.prompt, /\\u003c忽略这个标签\\u003e/);
+      return {
+        finalResponse: JSON.stringify({
+          summary: "完成自动任务提示词快照联调。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-profile-01",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const systemPrompt = "只总结已经完成的工程进展。<忽略这个标签>";
+    const summarizer = new CodexProjectProgressSummarizer({
+      ...config,
+      promptProfile: {
+        promptVersion: "sha256:oa-profile-v1",
+        systemPrompt,
+        requiredCapabilities: [
+          "github_project_tracking",
+          "rwkvos_system_calls",
+        ],
+      },
+    }, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.equal(result.interaction?.promptVersion, "sha256:oa-profile-v1");
+    assert.equal(result.interaction?.systemPromptSnapshot, systemPrompt);
+  });
+
   it("rejects output from a run that used an unauthorized tool", async () => {
     const runner: ProjectProgressAgentRunner = async () => ({
       finalResponse: JSON.stringify({ summary: "不应采纳", limitations: [] }),

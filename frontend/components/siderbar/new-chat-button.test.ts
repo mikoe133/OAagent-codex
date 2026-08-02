@@ -277,6 +277,34 @@ test("opens task run history as a read-only chat from the card body", () => {
   assert.match(automatedTaskConversationSource, /aria-label="返回自动任务列表"/)
 })
 
+test("keeps the automated task conversation header visible while scrolling", () => {
+  const conversationHeader = automatedTaskConversationSource.match(
+    /<header[\s\S]*?data-slot="automated-task-conversation-header"[\s\S]*?<\/header>/,
+  )?.[0]
+
+  assert.ok(conversationHeader, "expected a dedicated task conversation header")
+  assert.match(conversationHeader, /sticky/)
+  assert.match(conversationHeader, /top-0/)
+  assert.doesNotMatch(conversationHeader, /sm:top-/)
+  assert.match(conversationHeader, /z-10/)
+  assert.match(conversationHeader, /h-10/)
+  assert.match(conversationHeader, /flex-nowrap/)
+  assert.match(conversationHeader, /rounded-full/)
+  assert.match(conversationHeader, /ml-12/)
+  assert.match(conversationHeader, /-mr-3/)
+  assert.match(conversationHeader, /-mt-16/)
+  assert.match(conversationHeader, /bg-zinc-100/)
+  assert.match(conversationHeader, /text-stone-600/)
+  assert.match(conversationHeader, /theme-dark:bg-zinc-800/)
+  assert.match(conversationHeader, /theme-dark:text-zinc-300/)
+  assert.match(conversationHeader, /sm:ml-8/)
+  assert.match(conversationHeader, /sm:-mr-7/)
+  assert.match(conversationHeader, /sm:mt-0/)
+  assert.match(conversationHeader, /aria-label="返回自动任务列表"/)
+  assert.match(conversationHeader, /最近 \{runs\.length\} 次运行/)
+  assert.doesNotMatch(conversationHeader, /<p/)
+})
+
 test("reuses the task form dialog when creating an automated task", () => {
   const createTaskButton = automatedTasksSource.match(
     /<Button\s+data-slot="create-automated-task-button"[\s\S]*?<\/Button>/,

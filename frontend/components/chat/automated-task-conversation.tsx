@@ -62,8 +62,11 @@ export function AutomatedTaskConversation({
 
   return (
     <section data-slot="automated-task-conversation" className="min-h-full">
-      <header className="flex min-h-11 flex-wrap items-center justify-between gap-4 sm:pl-8">
-        <div className="flex min-w-0 items-center gap-3">
+      <header
+        data-slot="automated-task-conversation-header"
+        className="sticky top-0 z-10 -mr-3 -mt-16 ml-12 flex h-10 flex-nowrap items-center justify-between gap-2 rounded-full bg-zinc-100 px-2.5 text-stone-600 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 sm:-mr-7 sm:ml-8 sm:mt-0 sm:px-3"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <Button
             type="button"
             variant="ghost"
@@ -74,36 +77,40 @@ export function AutomatedTaskConversation({
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-xl font-semibold tracking-tight sm:text-2xl">
-                {task.display_name ?? task.name}
-              </h1>
-              <Badge variant="outline" className="rounded-full">
-                {task.deleted ? "已删除" : task.enabled ? "已开启" : "已暂停"}
-              </Badge>
-            </div>
-            <p className="mt-1 text-sm text-stone-500 theme-dark:text-zinc-400">
-              自动任务运行对话 · 最近 {runs.length} 次运行
-            </p>
+          <div className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap">
+            <h1 className="min-w-0 truncate text-base font-semibold tracking-tight sm:text-lg">
+              {task.display_name ?? task.name}
+            </h1>
+            <Badge variant="outline" className="hidden shrink-0 rounded-full sm:inline-flex">
+              {task.deleted ? "已删除" : task.enabled ? "已开启" : "已暂停"}
+            </Badge>
+            <span className="shrink-0 text-xs text-stone-500 theme-dark:text-zinc-400">
+              最近 {runs.length} 次运行
+            </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="icon"
             aria-label="刷新任务对话"
             onClick={onRefresh}
             disabled={loading}
-            className="rounded-full"
+            className="rounded-full hover:bg-zinc-200 theme-dark:hover:bg-zinc-700"
           >
             <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
           </Button>
-          <Button type="button" variant="outline" onClick={onEdit} className="rounded-full">
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label="编辑任务"
+            onClick={onEdit}
+            className="size-9 rounded-full px-0 hover:bg-zinc-200 theme-dark:hover:bg-zinc-700 sm:w-auto sm:px-3"
+          >
             <Pencil className="h-4 w-4" />
-            编辑任务
+            <span className="hidden sm:inline">编辑任务</span>
           </Button>
         </div>
       </header>

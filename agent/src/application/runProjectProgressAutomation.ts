@@ -17,6 +17,11 @@ export class ProjectProgressConfigurationError extends Error {
   override name = "ProjectProgressConfigurationError";
 }
 
+const SUPPORTED_PROMPT_CAPABILITIES = new Set([
+  "github_project_tracking",
+  "rwkvos_system_calls",
+]);
+
 export type ProjectProgressAutomationResult = {
   claimed: boolean;
   runId: string | null;
@@ -102,6 +107,9 @@ export async function runProjectProgressAutomation(input: {
           continue;
         }
         const interaction = summary.interaction;
+        const promptVersion = claim.promptProfile?.promptVersion ?? interaction.promptVersion;
+        const systemPromptSnapshot = claim.promptProfile?.systemPrompt ??
+          interaction.systemPromptSnapshot;
         await input.automationClient.upsertAiInteraction({
           claim,
           workerInstance: input.workerInstance,
@@ -111,8 +119,8 @@ export async function runProjectProgressAutomation(input: {
             provider: interaction.provider,
             model: interaction.model,
             modelCatalogVersion: claim.modelCatalogVersion,
-            promptVersion: interaction.promptVersion,
-            systemPromptSnapshot: interaction.systemPromptSnapshot,
+            promptVersion,
+            systemPromptSnapshot,
             requestPayloadSanitized: interaction.requestPayloadSanitized,
             responsePayloadSanitized: interaction.responsePayloadSanitized,
             finalSummary: interaction.finalSummary,
@@ -186,6 +194,14 @@ function validateClaim(claim: AutomationJobClaim): void {
   }
   if (claim.cancelRequested) {
     throw new ProjectProgressConfigurationError("任务在 claim 时已请求取消。");
+  }
+  const unsupportedCapabilities = claim.promptProfile?.requiredCapabilities.filter(
+    (capability) => !SUPPORTED_PROMPT_CAPABILITIES.has(capability),
+  ) ?? [];
+  if (unsupportedCapabilities.length > 0) {
+    throw new ProjectProgressConfigurationError(
+      `任务提示词要求不支持的能力:${unsupportedCapabilities.join(",")}`,
+    );
   }
 }
 

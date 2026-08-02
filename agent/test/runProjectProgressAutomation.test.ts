@@ -35,6 +35,7 @@ describe("runProjectProgressAutomation", () => {
     let projectCalls = 0;
     let interactionCalls = 0;
     const client = fakeClient({
+      claim: async () => promptAwareClaim(),
       updateRun: async ({ status }) => {
         statuses.push(status);
       },
@@ -50,6 +51,11 @@ describe("runProjectProgressAutomation", () => {
       upsertAiInteraction: async ({ interaction }) => {
         interactionCalls += 1;
         assert.equal(interaction.runProjectId, 123);
+        assert.equal(interaction.promptVersion, "sha256:oa-profile-v1");
+        assert.equal(
+          interaction.systemPromptSnapshot,
+          "只总结已经完成的工程进展。",
+        );
         assert.deepEqual(interaction.limitations, [{ message: "仅依据 commit" }]);
         await delay(30);
         return 456;
@@ -121,6 +127,38 @@ describe("runProjectProgressAutomation", () => {
     );
     assert.deepEqual(statuses, ["running"]);
   });
+
+  it("rejects a prompt profile that requires an unsupported capability", async () => {
+    const statuses: AutomationRunStatus[] = [];
+    const client = fakeClient({
+      claim: async () => ({
+        ...promptAwareClaim(),
+        promptProfile: {
+          ...promptAwareClaim().promptProfile!,
+          requiredCapabilities: ["github_project_tracking", "shell_access"],
+        },
+      }),
+      updateRun: async ({ status }) => {
+        statuses.push(status);
+      },
+    });
+    let executionResolved = false;
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => {
+        executionResolved = true;
+        return async () => report();
+      },
+    });
+
+    assert.equal(result.status, "configuration_error");
+    assert.equal(executionResolved, false);
+    assert.deepEqual(statuses, ["configuration_error"]);
+  });
 });
 
 type AutomationClientMethods = Pick<
@@ -160,12 +198,27 @@ function claim(): AutomationJobClaim {
     modelId: "gpt-5.6-terra",
     modelParameters: {},
     modelCatalogVersion: "catalog-v1",
+    promptProfile: null,
     retryPolicy: { attempt: 1, maxAttempts: 3, intervalSeconds: 300 },
     timeoutSeconds: 2_700,
     deadlineAt: "2099-07-30T12:45:00.000Z",
     leaseExpiresAt: "2099-07-30T12:05:00.000Z",
     cancelRequested: false,
   };
+}
+
+function promptAwareClaim(): AutomationJobClaim {
+  return {
+    ...claim(),
+    promptProfile: {
+      promptVersion: "sha256:oa-profile-v1",
+      systemPrompt: "只总结已经完成的工程进展。",
+      requiredCapabilities: [
+        "github_project_tracking",
+        "rwkvos_system_calls",
+      ],
+    },
+  } as AutomationJobClaim & { promptProfile: Record<string, unknown> };
 }
 
 function report(options: {

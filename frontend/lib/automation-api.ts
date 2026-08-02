@@ -261,6 +261,13 @@ type AutomationEnvelope<T> = {
   error?: string
 }
 
+const MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000
+const inFlightGetRequests = new Map<string, Promise<unknown>>()
+let modelCatalogCache: {
+  value: AutomationModelCatalog
+  expiresAt: number
+} | null = null
+
 export class AutomationApiError extends Error {
   constructor(
     message: string,
@@ -379,7 +386,16 @@ export function deleteAutomationTag(tagId: number): Promise<{ id: number }> {
 }
 
 export function getAutomationModelCatalog(): Promise<AutomationModelCatalog> {
-  return automationRequest<AutomationModelCatalog>("/models")
+  if (modelCatalogCache && modelCatalogCache.expiresAt > Date.now()) {
+    return Promise.resolve(modelCatalogCache.value)
+  }
+  return automationRequest<AutomationModelCatalog>("/models").then((catalog) => {
+    modelCatalogCache = {
+      value: catalog,
+      expiresAt: Date.now() + MODEL_CATALOG_CACHE_TTL_MS,
+    }
+    return catalog
+  })
 }
 
 export function getAutomationPromptProfile(
@@ -434,9 +450,33 @@ export function cancelAutomationRun(runId: string): Promise<AutomationRun> {
   )
 }
 
-async function automationRequest<T>(
+function automationRequest<T>(
   path: string,
   init: RequestInit = {},
+): Promise<T> {
+  const method = (init.method ?? "GET").toUpperCase()
+  if (method !== "GET") {
+    return executeAutomationRequest<T>(path, init)
+  }
+
+  const requestKey = `/api/automation${path}`
+  const inFlightRequest = inFlightGetRequests.get(requestKey) as Promise<T> | undefined
+  if (inFlightRequest) {
+    return inFlightRequest
+  }
+
+  const request = executeAutomationRequest<T>(path, init).finally(() => {
+    if (inFlightGetRequests.get(requestKey) === request) {
+      inFlightGetRequests.delete(requestKey)
+    }
+  })
+  inFlightGetRequests.set(requestKey, request)
+  return request
+}
+
+async function executeAutomationRequest<T>(
+  path: string,
+  init: RequestInit,
 ): Promise<T> {
   const response = await fetch(`/api/automation${path}`, {
     ...init,

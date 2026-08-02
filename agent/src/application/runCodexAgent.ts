@@ -74,8 +74,8 @@ export function buildRuntimeContext(
     `- 完整接口文档: ${openapiPath}`,
     candidateContext,
     oaApiBudgetContext,
-    "- 必须优先从候选接口索引中选择 operation,不得用任何命令宽泛扫描完整 OpenAPI。",
-    `- 只有候选信息不足以确认参数或响应结构时才读取完整 schema;具体读取次数服从本 turn 的动态查询模式,且读取范围必须精确限定到实际需要的 operation。`,
+    "- 必须优先从候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,允许在候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
+    `- 候选信息不足,或受限检索发现候选外 operation 时,才读取完整 schema,并精确限定到该 operation;具体读取次数服从本 turn 的动态查询模式。不得因候选接口未命中就直接断言接口不存在。`,
     "- 不使用额外 Skill、MCP 或自定义 function tools",
     config.oaApiBaseUrl && hasAnyOaApiToken
       ? [
@@ -87,10 +87,10 @@ export function buildRuntimeContext(
           "- 有 path parameters 时加 --pathParams '<JSON对象>';有 request body 时加 --body '<JSON值>'",
           "- 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认",
           "- 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作必须先取得用户确认,再加 --confirmed true",
-          `- 处理 OA 查询时不要修改工作区文件;只允许按上述规则精确读取 ${openapiPath} 并运行 scripts/callOaApi.mjs`,
+          `- 处理 OA 查询时不要修改工作区文件;只允许按上述规则受限检索或精确读取 ${openapiPath} 并运行 scripts/callOaApi.mjs`,
           "- 不要读取或输出 CALL_OA_API_URL、CALL_OA_API_TOKEN、请求 token 或 Authorization header",
         ].join("\n")
-      : "- 受控 OA API 调用工具: 不可用;只能基于候选接口索引和至多一次精确 schema 读取做接口分析,不能声称已执行真实后端操作",
+      : "- 受控 OA API 调用工具: 不可用;只能基于候选接口索引、至多一次候选外受限检索和精确 schema 读取做接口分析,不能声称已执行真实后端操作",
     `- OA_API_BASE_URL: ${config.oaApiBaseUrl ? "已配置" : "未配置"}`,
     `- OA 登录态: ${hasAnyOaApiToken ? "已配置" : "未配置"}`,
   ]
@@ -187,7 +187,7 @@ function formatOpenApiCandidates(
   candidates: OpenApiOperationIndexEntry[],
 ): string {
   if (candidates.length === 0) {
-    return "- 候选接口索引:不可用;不得猜测接口能力。";
+    return "- 候选接口索引:不可用;必须对指定的完整 OpenAPI 执行一次受限检索后再判断接口能力,不得猜测。";
   }
   return [
     `- 候选接口索引:已按当前任务筛选 ${candidates.length} 个最相关接口。`,

@@ -396,6 +396,11 @@ function scoreBusinessResource(
   task: string,
 ): number {
   let score = 0;
+  if (isCompanyProjectInventoryIntent(task)) {
+    if (/^\/projects\/list-by-project$/i.test(operation.path)) {
+      score += 96;
+    }
+  }
   if (/个人信息|用户信息|员工信息|人员信息|同事|姓名|邮箱/.test(task)) {
     if (/^\/user\/user-list$/i.test(operation.path)) {
       score += 18;
@@ -419,6 +424,17 @@ function scoreBusinessResource(
     }
   }
   return score;
+}
+
+function isCompanyProjectInventoryIntent(task: string): boolean {
+  const projectInventoryIntent =
+    /项目列表|(?:当前)?公司.{0,12}(?:有哪些|有什么|所有|全部).{0,8}项目|(?:哪些|有哪些|所有|全部|列出).{0,12}项目/i.test(
+      task,
+    );
+  const repositoryDiscoveryIntent =
+    !/提交|commit|摘要|summary/i.test(task) &&
+    /项目.{0,20}(?:github|仓库)|(?:github|仓库).{0,20}项目/i.test(task);
+  return projectInventoryIntent || repositoryDiscoveryIntent;
 }
 
 function buildSearchTerms(task: string): Set<string> {

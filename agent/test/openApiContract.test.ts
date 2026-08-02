@@ -125,6 +125,9 @@ describe("buildRuntimeContext", () => {
     assert.match(runtimeContext, /候选接口索引/);
     assert.match(runtimeContext, /user_info_user_user_list_get/);
     assert.match(runtimeContext, /读取完整 schema/);
+    assert.match(runtimeContext, /候选接口.*未包含.*用户意图/);
+    assert.match(runtimeContext, /候选以外的完整 OpenAPI/);
+    assert.match(runtimeContext, /不得因候选接口未命中就直接断言接口不存在/);
     assert.doesNotMatch(runtimeContext, /先用 .*确认 operationId/);
     assert.doesNotMatch(runtimeContext, /grep|sed/);
   });

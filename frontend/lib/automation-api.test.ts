@@ -7,6 +7,7 @@ import {
   deleteAutomationJob,
   deleteAutomationTag,
   getAutomationJob,
+  getAutomationModelCatalog,
   getAutomationPromptProfile,
   getAutomationRun,
   listAutomationJobs,
@@ -213,6 +214,126 @@ test("surfaces OA envelope errors with status and error code", async () => {
         return true
       },
     )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("deduplicates concurrent identical GET requests", async () => {
+  const originalFetch = globalThis.fetch
+  let requestCount = 0
+  globalThis.fetch = async () => {
+    requestCount += 1
+    return Response.json({
+      code: 200,
+      message: "ok",
+      data: { total: 0, items: [] },
+      success: true,
+    })
+  }
+
+  try {
+    const [first, second] = await Promise.all([
+      listAutomationJobs(),
+      listAutomationJobs(),
+    ])
+
+    assert.equal(requestCount, 1)
+    assert.deepEqual(first, second)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("caches the model catalog for five minutes", async () => {
+  const originalFetch = globalThis.fetch
+  const originalDateNow = Date.now
+  let now = 1_000
+  let requestCount = 0
+  Date.now = () => now
+  globalThis.fetch = async () => {
+    requestCount += 1
+    return Response.json({
+      code: 200,
+      message: "ok",
+      data: {
+        catalog_version: `v${requestCount}`,
+        providers: [],
+      },
+      success: true,
+    })
+  }
+
+  try {
+    const first = await getAutomationModelCatalog()
+    now += 299_999
+    const cached = await getAutomationModelCatalog()
+    now += 2
+    const refreshed = await getAutomationModelCatalog()
+
+    assert.equal(requestCount, 2)
+    assert.equal(cached, first)
+    assert.equal(refreshed.catalog_version, "v2")
+  } finally {
+    globalThis.fetch = originalFetch
+    Date.now = originalDateNow
+  }
+})
+
+test("removes failed GET requests from the in-flight cache", async () => {
+  const originalFetch = globalThis.fetch
+  let requestCount = 0
+  globalThis.fetch = async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return Response.json({
+        code: 503,
+        message: "temporary failure",
+        success: false,
+      }, { status: 503 })
+    }
+    return Response.json({
+      code: 200,
+      message: "ok",
+      data: { total: 0, items: [] },
+      success: true,
+    })
+  }
+
+  try {
+    const first = listAutomationTags({ enabled: true })
+    const second = listAutomationTags({ enabled: true })
+
+    await assert.rejects(first, AutomationApiError)
+    await assert.rejects(second, AutomationApiError)
+    await listAutomationTags({ enabled: true })
+
+    assert.equal(requestCount, 2)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("never deduplicates mutating requests", async () => {
+  const originalFetch = globalThis.fetch
+  let requestCount = 0
+  globalThis.fetch = async () => {
+    requestCount += 1
+    return Response.json({
+      code: 200,
+      message: "ok",
+      data: { id: 3 },
+      success: true,
+    })
+  }
+
+  try {
+    await Promise.all([
+      deleteAutomationTag(3),
+      deleteAutomationTag(3),
+    ])
+
+    assert.equal(requestCount, 2)
   } finally {
     globalThis.fetch = originalFetch
   }
