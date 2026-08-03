@@ -156,6 +156,32 @@ test("restores the previous runtime env when deployment fails", async (context) 
   assert.equal((await stat(path.join(fixture.deployDir, ".env"))).mode & 0o777, 0o600)
 })
 
+test("restores previous image tags before rejecting an invalid rollback runtime env", async (context) => {
+  const fixture = await createFixture(context)
+  const previousImages =
+    "AGENT_IMAGE=ghcr.io/example/oa-agent:previous\n" +
+    "WEB_IMAGE=ghcr.io/example/oa-web:previous\n"
+  const previousRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nWEB_PORT=3001\n"
+  const nextRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nAGENT_PORT=3003\nWEB_PORT=3001\n"
+  await writeFile(path.join(fixture.deployDir, ".deploy.env"), previousImages)
+  await writeFile(path.join(fixture.deployDir, ".env"), previousRuntime)
+  await writeFile(path.join(fixture.deployDir, ".env.next"), nextRuntime)
+
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:broken",
+    webImage: "ghcr.io/example/oa-web:broken",
+    failFirstUp: true,
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /rollback runtime environment is invalid/)
+  assert.equal(await readFile(path.join(fixture.deployDir, ".deploy.env"), "utf8"), previousImages)
+  assert.equal(await readFile(path.join(fixture.deployDir, ".env"), "utf8"), previousRuntime)
+
+  const dockerLog = await readFile(fixture.logPath, "utf8")
+  assert.equal(dockerLog.match(/ up /g)?.length, 1)
+})
+
 async function createFixture(context) {
   const root = await mkdtemp(path.join(os.tmpdir(), "oa-deploy-test-"))
   context.after(() => rm(root, { recursive: true, force: true }))
