@@ -4,13 +4,60 @@ import test from "node:test"
 import type { AutomationRun } from "./automation-api"
 import {
   hasActiveAutomationRuns,
+  hasPollableAutomationRuns,
   resolveAutomationRunReply,
+  shouldRefreshAutomationRunDetail,
 } from "./automation-run-presentation"
 
 test("keeps polling while an automation run is active", () => {
   assert.equal(hasActiveAutomationRuns([run({ status: "pending" })]), true)
   assert.equal(hasActiveAutomationRuns([run({ status: "running" })]), true)
   assert.equal(hasActiveAutomationRuns([run({ status: "succeeded" })]), false)
+})
+
+test("refreshes only new runs or runs whose status changed", () => {
+  const succeeded = run({ status: "succeeded" })
+
+  assert.equal(shouldRefreshAutomationRunDetail(succeeded), true)
+  assert.equal(
+    shouldRefreshAutomationRunDetail(
+      run({ status: "running" }),
+      run({ status: "running" }),
+    ),
+    false,
+  )
+  assert.equal(
+    shouldRefreshAutomationRunDetail(
+      run({ status: "running" }),
+      run({ status: "pending" }),
+    ),
+    true,
+  )
+  assert.equal(
+    shouldRefreshAutomationRunDetail(
+      succeeded,
+      run({ status: "running" }),
+    ),
+    true,
+  )
+  assert.equal(shouldRefreshAutomationRunDetail(succeeded, succeeded), false)
+})
+
+test("stops polling active runs after their deadline", () => {
+  const now = Date.parse("2026-08-03T04:30:00.000Z")
+
+  assert.equal(
+    hasPollableAutomationRuns([
+      run({ status: "pending", deadline_at: "2026-08-03T04:45:00.000Z" }),
+    ], now),
+    true,
+  )
+  assert.equal(
+    hasPollableAutomationRuns([
+      run({ status: "pending", deadline_at: "2026-08-03T04:15:00.000Z" }),
+    ], now),
+    false,
+  )
 })
 
 test("explains successful runs that had no commits instead of claiming AI is pending", () => {

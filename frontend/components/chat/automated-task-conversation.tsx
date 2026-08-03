@@ -53,12 +53,15 @@ export function AutomatedTaskConversation({
   onRunSelected,
 }: AutomatedTaskConversationProps) {
   const conversationEndRef = React.useRef<HTMLDivElement | null>(null)
+  const lastScrolledRunIdRef = React.useRef<string | null>(null)
+  const latestRunId = runs[0]?.id ?? null
 
   React.useEffect(() => {
-    if (!loading && runs.length) {
+    if (!loading && latestRunId && latestRunId !== lastScrolledRunIdRef.current) {
+      lastScrolledRunIdRef.current = latestRunId
       conversationEndRef.current?.scrollIntoView({ block: "end" })
     }
-  }, [loading, runs])
+  }, [latestRunId, loading])
 
   return (
     <section data-slot="automated-task-conversation" className="min-h-full">

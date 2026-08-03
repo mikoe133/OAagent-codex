@@ -75,7 +75,10 @@ export function buildRuntimeContext(
     candidateContext,
     oaApiBudgetContext,
     "- 必须优先从候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,允许在候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
-    `- 候选信息不足,或受限检索发现候选外 operation 时,才读取完整 schema,并精确限定到该 operation;具体读取次数服从本 turn 的动态查询模式。不得因候选接口未命中就直接断言接口不存在。`,
+    `- 候选索引包含主要请求字段和响应字段。候选信息不足,或受限检索发现候选外 operation 时,才读取完整 schema,并精确限定到该 operation;具体读取次数服从本 turn 的动态查询模式。不得因候选接口未命中就直接断言接口不存在。`,
+    "- 已确认的批量写操作按记录独立处理;单条失败时记录结果并继续处理其余记录,只有认证、权限、确认或共享前置条件失败才停止整批。",
+    "- 项目 ID 缺失时先通过只读项目列表和详情重新发现并处理分页;历史或归档状态不是项目不可更新的证据,无法唯一匹配时只跳过该条。",
+    "- 维护项目 GitHub 地址时先映射项目名称和 ID,再使用请求 schema 声明 github_urls 的项目更新接口;不得误用 Commit 摘要接口,写入后应回查并汇总每条结果。",
     "- 不使用额外 Skill、MCP 或自定义 function tools",
     config.oaApiBaseUrl && hasAnyOaApiToken
       ? [

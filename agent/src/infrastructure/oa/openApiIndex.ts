@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 const INDEX_FILE_NAME = "openapi-index.json";
 const OPENAPI_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 const MAX_RESPONSE_FIELDS = 32;
@@ -27,6 +27,7 @@ export type OpenApiOperationIndexEntry = {
   tags: string[];
   permissionLevel: OpenApiPermissionLevel;
   parameters: OpenApiIndexParameter[];
+  requestBodyFields: string[];
   mainResponseFields: string[];
 };
 
@@ -74,6 +75,7 @@ export function buildOpenApiIndex(document: unknown): OpenApiOperationIndex {
           operation,
         ),
         parameters: extractParameters(root, pathItem, operation),
+        requestBodyFields: extractRequestBodyFields(root, operation),
         mainResponseFields: extractMainResponseFields(root, operation),
       });
     }
@@ -120,7 +122,7 @@ export function selectOpenApiCandidates(
   const terms = buildSearchTerms(task);
   const adminIntent = /管理员|管理后台|后台管理|权限管理|全员管理/i.test(task);
   const writeIntent =
-    /新增|创建|修改|更新|编辑|删除|移除|保存|提交|上传|导入|审批|通过|驳回|拒绝|重置|变更|写入|发布|归档|恢复|分配|调整/i.test(
+    /新增|创建|添加|增加|修改|更新|编辑|维护|配置|设置|补充|替换|清空|删除|移除|保存|提交|上传|导入|审批|通过|驳回|拒绝|重置|变更|写入|发布|归档|恢复|分配|调整/i.test(
       task,
     );
 
@@ -249,6 +251,21 @@ function extractMainResponseFields(
   return fields;
 }
 
+function extractRequestBodyFields(
+  document: JsonRecord,
+  operation: JsonRecord,
+): string[] {
+  const requestBody = resolveReference(document, operation.requestBody);
+  const content = toRecord(requestBody?.content);
+  const mediaType = content
+    ? (toRecord(content["application/json"]) ??
+      toRecord(Object.values(content)[0]))
+    : null;
+  const fields: string[] = [];
+  collectSchemaFields(document, mediaType?.schema, "", 0, fields, new Set());
+  return fields;
+}
+
 function collectSchemaFields(
   document: JsonRecord,
   rawSchema: unknown,
@@ -360,7 +377,7 @@ function scoreOperation(
 ): number {
   const primary = `${operation.operationId} ${operation.path}`.toLowerCase();
   const secondary = `${operation.summary ?? ""} ${operation.tags.join(" ")}`.toLowerCase();
-  const details = `${operation.parameters.map((parameter) => parameter.name).join(" ")} ${operation.mainResponseFields.join(" ")}`.toLowerCase();
+  const details = `${operation.parameters.map((parameter) => parameter.name).join(" ")} ${operation.requestBodyFields.join(" ")} ${operation.mainResponseFields.join(" ")}`.toLowerCase();
   let score = 0;
 
   for (const term of terms) {
@@ -369,7 +386,7 @@ function scoreOperation(
     score += Math.min(countOccurrences(details, term), 2) * 2;
   }
 
-  score += scoreBusinessResource(operation, normalizedTask);
+  score += scoreBusinessResource(operation, normalizedTask, writeIntent);
 
   if (adminIntent) {
     score += operation.permissionLevel === "admin" ? 32 : 0;
@@ -394,11 +411,26 @@ function scoreOperation(
 function scoreBusinessResource(
   operation: OpenApiOperationIndexEntry,
   task: string,
+  writeIntent: boolean,
 ): number {
   let score = 0;
   if (isCompanyProjectInventoryIntent(task)) {
     if (/^\/projects\/list-by-project$/i.test(operation.path)) {
       score += 96;
+    }
+  }
+  if (writeIntent && isCompanyProjectInventoryIntent(task)) {
+    const projectCreationIntent =
+      /(?:新增|创建)(?:一个|新的|新)?\s*项目/i.test(task);
+    if (/^\/projects\/project$/i.test(operation.path)) {
+      if (projectCreationIntent && operation.method === "POST") {
+        score += 140;
+      } else if (!projectCreationIntent && operation.method === "PUT") {
+        score += 140;
+      }
+    }
+    if (/github-commit-(?:summary|summaries)/i.test(operation.path)) {
+      score -= 80;
     }
   }
   if (/个人信息|用户信息|员工信息|人员信息|同事|姓名|邮箱/.test(task)) {

@@ -117,6 +117,7 @@ describe("buildRuntimeContext", () => {
           parameters: [
             { name: "is_active", in: "query", required: false, type: "boolean" },
           ],
+          requestBodyFields: [],
           mainResponseFields: ["data[].full_name"],
         },
       ],
@@ -157,6 +158,26 @@ describe("buildRuntimeContext", () => {
     assert.match(multiStep, /保留自主多步能力/);
     assert.match(multiStep, /每个 operation 最多读取一次/);
     assert.match(unknown, /不设置单次调用硬限制/);
+  });
+
+  it("reinjects batch recovery guidance when resuming an existing conversation", () => {
+    const config = {
+      projectRoot: "/tmp/agent",
+      openapiPath: "/tmp/agent/.context/openapi/remote.json",
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+      oaApiBaseUrl: "https://oa.example.test",
+      oaAuthAlias: "default",
+    } as AppConfig;
+
+    const runtimeContext = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "multi_step", exactPersonName: null },
+      hasSessionOaApiToken: true,
+    });
+
+    assert.match(runtimeContext, /批量写操作.*单条失败.*继续处理其余/);
+    assert.match(runtimeContext, /历史或归档.*不是.*不可更新/);
+    assert.match(runtimeContext, /GitHub.*github_urls.*项目更新接口/);
   });
 });
 

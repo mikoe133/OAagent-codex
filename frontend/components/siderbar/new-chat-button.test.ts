@@ -305,22 +305,21 @@ test("keeps the automated task conversation header visible while scrolling", () 
   assert.doesNotMatch(conversationHeader, /<p/)
 })
 
-test("reuses the task form dialog when creating an automated task", () => {
+test("disables automated task creation with a simple under-development hint", () => {
   const createTaskButton = automatedTasksSource.match(
     /<Button\s+data-slot="create-automated-task-button"[\s\S]*?<\/Button>/,
   )?.[0]
 
   assert.ok(createTaskButton, "expected a dedicated create task button")
-  assert.match(createTaskButton, /onClick=\{openCreateDialog\}/)
   assert.match(createTaskButton, /<Plus/)
   assert.match(createTaskButton, /新建自动任务/)
-  assert.match(automatedTasksSource, /type TaskDialogMode = "create" \| "edit" \| null/)
-  assert.match(automatedTasksSource, /const \[taskDialogMode, setTaskDialogMode\]/)
-  assert.match(automatedTasksSource, /const openCreateDialog = React\.useCallback/)
-  assert.match(automatedTasksSource, /setSelectedTask\(undefined\)[\s\S]*?setTaskDialogMode\("create"\)/)
-  assert.match(taskDialogSource, /mode\?: "create" \| "edit"/)
-  assert.match(taskDialogSource, /const isCreateMode = mode === "create"/)
-  assert.match(taskDialogSource, /isCreateMode \? "创建任务" : "保存更改"/)
+  assert.match(createTaskButton, /disabled/)
+  assert.doesNotMatch(createTaskButton, /openCreateDialog/)
+  assert.match(automatedTasksSource, /title="功能开发中"/)
+  assert.match(automatedTasksSource, /cursor-not-allowed/)
+  assert.doesNotMatch(automatedTasksSource, /AnimatedTooltip/)
+  assert.doesNotMatch(automatedTasksSource, /openOnClick/)
+  assert.doesNotMatch(automatedTasksSource, /const openCreateDialog = React\.useCallback/)
 })
 
 test("loads full run audit and supports permission fallback and cancellation", () => {

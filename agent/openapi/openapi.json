@@ -17328,16 +17328,30 @@
                         ],
                         "title": "Softforge Id"
                     },
-                    "is_archived": {
+                    "status": {
                         "anyOf": [
                             {
-                                "type": "boolean"
+                                "type": "string"
                             },
                             {
                                 "type": "null"
                             }
                         ],
-                        "title": "Is Archived"
+                        "title": "Status"
+                    },
+                    "github_urls": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Github Urls"
                     }
                 },
                 "type": "object",
@@ -17374,6 +17388,18 @@
                             }
                         ],
                         "title": "Softforge Id"
+                    },
+                    "status": {
+                        "type": "string",
+                        "title": "Status",
+                        "default": "updating"
+                    },
+                    "github_urls": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "title": "Github Urls"
                     }
                 },
                 "type": "object",

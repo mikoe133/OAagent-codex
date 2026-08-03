@@ -34,6 +34,17 @@ describe("OA agent prompt policy", () => {
     assert.match(prompts, /不得因候选接口未命中就直接断言接口不存在/);
     assert.doesNotMatch(prompts, /必须先通过 shell 管道使用 `grep`/);
   });
+
+  it("recovers autonomously from item-level failures in confirmed batch updates", async () => {
+    const systemPrompt = await readPrompt("system.md");
+
+    assert.match(systemPrompt, /批量写操作.*按记录独立处理/);
+    assert.match(systemPrompt, /单条.*失败.*继续.*其余/);
+    assert.match(systemPrompt, /历史.*归档.*不是.*不可更新/);
+    assert.match(systemPrompt, /项目列表.*重新发现.*项目 ID/);
+    assert.match(systemPrompt, /GitHub.*github_urls/);
+    assert.match(systemPrompt, /写入后.*回查.*不属于.*重复调用/);
+  });
 });
 
 function readPrompt(fileName: string): Promise<string> {

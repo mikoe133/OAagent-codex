@@ -8,6 +8,37 @@ import test from "node:test"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const renderScript = path.join(repoRoot, "scripts", "render-runtime-env.sh")
+const obsoleteRuntimeEnvNames = [
+  "AGENT_ACTIONS_ENABLED",
+  "AGENT_ACTION_TTL_SECONDS",
+  "AGENT_DEFAULT_MODE",
+  "AGENT_MAX_STEPS",
+  "AGENT_TOOL_TIMEOUT_MS",
+  "AGENT_TOTAL_TIMEOUT_MS",
+  "DATABASE_URL",
+  "MODEL_TOOL_MODE",
+  "OAAGENT_CLIENT_KEYS",
+  "OA_API_token",
+  "OA_TOOLS_ALLOW_WRITES",
+  "OPENAI_AGENTS_DISABLE_TRACING",
+  "OPENROUTER_HTTP_REFERER",
+  "OPENROUTER_X_TITLE",
+  "TRACE_DIR",
+  "TRACE_RETENTION_DAYS",
+]
+
+test("keeps obsolete environment settings out of deployable configuration", async () => {
+  const [exampleEnv, runtimeEnvRenderer] = await Promise.all([
+    readFile(path.join(repoRoot, ".env.example"), "utf8"),
+    readFile(renderScript, "utf8"),
+  ])
+
+  for (const name of obsoleteRuntimeEnvNames) {
+    const assignment = new RegExp(`^${name}=`, "m")
+    assert.doesNotMatch(exampleEnv, assignment)
+    assert.doesNotMatch(runtimeEnvRenderer, new RegExp(`\\b${name}\\b`))
+  }
+})
 
 test("renders a private runtime env for one isolated Compose environment", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))

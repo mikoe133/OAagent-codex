@@ -118,13 +118,52 @@ describe("OpenAPI operation index", () => {
     );
   });
 
-  it("indexes project and GitHub repository fields from the bundled project list schema", async () => {
+  it("prioritizes project lookup and update for batched GitHub repository maintenance", () => {
+    const index = buildOpenApiIndex(createProjectContract());
+    const candidates = selectOpenApiCandidates(
+      index,
+      "批量更新 8 个项目的 GitHub 仓库地址",
+    );
+
+    assert.equal(
+      candidates[0]?.operationId,
+      "projects_projects_project_put",
+    );
+    assert.ok(
+      candidates.some(
+        (operation) =>
+          operation.operationId ===
+          "projects_list_projects_list_by_project_get",
+      ),
+    );
+    assert.ok(candidates[0]?.requestBodyFields.includes("github_urls"));
+    assert.doesNotMatch(candidates[0]?.operationId ?? "", /commit_summary/);
+  });
+
+  it("keeps project creation distinct from repository updates", () => {
+    const candidates = selectOpenApiCandidates(
+      buildOpenApiIndex(createProjectContract()),
+      "创建一个项目并设置 GitHub 仓库地址",
+    );
+
+    assert.equal(
+      candidates[0]?.operationId,
+      "projects_projects_project_post",
+    );
+  });
+
+  it("indexes project and GitHub repository fields from the bundled project schemas", async () => {
     const contract = JSON.parse(
       await readFile(new URL("../openapi/openapi.json", import.meta.url), "utf8"),
     ) as unknown;
-    const projectList = buildOpenApiIndex(contract).operations.find(
+    const operations = buildOpenApiIndex(contract).operations;
+    const projectList = operations.find(
       (operation) =>
         operation.operationId === "projects_list_projects_list_by_project_get",
+    );
+    const projectUpdate = operations.find(
+      (operation) =>
+        operation.operationId === "projects_projects_project_put",
     );
 
     assert.ok(projectList);
@@ -132,6 +171,9 @@ describe("OpenAPI operation index", () => {
     assert.ok(projectList.mainResponseFields.includes("data.items[].project_name"));
     assert.ok(projectList.mainResponseFields.includes("data.items[].status"));
     assert.ok(projectList.mainResponseFields.includes("data.items[].github_urls"));
+    assert.ok(projectUpdate);
+    assert.ok(projectUpdate.requestBodyFields.includes("status"));
+    assert.ok(projectUpdate.requestBodyFields.includes("github_urls"));
   });
 
   it("handles referenced metadata, public operations, and candidate bounds", () => {
@@ -325,6 +367,29 @@ function createProjectContract() {
   return {
     openapi: "3.1.0",
     info: { title: "OA", version: "1.0.0" },
+    components: {
+      schemas: {
+        ProjectChangeInModel: {
+          type: "object",
+          properties: {
+            github_urls: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+        },
+        ProjectCreateInModel: {
+          type: "object",
+          properties: {
+            project_name: { type: "string" },
+            github_urls: {
+              type: "array",
+              items: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     paths: {
       "/projects/list-by-project": {
         get: {
@@ -369,6 +434,48 @@ function createProjectContract() {
             "delete_github_commit_summary_projects_github_commit_summary_delete",
           summary: "Delete Github Commit Summary",
           tags: ["projects"],
+          responses: response,
+        },
+      },
+      "/projects/project": {
+        post: {
+          operationId: "projects_projects_project_post",
+          summary: "Projects",
+          tags: ["projects"],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/ProjectCreateInModel",
+                },
+              },
+            },
+          },
+          responses: response,
+        },
+        put: {
+          operationId: "projects_projects_project_put",
+          summary: "Projects",
+          tags: ["projects"],
+          parameters: [
+            {
+              name: "project_id",
+              in: "query",
+              required: true,
+              schema: { type: "integer" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/ProjectChangeInModel",
+                },
+              },
+            },
+          },
           responses: response,
         },
       },

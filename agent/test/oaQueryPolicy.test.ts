@@ -44,6 +44,7 @@ describe("OA dynamic query policy", () => {
       "统计各部门本月工时趋势",
       "查询薛屹阳的信息以及本周周报",
       "修改第 101 周周报",
+      "维护项目 GitHub 仓库地址",
     ]) {
       assert.equal(resolveOaQueryPolicy(task).mode, "multi_step", task);
     }
