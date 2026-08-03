@@ -256,7 +256,7 @@ test("opens task run history as a read-only chat from the card body", () => {
   assert.match(automatedTasksSource, /onSelect: \(\) => openTaskConversation\(job\)/)
   assert.match(automatedTasksSource, /listAutomationRuns\(\{ jobId: task\.id, page: 1, size: 20 \}\)/)
   assert.match(automatedTasksSource, /getAutomationRun\(run\.id\)/)
-  assert.match(automatedTasksSource, /hasActiveAutomationRuns\(conversationRuns\)/)
+  assert.match(automatedTasksSource, /hasPollableAutomationRuns\(conversationRuns\)/)
   assert.match(automatedTasksSource, /}, 3_000\)/)
   assert.match(automatedTasksSource, /conversationTask \? \(/)
   assert.match(automatedTasksSource, /<AutomatedTaskConversation/)
