@@ -42,6 +42,23 @@ test("uses preloaded images without contacting the registry", async (context) =>
   assert.match(dockerLog, / up /)
 })
 
+test("retries a transient Docker port binding failure without removing volumes", async (context) => {
+  const fixture = await createFixture(context)
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:abc123",
+    webImage: "ghcr.io/example/oa-web:abc123",
+    failFirstUpWithPortConflict: true,
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stderr, /port binding failed; resetting this Compose project before one retry/)
+
+  const dockerLog = await readFile(fixture.logPath, "utf8")
+  assert.equal(dockerLog.match(/ up /g)?.length, 2)
+  assert.equal(dockerLog.match(/ down --remove-orphans --timeout 30/g)?.length, 1)
+  assert.doesNotMatch(dockerLog, / down .* (?:-v|--volumes)(?: |$)/)
+})
+
 test("restores the previous image tags when the new deployment fails", async (context) => {
   const fixture = await createFixture(context)
   const previous =
@@ -127,6 +144,11 @@ if [[ " $* " == *" up "* ]] && [[ "\${MOCK_FAIL_FIRST_UP:-0}" == "1" ]] && [[ ! 
   touch "$MOCK_DOCKER_MARKER"
   exit 42
 fi
+if [[ " $* " == *" up "* ]] && [[ "\${MOCK_FAIL_FIRST_UP_WITH_PORT_CONFLICT:-0}" == "1" ]] && [[ ! -e "$MOCK_DOCKER_MARKER" ]]; then
+  touch "$MOCK_DOCKER_MARKER"
+  echo "Error response from daemon: failed to bind host port: address already in use" >&2
+  exit 42
+fi
 `,
   )
   await chmod(dockerPath, 0o755)
@@ -134,7 +156,13 @@ fi
   return { binDir, deployDir, logPath, markerPath }
 }
 
-function runDeploy(fixture, { agentImage, webImage, failFirstUp = false, skipImagePull = false }) {
+function runDeploy(fixture, {
+  agentImage,
+  webImage,
+  failFirstUp = false,
+  failFirstUpWithPortConflict = false,
+  skipImagePull = false,
+}) {
   return spawnSync(
     "bash",
     [deployScript, fixture.deployDir, agentImage, webImage],
@@ -146,6 +174,7 @@ function runDeploy(fixture, { agentImage, webImage, failFirstUp = false, skipIma
         MOCK_DOCKER_LOG: fixture.logPath,
         MOCK_DOCKER_MARKER: fixture.markerPath,
         MOCK_FAIL_FIRST_UP: failFirstUp ? "1" : "0",
+        MOCK_FAIL_FIRST_UP_WITH_PORT_CONFLICT: failFirstUpWithPortConflict ? "1" : "0",
         SKIP_IMAGE_PULL: skipImagePull ? "1" : "0",
       },
     },

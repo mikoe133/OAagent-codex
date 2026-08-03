@@ -45,6 +45,34 @@ function pull_images() {
   compose pull agent web
 }
 
+function compose_up_once() {
+  : > "$compose_up_log_file"
+  compose up -d --no-build --remove-orphans --wait --wait-timeout 180 \
+    2>&1 | tee "$compose_up_log_file"
+}
+
+function start_release() {
+  local phase="$1"
+
+  if compose_up_once; then
+    return 0
+  fi
+
+  if ! grep -Eiq \
+    'failed to bind host port|port is already allocated|address already in use' \
+    "$compose_up_log_file"; then
+    return 1
+  fi
+
+  echo "[deploy] $phase port binding failed; resetting this Compose project before one retry" >&2
+  if ! compose down --remove-orphans --timeout 30; then
+    echo "[deploy] failed to reset this Compose project" >&2
+    return 1
+  fi
+
+  compose_up_once
+}
+
 function rollback() {
   restore_runtime_env
 
@@ -58,7 +86,7 @@ function rollback() {
   chmod 600 "$deployment_env_file"
   echo "[deploy] rolling back with $previous_env_file" >&2
   pull_images || echo "[deploy] rollback image pull failed" >&2
-  compose up -d --no-build --remove-orphans --wait --wait-timeout 180 \
+  start_release "rollback" \
     || echo "[deploy] rollback failed; manual intervention is required" >&2
 }
 
@@ -108,6 +136,9 @@ readonly staged_runtime_env_file=".env.next"
 readonly previous_runtime_env_file=".env.previous"
 readonly deployment_env_file=".deploy.env"
 readonly previous_env_file=".deploy.env.previous"
+readonly compose_up_log_file="$(mktemp "${TMPDIR:-/tmp}/oa-agent-compose-up.XXXXXX")"
+
+trap 'rm -f "$compose_up_log_file"' EXIT
 
 [[ -f "$compose_file" ]] || fail "missing $deploy_dir/$compose_file"
 command -v docker >/dev/null || fail "docker is not installed"
@@ -135,7 +166,7 @@ if ! pull_images; then
   exit 1
 fi
 
-if ! compose up -d --no-build --remove-orphans --wait --wait-timeout 180; then
+if ! start_release "release"; then
   echo "[deploy] health check failed; restoring the previous release" >&2
   rollback
   exit 1
