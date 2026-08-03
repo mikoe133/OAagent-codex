@@ -23,13 +23,27 @@ describe("OA agent prompt policy", () => {
     assert.doesNotMatch(prompts, /先给结论,再给接口依据/);
   });
 
-  it("uses compact candidates instead of broad OpenAPI scans", async () => {
+  it("uses compact candidates before a bounded fallback OpenAPI scan", async () => {
     const prompts = `${await readPrompt("system.md")}\n${await readPrompt("document-policy.md")}`;
 
     assert.match(prompts, /候选接口索引/);
     assert.match(prompts, /高置信度单步查询最多读取一次选定 operation/);
     assert.match(prompts, /复杂或不确定查询可按需读取多个相关 operation/);
+    assert.match(prompts, /候选接口.*未包含.*用户意图/);
+    assert.match(prompts, /候选以外的完整 OpenAPI/);
+    assert.match(prompts, /不得因候选接口未命中就直接断言接口不存在/);
     assert.doesNotMatch(prompts, /必须先通过 shell 管道使用 `grep`/);
+  });
+
+  it("recovers autonomously from item-level failures in confirmed batch updates", async () => {
+    const systemPrompt = await readPrompt("system.md");
+
+    assert.match(systemPrompt, /批量写操作.*按记录独立处理/);
+    assert.match(systemPrompt, /单条.*失败.*继续.*其余/);
+    assert.match(systemPrompt, /历史.*归档.*不是.*不可更新/);
+    assert.match(systemPrompt, /项目列表.*重新发现.*项目 ID/);
+    assert.match(systemPrompt, /GitHub.*github_urls/);
+    assert.match(systemPrompt, /写入后.*回查.*不属于.*重复调用/);
   });
 });
 

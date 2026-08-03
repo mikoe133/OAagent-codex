@@ -53,9 +53,17 @@ import {
   listAutomationRuns,
   listAutomationTags,
 } from "@/lib/automation-api"
-import { hasActiveAutomationRuns } from "@/lib/automation-run-presentation"
+import {
+  hasPollableAutomationRuns,
+  shouldRefreshAutomationRunDetail,
+} from "@/lib/automation-run-presentation"
 
 type TaskDialogMode = "create" | "edit" | null
+
+type LoadTaskConversationOptions = {
+  background?: boolean
+  previousRuns?: AutomationRun[]
+}
 
 export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [jobs, setJobs] = React.useState<AutomationJob[]>([])
@@ -109,13 +117,6 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
     void loadOverview()
   }, [loadOverview])
 
-  const openCreateDialog = React.useCallback(() => {
-    setSelectedTask(undefined)
-    setSelectedTaskRuns([])
-    setTaskDetailError(null)
-    setTaskDialogMode("create")
-  }, [])
-
   const openEditDialog = React.useCallback(async (jobId: number, includeDeleted = false) => {
     setSelectedTask(undefined)
     setSelectedTaskRuns([])
@@ -136,17 +137,34 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
     }
   }, [])
 
-  const loadTaskConversation = React.useCallback(async (task: AutomationJob) => {
+  const loadTaskConversation = React.useCallback(async (
+    task: AutomationJob,
+    options: LoadTaskConversationOptions = {},
+  ) => {
     const requestId = ++conversationRequestRef.current
-    setIsConversationLoading(true)
-    setConversationError(null)
-    setConversationAuditWarning(null)
+    const background = options.background === true
+    if (!background) {
+      setIsConversationLoading(true)
+      setConversationError(null)
+      setConversationAuditWarning(null)
+    }
 
     try {
       const runPage = await listAutomationRuns({ jobId: task.id, page: 1, size: 20 })
+      const previousRunsById = new Map(
+        (options.previousRuns ?? []).map((run) => [run.id, run]),
+      )
       let hasAuditRestriction = false
       let hasPartialFailure = false
       const detailedRuns = await Promise.all(runPage.items.map(async (run) => {
+        const previousRun = previousRunsById.get(run.id)
+        if (
+          background &&
+          previousRun &&
+          !shouldRefreshAutomationRunDetail(run, previousRun)
+        ) {
+          return previousRun
+        }
         try {
           return await getAutomationRun(run.id)
         } catch (error) {
@@ -166,19 +184,24 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
       if (requestId !== conversationRequestRef.current) {
         return
       }
+      setConversationError(null)
       setConversationRuns(detailedRuns)
       if (hasAuditRestriction) {
         setConversationAuditWarning("当前 OA 账号缺少 automation:audit 权限，部分 AI 请求与回复内容已隐藏。")
       } else if (hasPartialFailure) {
         setConversationAuditWarning("部分运行详情暂时无法读取，当前仅展示可用的运行状态。")
+      } else {
+        setConversationAuditWarning(null)
       }
     } catch (error) {
       if (requestId === conversationRequestRef.current) {
         setConversationError(resolvePageError(error))
-        setConversationRuns([])
+        if (!background) {
+          setConversationRuns([])
+        }
       }
     } finally {
-      if (requestId === conversationRequestRef.current) {
+      if (!background && requestId === conversationRequestRef.current) {
         setIsConversationLoading(false)
       }
     }
@@ -194,14 +217,28 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
     if (
       !conversationTask ||
       isConversationLoading ||
-      !hasActiveAutomationRuns(conversationRuns)
+      !hasPollableAutomationRuns(conversationRuns)
     ) {
       return
     }
-    const timer = window.setTimeout(() => {
-      void loadTaskConversation(conversationTask)
+    let requestInFlight = false
+    const timer = window.setInterval(() => {
+      if (!hasPollableAutomationRuns(conversationRuns)) {
+        window.clearInterval(timer)
+        return
+      }
+      if (requestInFlight) {
+        return
+      }
+      requestInFlight = true
+      void loadTaskConversation(conversationTask, {
+        background: true,
+        previousRuns: conversationRuns,
+      }).finally(() => {
+        requestInFlight = false
+      })
     }, 3_000)
-    return () => window.clearTimeout(timer)
+    return () => window.clearInterval(timer)
   }, [conversationRuns, conversationTask, isConversationLoading, loadTaskConversation])
 
   const closeTaskConversation = React.useCallback(() => {
@@ -395,15 +432,21 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
                         </SelectContent>
                       </Select>
                     </div>
-                    <Button
-                      data-slot="create-automated-task-button"
-                      type="button"
-                      onClick={openCreateDialog}
-                      className="h-11 rounded-full px-5"
+                    <span
+                      className="shrink-0 cursor-not-allowed"
+                      title="功能开发中"
                     >
-                      <Plus className="h-5 w-5" />
-                      新建自动任务
-                    </Button>
+                      <Button
+                        data-slot="create-automated-task-button"
+                        type="button"
+                        disabled
+                        aria-label="新建自动任务，功能开发中"
+                        className="h-11 rounded-full px-5"
+                      >
+                        <Plus className="h-5 w-5" />
+                        新建自动任务
+                      </Button>
+                    </span>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button

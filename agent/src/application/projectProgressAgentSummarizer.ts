@@ -55,6 +55,12 @@ export type ProjectProgressAgentRunner = (
   input: ProjectProgressAgentRunInput,
 ) => Promise<ProjectProgressAgentRunResult>;
 
+export type ProjectProgressPromptProfile = {
+  promptVersion: string;
+  systemPrompt: string;
+  requiredCapabilities: string[];
+};
+
 export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer {
   constructor(
     private readonly config: {
@@ -63,6 +69,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       githubApiBaseUrl: string;
       agent: ProjectProgressAgentLimits & { maxCandidateCommits: number };
       workingDirectory: string;
+      promptProfile?: ProjectProgressPromptProfile | null;
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
     private readonly fallback: ProjectProgressSummarizer = new DeterministicProjectProgressSummarizer(),
@@ -85,7 +92,12 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         workingDirectory: this.config.workingDirectory,
         mcpUrl: mcpServer.url,
         mcpBearerToken: mcpServer.bearerToken,
-        prompt: buildProjectProgressAgentPrompt(input, candidates, this.config.agent),
+        prompt: buildProjectProgressAgentPrompt(
+          input,
+          candidates,
+          this.config.agent,
+          this.config.promptProfile ?? null,
+        ),
       });
       if (agentRun.prohibitedToolUseCount > 0) {
         throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
@@ -240,6 +252,7 @@ function buildProjectProgressAgentPrompt(
   input: ProjectProgressSummaryInput,
   commits: NormalizedProjectProgressCommit[],
   limits: ProjectProgressAgentLimits,
+  promptProfile: ProjectProgressPromptProfile | null,
 ): string {
   const repositories = new Map<string, Array<Record<string, unknown>>>();
   for (const commit of commits) {
@@ -270,6 +283,14 @@ function buildProjectProgressAgentPrompt(
     "<system_prompt>",
     PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT,
     "</system_prompt>",
+    ...(promptProfile
+      ? [
+        "",
+        "<automation_prompt_profile>",
+        escapePromptData(promptProfile.systemPrompt),
+        "</automation_prompt_profile>",
+      ]
+      : []),
     "",
     "<project_commit_data>",
     escapePromptData(JSON.stringify(payload)),
@@ -337,11 +358,15 @@ function buildAgentInteraction(input: {
   fallbackUsed: boolean;
   error?: unknown;
 }): ProjectProgressAiInteraction {
+  const promptVersion = input.config.promptProfile?.promptVersion ??
+    PROJECT_PROGRESS_AGENT_PROMPT_VERSION;
+  const systemPromptSnapshot = input.config.promptProfile?.systemPrompt ??
+    PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT;
   return {
     provider: input.config.model.provider,
     model: input.config.model.model,
-    promptVersion: PROJECT_PROGRESS_AGENT_PROMPT_VERSION,
-    systemPromptSnapshot: PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT,
+    promptVersion,
+    systemPromptSnapshot,
     requestPayloadSanitized: {
       project_id: input.input.projectId,
       summary_date: input.input.summaryDate,
@@ -357,6 +382,8 @@ function buildAgentInteraction(input: {
       max_files_per_commit: input.config.agent.maxFilesPerCommit,
       max_patch_chars_per_file: input.config.agent.maxPatchCharsPerFile,
       max_total_patch_chars: input.config.agent.maxTotalPatchChars,
+      prompt_profile_applied: input.config.promptProfile !== null &&
+        input.config.promptProfile !== undefined,
     },
     responsePayloadSanitized: {
       execution_mode: "codex_sdk_agent",

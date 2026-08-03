@@ -9,8 +9,31 @@ const ACTIVE_AUTOMATION_RUN_STATUSES = new Set<AutomationRun["status"]>([
   "running",
 ])
 
+export function isActiveAutomationRun(run: AutomationRun): boolean {
+  return ACTIVE_AUTOMATION_RUN_STATUSES.has(run.status)
+}
+
 export function hasActiveAutomationRuns(runs: AutomationRun[]): boolean {
-  return runs.some((run) => ACTIVE_AUTOMATION_RUN_STATUSES.has(run.status))
+  return runs.some(isActiveAutomationRun)
+}
+
+export function hasPollableAutomationRuns(
+  runs: AutomationRun[],
+  now = Date.now(),
+): boolean {
+  return runs.some((run) => {
+    const deadline = Date.parse(run.deadline_at)
+    return isActiveAutomationRun(run) &&
+      Number.isFinite(deadline) &&
+      deadline > now
+  })
+}
+
+export function shouldRefreshAutomationRunDetail(
+  run: AutomationRun,
+  previousRun?: AutomationRun,
+): boolean {
+  return !previousRun || run.status !== previousRun.status
 }
 
 export function resolveAutomationRunReply(

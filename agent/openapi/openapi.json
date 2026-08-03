@@ -4591,7 +4591,180 @@
                         "description": "Successful Response",
                         "content": {
                             "application/json": {
-                                "schema": {}
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "code": {
+                                            "type": "integer",
+                                            "title": "Code"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "title": "Message"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "total": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "title": "Total"
+                                                },
+                                                "page": {
+                                                    "type": "integer",
+                                                    "minimum": 1,
+                                                    "title": "Page"
+                                                },
+                                                "size": {
+                                                    "type": "integer",
+                                                    "minimum": 1,
+                                                    "title": "Size"
+                                                },
+                                                "items": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "title": "Id"
+                                                            },
+                                                            "project_name": {
+                                                                "type": "string",
+                                                                "title": "Project Name"
+                                                            },
+                                                            "status": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "updating",
+                                                                    "maintenance",
+                                                                    "archived"
+                                                                ],
+                                                                "title": "Status"
+                                                            },
+                                                            "github_urls": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "type": "string",
+                                                                    "format": "uri"
+                                                                },
+                                                                "title": "Github Urls"
+                                                            },
+                                                            "created_by": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    {
+                                                                        "type": "null"
+                                                                    }
+                                                                ],
+                                                                "title": "Created By"
+                                                            },
+                                                            "created_at": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    {
+                                                                        "type": "null"
+                                                                    }
+                                                                ],
+                                                                "title": "Created At"
+                                                            },
+                                                            "updated_at": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    {
+                                                                        "type": "null"
+                                                                    }
+                                                                ],
+                                                                "title": "Updated At"
+                                                            },
+                                                            "describe": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string"
+                                                                    },
+                                                                    {
+                                                                        "type": "null"
+                                                                    }
+                                                                ],
+                                                                "title": "Describe"
+                                                            },
+                                                            "softforge_id": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    {
+                                                                        "type": "null"
+                                                                    }
+                                                                ],
+                                                                "title": "Softforge Id"
+                                                            },
+                                                            "people": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "type": "integer"
+                                                                },
+                                                                "title": "People"
+                                                            },
+                                                            "version": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "integer"
+                                                                    },
+                                                                    {
+                                                                        "type": "null"
+                                                                    }
+                                                                ],
+                                                                "title": "Version"
+                                                            },
+                                                            "managed_by": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string"
+                                                                    },
+                                                                    {
+                                                                        "type": "null"
+                                                                    }
+                                                                ],
+                                                                "title": "Managed By"
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "id",
+                                                            "project_name",
+                                                            "status",
+                                                            "github_urls"
+                                                        ],
+                                                        "title": "Project List Item"
+                                                    },
+                                                    "title": "Items"
+                                                }
+                                            },
+                                            "required": [
+                                                "total",
+                                                "items"
+                                            ],
+                                            "title": "Project List Data"
+                                        },
+                                        "success": {
+                                            "type": "boolean",
+                                            "title": "Success"
+                                        }
+                                    },
+                                    "required": [
+                                        "code",
+                                        "message",
+                                        "data",
+                                        "success"
+                                    ],
+                                    "title": "Project List Response"
+                                }
                             }
                         }
                     },
@@ -17155,16 +17328,30 @@
                         ],
                         "title": "Softforge Id"
                     },
-                    "is_archived": {
+                    "status": {
                         "anyOf": [
                             {
-                                "type": "boolean"
+                                "type": "string"
                             },
                             {
                                 "type": "null"
                             }
                         ],
-                        "title": "Is Archived"
+                        "title": "Status"
+                    },
+                    "github_urls": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Github Urls"
                     }
                 },
                 "type": "object",
@@ -17201,6 +17388,18 @@
                             }
                         ],
                         "title": "Softforge Id"
+                    },
+                    "status": {
+                        "type": "string",
+                        "title": "Status",
+                        "default": "updating"
+                    },
+                    "github_urls": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "title": "Github Urls"
                     }
                 },
                 "type": "object",

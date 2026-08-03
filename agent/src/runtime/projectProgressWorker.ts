@@ -66,6 +66,7 @@ async function main(): Promise<void> {
               githubApiBaseUrl: config.githubApiBaseUrl,
               agent: config.agent,
               workingDirectory: repoRoot,
+              promptProfile: claim.promptProfile,
             }),
             store,
             writeMode: "production",

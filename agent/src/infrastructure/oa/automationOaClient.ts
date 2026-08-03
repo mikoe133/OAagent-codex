@@ -11,6 +11,12 @@ export type AutomationRunStatus =
   | "configuration_error"
   | "cancelled";
 
+export type AutomationPromptProfileSnapshot = {
+  promptVersion: string;
+  systemPrompt: string;
+  requiredCapabilities: string[];
+};
+
 export type AutomationJobClaim = {
   runId: string;
   leaseToken: string;
@@ -25,6 +31,7 @@ export type AutomationJobClaim = {
   modelId: string;
   modelParameters: Record<string, unknown>;
   modelCatalogVersion: string | null;
+  promptProfile: AutomationPromptProfileSnapshot | null;
   retryPolicy: {
     attempt: number;
     maxAttempts: number;
@@ -305,6 +312,7 @@ function decodeClaim(value: unknown): AutomationJobClaim {
     throw new AutomationOaContractError("OA claim data 不是对象。");
   }
   const retryPolicy = value.retry_policy;
+  const promptProfile = decodePromptProfile(value.prompt_profile);
   if (
     !isNonEmptyString(value.run_id) ||
     !isNonEmptyString(value.lease_token) ||
@@ -344,6 +352,7 @@ function decodeClaim(value: unknown): AutomationJobClaim {
     modelId: value.model_id,
     modelParameters: value.model_parameters,
     modelCatalogVersion: value.model_catalog_version,
+    promptProfile,
     retryPolicy: {
       attempt: retryPolicy.attempt,
       maxAttempts: retryPolicy.max_attempts,
@@ -353,6 +362,26 @@ function decodeClaim(value: unknown): AutomationJobClaim {
     deadlineAt: new Date(value.deadline_at).toISOString(),
     leaseExpiresAt: new Date(value.lease_expires_at).toISOString(),
     cancelRequested: value.cancel_requested,
+  };
+}
+
+function decodePromptProfile(value: unknown): AutomationPromptProfileSnapshot | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.prompt_version) ||
+    !isNonEmptyString(value.system_prompt) ||
+    !Array.isArray(value.required_capabilities) ||
+    !value.required_capabilities.every(isNonEmptyString)
+  ) {
+    throw new AutomationOaContractError("OA claim prompt_profile 字段无效。");
+  }
+  return {
+    promptVersion: value.prompt_version,
+    systemPrompt: value.system_prompt,
+    requiredCapabilities: [...value.required_capabilities],
   };
 }
 
