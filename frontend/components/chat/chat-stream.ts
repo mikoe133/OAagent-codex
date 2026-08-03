@@ -122,6 +122,13 @@ export function mergeMessageTraceDelta(
   return messages.map((message, index) => (index === existingIndex ? nextMessage : message))
 }
 
+export function withTraceMessages<T extends object>(
+  message: T,
+  traceMessages: TraceMessage[],
+): T & { traceMessages?: TraceMessage[] } {
+  return traceMessages.length > 0 ? { ...message, traceMessages } : message
+}
+
 function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | null): ToolStep {
   const eventType = stringValue(event.type)
   const toolType = stringValue(event.toolType) || previous?.type || (eventType === "progress" ? "progress" : "tool")

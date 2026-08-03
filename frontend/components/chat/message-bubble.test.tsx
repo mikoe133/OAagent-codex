@@ -289,6 +289,30 @@ test("streaming agent messages render as separate subdued trace steps in event o
   assert.match(html, /lucide-circle-check[^>]*text-\[#00BFFF\]/)
 })
 
+test("completed assistant replies keep a trace entry when no tool was called", () => {
+  const message = {
+    id: "assistant-completed-trace-message",
+    role: "assistant",
+    content: "The project summary is ready.",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    durationMs: 3_452_600,
+    status: "completed",
+    traceMessages: [
+      {
+        id: "message-1",
+        content: "Inspecting the project records.",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, /data-slot="agent-trace"/)
+  assert.match(html, /data-slot="agent-trace-trigger"/)
+  assert.match(html, /data-state="closed"/)
+  assert.match(html, />Completed<\/span>/)
+})
+
 test("running trace nodes use the mint icon color", () => {
   const message = {
     id: "assistant-running-trace",
