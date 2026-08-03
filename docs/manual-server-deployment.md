@@ -73,12 +73,12 @@ OA_AGENT_SSO_SHARED_SECRET=<与对应 OA 服务端一致的密钥>
 OA_AGENT_SSO_TTL_SECONDS=300
 OA_AGENT_AUTOMATION_TOKEN=<与对应 OA 服务端一致的自动化专用密钥>
 AGENT_BIND_ADDRESS=127.0.0.1
-AGENT_PORT=3002
+AGENT_PORT=3003
 WEB_BIND_ADDRESS=127.0.0.1
 WEB_PORT=3001
 ```
 
-生产环境将 `COMPOSE_PROJECT_NAME` 改为 `oa-agent-prod`，将 `AGENT_PORT` 改为 `3011`，将 `WEB_PORT` 改为 `3010`，并使用生产环境自己的 SSO 与自动化密钥。不要把 `.env` 上传到 Git 或源码压缩包。
+测试服务器的 `3002` 端口由 Alphachain/OA Node 服务使用，因此测试 Agent 固定使用 `3003`。生产环境将 `COMPOSE_PROJECT_NAME` 改为 `oa-agent-prod`，将 `AGENT_PORT` 改为 `3011`，将 `WEB_PORT` 改为 `3010`，并使用生产环境自己的 SSO 与自动化密钥。不要把 `.env` 上传到 Git 或源码压缩包。
 
 ### 3. 创建受限 BuildKit
 
@@ -199,7 +199,7 @@ case "$TARGET" in
     DEPLOY_DIR=/opt/rwkv/apps/oa-agent-test
     IMAGE_PREFIX=oa-agent-test
     PROJECT_NAME=oa-agent-test
-    AGENT_PORT=3002
+    AGENT_PORT=3003
     WEB_PORT=3001
     ;;
   production)

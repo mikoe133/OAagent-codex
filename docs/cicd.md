@@ -78,8 +78,10 @@ Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份
 
 | 环境 | 部署目录 | Compose 项目 | Agent 监听 | Web 监听 | 公网域名 |
 | --- | --- | --- | --- | --- | --- |
-| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3002` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
+| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3003` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
 | 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3011` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
+
+测试服务器的 `3002` 端口由 Alphachain/OA Node 服务使用，不得分配给 OA Agent 容器。
 
 Workflow 会把运行配置安全写入服务器 `.env.next`;部署脚本在发布时将其提升为 `.env`。失败时会同时恢复 `.env.previous` 和 `.deploy.env.previous`。
 
