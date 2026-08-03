@@ -58,7 +58,7 @@ test("renders a private runtime env for one isolated Compose environment", async
     PROJECT_PROGRESS_WORKER_INSTANCE: "oaagent-test-01",
     PROJECT_PROGRESS_LEASE_SECONDS: "300",
     PROJECT_PROGRESS_HEARTBEAT_SECONDS: "60",
-    AGENT_PORT: "3002",
+    AGENT_PORT: "3003",
     WEB_PORT: "3001",
   })
 
@@ -89,7 +89,7 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^OA_API_TOKEN_HEADER=Cookie$/m)
   assert.match(content, /^OA_API_TOKEN_PREFIX=sessionid=$/m)
   assert.match(content, /^AGENT_BIND_ADDRESS=127\.0\.0\.1$/m)
-  assert.match(content, /^AGENT_PORT=3002$/m)
+  assert.match(content, /^AGENT_PORT=3003$/m)
   assert.match(content, /^WEB_BIND_ADDRESS=127\.0\.0\.1$/m)
   assert.match(content, /^WEB_PORT=3001$/m)
   assert.doesNotMatch(content, /^AGENT_API_TOKEN=/m)
@@ -180,6 +180,28 @@ test("rejects an invalid SSO TTL", async (context) => {
   assert.match(result.stderr, /OA_AGENT_SSO_TTL_SECONDS must be a positive integer/)
 })
 
+test("rejects agent and web services that share a host port", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
+  context.after(() => rm(directory, { recursive: true, force: true }))
+  const outputPath = path.join(directory, ".env")
+
+  const result = runRender(outputPath, {
+    COMPOSE_PROJECT_NAME: "oa-agent-test",
+    NEXTTOKEN_API_KEY: "test-nexttoken-secret",
+    NEXTTOKEN_API_BASE_URL: "https://next-token.cc",
+    OPENROUTER_API_KEY: "test-openrouter-secret",
+    OPENROUTER_API_BASE_URL: "https://openrouter.ai/api/v1",
+    OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
+    OA_AGENT_SSO_SHARED_SECRET: "test-sso-secret",
+    OA_AGENT_SSO_TTL_SECONDS: "300",
+    AGENT_PORT: "3001",
+    WEB_PORT: "3001",
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /AGENT_PORT and WEB_PORT must use different host ports/)
+})
+
 function runRender(outputPath, overrides) {
   return spawnSync("bash", [renderScript, outputPath], {
     encoding: "utf8",
@@ -192,7 +214,7 @@ function runRender(outputPath, overrides) {
       PROJECT_PROGRESS_GITHUB_TOKEN: "test-github-secret",
       OA_AGENT_AUTOMATION_TOKEN: "test-automation-secret",
       AGENT_BIND_ADDRESS: "127.0.0.1",
-      AGENT_PORT: "3002",
+      AGENT_PORT: "3003",
       WEB_BIND_ADDRESS: "127.0.0.1",
       ...overrides,
     },
