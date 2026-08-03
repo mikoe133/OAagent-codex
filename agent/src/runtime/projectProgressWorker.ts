@@ -9,6 +9,7 @@ import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.j
 import { AutomationOaClient } from "../infrastructure/oa/automationOaClient.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
+import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 
 const WORKER_POLL_INTERVAL_MS = 5_000;
 
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
         modelId: claim.modelId,
         modelParameters: claim.modelParameters,
       });
+      const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
       return async (shouldCancel) => {
         const store = new ProjectProgressStore(config.stateDatabasePath);
         try {
@@ -59,6 +61,8 @@ async function main(): Promise<void> {
               config.githubToken,
               fetch,
               config.githubApiBaseUrl,
+              undefined,
+              githubRequestLimiter,
             ),
             summarizer: new CodexProjectProgressSummarizer({
               model: config.model,
@@ -66,10 +70,15 @@ async function main(): Promise<void> {
               githubApiBaseUrl: config.githubApiBaseUrl,
               agent: config.agent,
               workingDirectory: repoRoot,
+              workspaceRoot: config.workspaceRoot,
+              runId: claim.runId,
+              githubRequestLimiter,
               promptProfile: claim.promptProfile,
             }),
             store,
             writeMode: "production",
+            concurrency: config.concurrency,
+            githubRequestLimiter,
             shouldCancel,
           });
         } finally {
@@ -118,6 +127,15 @@ function logResult(result: Awaited<ReturnType<typeof runProjectProgressAutomatio
     projects_total: result.report?.projects.length ?? 0,
     mutations_applied: result.report?.mutationsApplied ?? 0,
     retry_recommended: result.report?.retryRecommended ?? false,
+    repositories_discovered: result.report?.metrics.repositoriesDiscovered ?? 0,
+    repositories_with_commits: result.report?.metrics.repositoriesWithCommits ?? 0,
+    repository_tasks: result.report?.metrics.repositoryTasksTotal ?? 0,
+    repository_tasks_succeeded: result.report?.metrics.repositoryTasksSucceeded ?? 0,
+    repository_tasks_fallback: result.report?.metrics.repositoryTasksFallback ?? 0,
+    repository_tasks_failed: result.report?.metrics.repositoryTasksFailed ?? 0,
+    agent_peak_concurrency: result.report?.metrics.agentPeakConcurrency ?? 0,
+    github_peak_concurrency: result.report?.metrics.githubPeakConcurrency ?? 0,
+    oa_write_peak_concurrency: result.report?.metrics.oaWritePeakConcurrency ?? 0,
   }));
 }
 

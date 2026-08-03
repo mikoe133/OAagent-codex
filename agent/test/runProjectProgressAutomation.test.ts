@@ -77,6 +77,48 @@ describe("runProjectProgressAutomation", () => {
     assert.ok(heartbeatCalls > 0, "AI 审计期间应继续 heartbeat");
   });
 
+  it("uploads one AI audit record for every repository Thread", async () => {
+    const interactionKeys: string[] = [];
+    let activeUploads = 0;
+    let peakUploads = 0;
+    const client = fakeClient({
+      claim: async () => promptAwareClaim(),
+      upsertAiInteraction: async ({ interaction }) => {
+        activeUploads += 1;
+        peakUploads = Math.max(peakUploads, activeUploads);
+        interactionKeys.push(interaction.interactionKey);
+        assert.match(
+          String(interaction.requestPayloadSanitized.repository_full_name),
+          /^example\/(api|web)$/,
+        );
+        assert.equal(
+          interaction.requestPayloadSanitized.summary_date,
+          "2026-07-30",
+        );
+        assert.match(interaction.upstreamRequestId ?? "", /^thread-(api|web)$/);
+        await delay(5);
+        activeUploads -= 1;
+        return interactionKeys.length;
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async () => report({
+        withProject: true,
+        withRepositoryInteractions: true,
+      }),
+    });
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(interactionKeys.length, 2);
+    assert.equal(new Set(interactionKeys).size, 2);
+    assert.equal(peakUploads, 1);
+  });
+
   it("stops at a safe checkpoint when heartbeat requests cancellation", async () => {
     const statuses: AutomationRunStatus[] = [];
     const client = fakeClient({
@@ -223,6 +265,7 @@ function promptAwareClaim(): AutomationJobClaim {
 
 function report(options: {
   withProject?: boolean;
+  withRepositoryInteractions?: boolean;
   cancelled?: boolean;
 } = {}): ProjectProgressSyncReport {
   return {
@@ -231,6 +274,17 @@ function report(options: {
     mutationsApplied: options.withProject ? 1 : 0,
     retryRecommended: false,
     cancelled: options.cancelled ?? false,
+    metrics: {
+      repositoriesDiscovered: options.withProject ? 1 : 0,
+      repositoriesWithCommits: options.withProject ? 1 : 0,
+      repositoryTasksTotal: options.withProject ? 1 : 0,
+      repositoryTasksSucceeded: options.withProject ? 1 : 0,
+      repositoryTasksFallback: 0,
+      repositoryTasksFailed: 0,
+      githubPeakConcurrency: options.withProject ? 1 : 0,
+      agentPeakConcurrency: options.withProject ? 1 : 0,
+      oaWritePeakConcurrency: options.withProject ? 1 : 0,
+    },
     projects: options.withProject ? [{
       projectId: 51,
       projectName: "OA 服务端",
@@ -248,26 +302,42 @@ function report(options: {
         summary: "完成联调。",
         aiConfidence: 90,
         aiNote: "提交完整。",
-        interaction: {
-          provider: "nexttoken",
-          model: "gpt-5.6-terra",
-          promptVersion: "prompt-v1",
-          systemPromptSnapshot: "system prompt",
-          requestPayloadSanitized: { commit_count: 2 },
-          responsePayloadSanitized: { output_count: 1 },
-          finalSummary: "完成联调。",
-          limitations: ["仅依据 commit"],
-          fallbackUsed: false,
-          upstreamRequestId: "request-01",
-          inputTokens: 100,
-          outputTokens: 20,
-          latencyMs: 500,
-          status: "succeeded",
-          errorCode: null,
-          errorSummary: null,
-        },
+        interaction: interaction("request-01"),
+        ...(options.withRepositoryInteractions ? {
+          repositoryInteractions: [
+            {
+              repositoryKey: "example/api",
+              interaction: interaction("thread-api"),
+            },
+            {
+              repositoryKey: "example/web",
+              interaction: interaction("thread-web"),
+            },
+          ],
+        } : {}),
       }],
     }] : [],
+  };
+}
+
+function interaction(upstreamRequestId: string) {
+  return {
+    provider: "nexttoken",
+    model: "gpt-5.6-terra",
+    promptVersion: "prompt-v1",
+    systemPromptSnapshot: "system prompt",
+    requestPayloadSanitized: { commit_count: 2 },
+    responsePayloadSanitized: { output_count: 1 },
+    finalSummary: "完成联调。",
+    limitations: ["仅依据 commit"],
+    fallbackUsed: false,
+    upstreamRequestId,
+    inputTokens: 100,
+    outputTokens: 20,
+    latencyMs: 500,
+    status: "succeeded" as const,
+    errorCode: null,
+    errorSummary: null,
   };
 }
 

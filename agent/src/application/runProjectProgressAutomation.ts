@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   AutomationJobClaim,
   AutomationOaClient,
@@ -103,38 +104,55 @@ export async function runProjectProgressAutomation(input: {
         result: projectResult,
       });
       for (const summary of project.summaries) {
-        if (!summary.interaction) {
-          continue;
+        const interactions = summary.repositoryInteractions?.length
+          ? summary.repositoryInteractions
+          : summary.interaction
+            ? [{ repositoryKey: null, interaction: summary.interaction }]
+            : [];
+        for (const repositoryInteraction of interactions) {
+          const interaction = repositoryInteraction.interaction;
+          const promptVersion = claim.promptProfile?.promptVersion ??
+            interaction.promptVersion;
+          const systemPromptSnapshot = claim.promptProfile?.systemPrompt ??
+            interaction.systemPromptSnapshot;
+          await input.automationClient.upsertAiInteraction({
+            claim,
+            workerInstance: input.workerInstance,
+            interaction: {
+              runProjectId,
+              interactionKey: interactionKey(
+                project.projectId,
+                summary,
+                repositoryInteraction.repositoryKey,
+              ),
+              provider: interaction.provider,
+              model: interaction.model,
+              modelCatalogVersion: claim.modelCatalogVersion,
+              promptVersion,
+              systemPromptSnapshot,
+              requestPayloadSanitized: {
+                ...interaction.requestPayloadSanitized,
+                ...(repositoryInteraction.repositoryKey
+                  ? {
+                    repository_full_name: repositoryInteraction.repositoryKey,
+                    summary_date: summary.summaryDate,
+                  }
+                  : {}),
+              },
+              responsePayloadSanitized: interaction.responsePayloadSanitized,
+              finalSummary: interaction.finalSummary,
+              limitations: interaction.limitations.map((message) => ({ message })),
+              fallbackUsed: interaction.fallbackUsed,
+              upstreamRequestId: interaction.upstreamRequestId,
+              inputTokens: interaction.inputTokens,
+              outputTokens: interaction.outputTokens,
+              latencyMs: interaction.latencyMs,
+              status: interaction.status,
+              errorCode: interaction.errorCode,
+              errorSummary: interaction.errorSummary,
+            },
+          });
         }
-        const interaction = summary.interaction;
-        const promptVersion = claim.promptProfile?.promptVersion ?? interaction.promptVersion;
-        const systemPromptSnapshot = claim.promptProfile?.systemPrompt ??
-          interaction.systemPromptSnapshot;
-        await input.automationClient.upsertAiInteraction({
-          claim,
-          workerInstance: input.workerInstance,
-          interaction: {
-            runProjectId,
-            interactionKey: interactionKey(project.projectId, summary),
-            provider: interaction.provider,
-            model: interaction.model,
-            modelCatalogVersion: claim.modelCatalogVersion,
-            promptVersion,
-            systemPromptSnapshot,
-            requestPayloadSanitized: interaction.requestPayloadSanitized,
-            responsePayloadSanitized: interaction.responsePayloadSanitized,
-            finalSummary: interaction.finalSummary,
-            limitations: interaction.limitations.map((message) => ({ message })),
-            fallbackUsed: interaction.fallbackUsed,
-            upstreamRequestId: interaction.upstreamRequestId,
-            inputTokens: interaction.inputTokens,
-            outputTokens: interaction.outputTokens,
-            latencyMs: interaction.latencyMs,
-            status: interaction.status,
-            errorCode: interaction.errorCode,
-            errorSummary: interaction.errorSummary,
-          },
-        });
       }
     }
 
@@ -251,8 +269,12 @@ function isWriteConflictWarning(warning: string): boolean {
 function interactionKey(
   projectId: number,
   summary: ProjectProgressSummaryProposal,
+  repositoryKey: string | null,
 ): string {
-  return `project-${projectId}-${summary.summaryDate}-${summary.sourceDigest.slice(0, 32)}`;
+  const repositorySuffix = repositoryKey
+    ? `-${createHash("sha256").update(repositoryKey).digest("hex").slice(0, 16)}`
+    : "";
+  return `project-${projectId}-${summary.summaryDate}-${summary.sourceDigest.slice(0, 32)}${repositorySuffix}`;
 }
 
 function resolveTerminal(

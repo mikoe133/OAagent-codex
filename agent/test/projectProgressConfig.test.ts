@@ -26,6 +26,15 @@ describe("loadProjectProgressConfig", () => {
     assert.equal(config.writeAuthorization, "disabled");
     assert.equal(config.automation.leaseSeconds, 300);
     assert.equal(config.automation.heartbeatSeconds, 60);
+    assert.deepEqual(config.concurrency, {
+      github: 6,
+      agent: 2,
+      oaWrite: 1,
+    });
+    assert.equal(
+      config.workspaceRoot,
+      "/srv/oa-agent/.context/project-progress-workspaces",
+    );
     assert.deepEqual(config.agent, {
       maxCandidateCommits: 50,
       maxDetailCalls: 12,
@@ -176,5 +185,35 @@ describe("loadProjectProgressConfig", () => {
       }, "/tmp"),
       /不能小于单文件 Patch 上限/,
     );
+    assert.throws(
+      () => loadProjectProgressConfig({
+        OA_API_BASE_URL: "http://127.0.0.1:3002",
+        OA_PROJECT_SYNC_TOKEN: "worker-token",
+        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        NEXTTOKEN_API_KEY: "model-token",
+        PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "2",
+      }, "/tmp"),
+      /OA_WRITE_CONCURRENCY.*必须为 1/,
+    );
+  });
+
+  it("loads explicit repository concurrency and workspace settings", () => {
+    const config = loadProjectProgressConfig({
+      OA_API_BASE_URL: "https://oa.example.test",
+      OA_PROJECT_SYNC_TOKEN: "worker-token",
+      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      NEXTTOKEN_API_KEY: "model-token",
+      PROJECT_PROGRESS_GITHUB_CONCURRENCY: "8",
+      PROJECT_PROGRESS_AGENT_CONCURRENCY: "3",
+      PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "1",
+      PROJECT_PROGRESS_WORKSPACE_ROOT: "/var/lib/oaagent/workspaces",
+    }, "/srv/oa-agent");
+
+    assert.deepEqual(config.concurrency, {
+      github: 8,
+      agent: 3,
+      oaWrite: 1,
+    });
+    assert.equal(config.workspaceRoot, "/var/lib/oaagent/workspaces");
   });
 });

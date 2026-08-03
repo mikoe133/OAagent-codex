@@ -4,6 +4,182 @@ import { syncProjectProgress } from "../src/application/syncProjectProgress.js";
 import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/githubTypes.js";
 
 describe("syncProjectProgress", () => {
+  it("fans out one Agent summary per active repository with 6/2/1 concurrency", async () => {
+    const repositoryCount = 8;
+    const project = {
+      id: 1,
+      projectName: "parallel-project",
+      status: "updating" as const,
+      githubUrls: Array.from(
+        { length: repositoryCount },
+        (_, index) => `https://github.com/example/repository-${index + 1}`,
+      ),
+    };
+    let activeGitHubReads = 0;
+    let peakGitHubReads = 0;
+    let activeAgentRuns = 0;
+    let peakAgentRuns = 0;
+    const summarizedRepositories: string[] = [];
+
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      concurrency: { github: 6, agent: 2, oaWrite: 1 },
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+      },
+      githubReader: {
+        readRepository: async (repository) => {
+          activeGitHubReads += 1;
+          peakGitHubReads = Math.max(peakGitHubReads, activeGitHubReads);
+          await delay(10);
+          activeGitHubReads -= 1;
+          const repositoryId = Number(repository.repository.split("-").at(-1));
+          return {
+            repositoryId,
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: "2026-07-24T01:00:00.000Z",
+            commits: [commit(
+              repositoryId,
+              repository.fullName,
+              `sha-${repositoryId}`,
+              "2026-07-24T01:00:00.000Z",
+            )],
+          };
+        },
+      },
+      summarizer: {
+        summarize: async (summaryInput) => {
+          const repositories = [...new Set(
+            summaryInput.commits.map((item) => item.repositoryFullName),
+          )];
+          assert.equal(repositories.length, 1);
+          summarizedRepositories.push(repositories[0]!);
+          activeAgentRuns += 1;
+          peakAgentRuns = Math.max(peakAgentRuns, activeAgentRuns);
+          await delay(10);
+          activeAgentRuns -= 1;
+          return { summary: `完成 ${repositories[0]} 更新。`, limitations: [] };
+        },
+      },
+    });
+
+    assert.equal(peakGitHubReads, 6);
+    assert.equal(peakAgentRuns, 2);
+    assert.equal(summarizedRepositories.length, repositoryCount);
+    assert.equal(new Set(summarizedRepositories).size, repositoryCount);
+    assert.equal(result.projects[0]?.summaries.length, 1);
+    assert.equal(result.projects[0]?.summaries[0]?.commitCount, repositoryCount);
+    assert.equal(result.metrics.repositoriesWithCommits, repositoryCount);
+    assert.equal(result.metrics.githubPeakConcurrency, 6);
+    assert.equal(result.metrics.agentPeakConcurrency, 2);
+    assert.equal(result.metrics.oaWritePeakConcurrency, 0);
+  });
+
+  it("summarizes a shared repository once and fans the result into both projects", async () => {
+    const projects = [1, 2].map((id) => ({
+      id,
+      projectName: `project-${id}`,
+      status: "updating" as const,
+      githubUrls: ["https://github.com/example/shared"],
+    }));
+    let summaries = 0;
+
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      concurrency: { github: 6, agent: 2, oaWrite: 1 },
+      oaClient: {
+        listProjects: async () => projects,
+        getProject: async (projectId) => projects.find((project) => project.id === projectId)!,
+      },
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: 99,
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(99, repository.fullName, "shared", "2026-07-24T01:00:00.000Z")],
+        }),
+      },
+      summarizer: {
+        summarize: async () => {
+          summaries += 1;
+          return { summary: "完成共享仓库更新。", limitations: [] };
+        },
+      },
+    });
+
+    assert.equal(summaries, 1);
+    assert.equal(result.projects.length, 2);
+    assert.deepEqual(
+      result.projects.map((item) => item.summaries[0]?.summary),
+      ["完成共享仓库更新。", "完成共享仓库更新。"],
+    );
+  });
+
+  it("cancels queued repository Threads when the worker loses its lease", async () => {
+    const project = {
+      id: 3,
+      projectName: "cancelled-project",
+      status: "updating" as const,
+      githubUrls: Array.from(
+        { length: 4 },
+        (_, index) => `https://github.com/example/cancel-${index + 1}`,
+      ),
+    };
+    let cancelRequested = false;
+    let summariesStarted = 0;
+
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      concurrency: { github: 6, agent: 1, oaWrite: 1 },
+      shouldCancel: () => cancelRequested,
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+      },
+      githubReader: {
+        readRepository: async (repository) => {
+          const repositoryId = Number(repository.repository.split("-").at(-1));
+          return {
+            repositoryId,
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: "2026-07-24T01:00:00.000Z",
+            commits: [commit(
+              repositoryId,
+              repository.fullName,
+              `sha-${repositoryId}`,
+              "2026-07-24T01:00:00.000Z",
+            )],
+          };
+        },
+      },
+      summarizer: {
+        summarize: async (summaryInput) => {
+          summariesStarted += 1;
+          cancelRequested = true;
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, 30);
+            summaryInput.signal?.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(summaryInput.signal?.reason);
+            }, { once: true });
+          });
+          return { summary: "must be cancelled", limitations: [] };
+        },
+      },
+    });
+
+    assert.equal(summariesStarted, 1);
+    assert.equal(result.cancelled, true);
+    assert.equal(result.metrics.repositoryTasksSucceeded, 0);
+  });
+
   it("never reads GitHub for archived projects", async () => {
     let githubReads = 0;
     const result = await syncProjectProgress({
@@ -34,6 +210,66 @@ describe("syncProjectProgress", () => {
 
     assert.equal(githubReads, 0);
     assert.equal(result.projects[0]?.outcome, "archived");
+  });
+
+  it("skips repository Threads without current-day commits but still applies maintenance", async () => {
+    const statusUpdates: string[] = [];
+    let summariesStarted = 0;
+    const project = {
+      id: 71,
+      projectName: "stale-project",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/example/stale"],
+    };
+
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async (_projectId, status) => {
+          statusUpdates.push(status);
+        },
+        listCommitSummaries: async () => [],
+        createCommitSummary: async () => {
+          throw new Error("must not create a summary without current-day commits");
+        },
+        updateCommitSummary: async () => {
+          throw new Error("must not update a summary without current-day commits");
+        },
+      },
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: 71,
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-07-10T01:00:00.000Z",
+          commits: [commit(
+            71,
+            repository.fullName,
+            "old-commit",
+            "2026-07-10T01:00:00.000Z",
+          )],
+        }),
+      },
+      summarizer: {
+        summarize: async () => {
+          summariesStarted += 1;
+          return { summary: "must not run", limitations: [] };
+        },
+      },
+      store: createWritableStore(),
+    });
+
+    assert.equal(summariesStarted, 0);
+    assert.deepEqual(statusUpdates, ["maintenance"]);
+    assert.equal(result.metrics.repositoriesWithCommits, 0);
+    assert.equal(result.metrics.repositoryTasksTotal, 0);
+    assert.equal(result.metrics.agentPeakConcurrency, 0);
+    assert.equal(result.projects[0]?.targetStatus, "maintenance");
+    assert.deepEqual(result.projects[0]?.summaries, []);
   });
 
   it("aggregates a multi-repository day and proposes maintenance recovery", async () => {
@@ -91,7 +327,7 @@ describe("syncProjectProgress", () => {
     assert.equal(report?.targetStatus, "updating");
     assert.equal(report?.summaries.length, 1);
     assert.equal(report?.summaries[0]?.commitCount, 2);
-    assert.equal(report?.summaries[0]?.summary, "共 2 条提交");
+    assert.equal(report?.summaries[0]?.summary, "共 1 条提交；共 1 条提交。");
     assert.equal(result.mutationsApplied, 0);
   });
 
@@ -210,9 +446,11 @@ describe("syncProjectProgress", () => {
     };
 
     await syncProjectProgress(dependencies);
-    await syncProjectProgress(dependencies);
+    const cachedResult = await syncProjectProgress(dependencies);
 
     assert.equal(summaries, 1);
+    assert.equal(cachedResult.metrics.repositoriesWithCommits, 1);
+    assert.equal(cachedResult.metrics.repositoryTasksTotal, 0);
   });
 
   it("applies status and summary writes only in explicit single-project test mode", async () => {
@@ -513,6 +751,8 @@ describe("syncProjectProgress", () => {
 
   it("writes every active project but only the current Beijing day in production", async () => {
     const created: Array<{ projectId: number; summaryDate: string }> = [];
+    let activeWrites = 0;
+    let peakWrites = 0;
     const projects = [21, 22].map((id) => ({
       id,
       projectName: `project-${id}`,
@@ -528,6 +768,10 @@ describe("syncProjectProgress", () => {
         updateProjectStatus: async () => undefined,
         listCommitSummaries: async () => [],
         createCommitSummary: async (input) => {
+          activeWrites += 1;
+          peakWrites = Math.max(peakWrites, activeWrites);
+          await delay(5);
+          activeWrites -= 1;
           created.push({ projectId: input.projectId, summaryDate: input.summaryDate });
           return { id: 600 + input.projectId, ...input };
         },
@@ -561,6 +805,8 @@ describe("syncProjectProgress", () => {
       { projectId: 22, summaryDate: "2026-07-24" },
     ]);
     assert.deepEqual(result.projects.map((project) => project.summaries.length), [1, 1]);
+    assert.equal(peakWrites, 1);
+    assert.equal(result.metrics.oaWritePeakConcurrency, 1);
   });
 
   it("adopts an exact unmanaged summary without overwriting it", async () => {
@@ -752,4 +998,8 @@ function commit(
     committedAt,
     subject: `commit ${sha}`,
   };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -14,5 +14,6 @@ export interface ProjectProgressGitHubReader {
   readRepository(
     repository: GitHubRepositoryIdentity,
     observedAt: Date,
+    signal?: AbortSignal,
   ): Promise<GitHubRepositorySnapshot>;
 }

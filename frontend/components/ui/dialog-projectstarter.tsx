@@ -72,6 +72,7 @@ import {
 import {
   getAutomationModelOptions,
   getAutomationProviderOptions,
+  resolveAutomationModelSelection,
 } from "@/lib/automation-model-options"
 
 interface Dialog11Props {
@@ -163,17 +164,22 @@ export default function Dialog11({
     setFeedback(null)
     setNewTagName("")
     if (isCreateMode) {
-      const defaultModel = findDefaultModel(modelCatalog)
+      const defaultModel = resolveAutomationModelSelection(modelCatalog)
       setForm({
         ...DEFAULT_FORM,
         jobKey: createAutomationJobKey(),
-        modelProvider: defaultModel?.provider ?? "",
-        modelId: defaultModel?.modelId ?? "",
+        modelProvider: defaultModel.provider,
+        modelId: defaultModel.modelId,
       })
       return
     }
     if (task) {
       const schedule = parseAutomationSchedule(task.cron_expression)
+      const taskModel = resolveAutomationModelSelection(
+        modelCatalog,
+        task.model_provider,
+        task.model_id,
+      )
       setForm({
         jobKey: task.job_key,
         name: task.name,
@@ -183,8 +189,8 @@ export default function Dialog11({
         executionTime: schedule.executionTime,
         timezone: task.timezone,
         enabled: task.enabled,
-        modelProvider: task.model_provider,
-        modelId: task.model_id,
+        modelProvider: taskModel.provider,
+        modelId: taskModel.modelId,
         tagIds: task.tags.map((tag) => tag.id),
         catchUpPolicy: task.catch_up_policy,
         retryMaxAttempts: String(task.retry_max_attempts ?? 3),
@@ -197,6 +203,8 @@ export default function Dialog11({
 
   const providerOptions = getAutomationProviderOptions(modelCatalog, form.modelProvider)
   const modelOptions = getAutomationModelOptions(modelCatalog, form.modelProvider, form.modelId)
+  const selectedProviderOption = providerOptions.find((option) => option.value === form.modelProvider)
+  const selectedModelOption = modelOptions.find((option) => option.value === form.modelId)
   const hasUnavailableModelSelection =
     providerOptions.some((option) => option.value === form.modelProvider && !option.available) ||
     modelOptions.some((option) => option.value === form.modelId && !option.available)
@@ -466,7 +474,9 @@ export default function Dialog11({
                       disabled={formDisabled || !modelCatalog}
                     >
                       <SelectTrigger id="automated-task-provider" className="w-full">
-                        <SelectValue placeholder="选择服务商" />
+                        <SelectValue placeholder="选择服务商">
+                          {selectedProviderOption?.label ?? form.modelProvider}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {providerOptions.map((provider) => (
@@ -488,7 +498,11 @@ export default function Dialog11({
                       disabled={formDisabled || !modelCatalog || !form.modelProvider}
                     >
                       <SelectTrigger id="automated-task-model" className="w-full">
-                        <SelectValue placeholder="选择模型" />
+                        <SelectValue placeholder="选择模型">
+                          {selectedModelOption
+                            ? `${selectedModelOption.label}${selectedModelOption.isDefault && selectedModelOption.available ? "（默认）" : ""}`
+                            : form.modelId}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {modelOptions.map((model) => (
@@ -735,17 +749,6 @@ function createAutomationJobKey(): string {
     ? globalThis.crypto.randomUUID().replaceAll("-", "").slice(0, 10)
     : Math.random().toString(36).slice(2, 12)
   return `github-project-progress-${Date.now().toString(36)}-${randomSuffix}`
-}
-
-function findDefaultModel(catalog?: AutomationModelCatalog | null) {
-  for (const provider of catalog?.providers ?? []) {
-    const model = provider.models.find((item) => item.enabled && item.is_default)
-      ?? provider.models.find((item) => item.enabled)
-    if (model) {
-      return { provider: provider.provider, modelId: model.model_id }
-    }
-  }
-  return null
 }
 
 function requireTask(task: AutomationJob | undefined): AutomationJob {

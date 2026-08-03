@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   CodexProjectProgressSummarizer,
@@ -146,5 +149,43 @@ describe("CodexProjectProgressSummarizer", () => {
 
     assert.equal(result.interaction?.status, "fallback");
     assert.match(result.interaction?.errorSummary ?? "", /结构化输出/);
+  });
+
+  it("uses and cleans an isolated workspace for each repository Thread", async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "project-progress-agent-"));
+    const workspaceRoot = path.join(temporaryRoot, "workspaces");
+    let threadWorkspace = "";
+    try {
+      const runner: ProjectProgressAgentRunner = async (runInput) => {
+        threadWorkspace = runInput.workingDirectory;
+        assert.equal(
+          runInput.codexExecutablePath,
+          path.join(temporaryRoot, "agent", "scripts", "isolatedCodexExec.mjs"),
+        );
+        assert.match(threadWorkspace, /workspaces\/run-42\//);
+        await access(threadWorkspace);
+        return {
+          finalResponse: JSON.stringify({ summary: "完成隔离执行。", limitations: [] }),
+          usage: null,
+          upstreamRequestId: "thread-isolated",
+          prohibitedToolUseCount: 0,
+        };
+      };
+      const summarizer = new CodexProjectProgressSummarizer({
+        ...config,
+        workingDirectory: temporaryRoot,
+        workspaceRoot,
+        runId: "run-42",
+      }, runner);
+
+      await summarizer.summarize({
+        ...input,
+        repositoryFullName: "example/api",
+      });
+
+      await assert.rejects(access(threadWorkspace));
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
   });
 });

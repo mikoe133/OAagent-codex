@@ -58,9 +58,9 @@ services:
       target: agent-runtime
     init: true
     restart: unless-stopped
-    cpus: 1.0
-    mem_limit: 1g
-    pids_limit: 128
+    cpus: 2.0
+    mem_limit: 3g
+    pids_limit: 256
     logging:
       driver: json-file
       options:
@@ -72,6 +72,7 @@ services:
       OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
       OA_AUTH_ALIAS: ${OA_AUTH_ALIAS:-default}
       PROJECT_PROGRESS_STATE_DB: /app/.context/project-progress.sqlite
+      PROJECT_PROGRESS_WORKSPACE_ROOT: /app/.context/project-progress-workspaces
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:

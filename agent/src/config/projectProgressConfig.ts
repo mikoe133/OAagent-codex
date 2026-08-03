@@ -48,6 +48,12 @@ export type ProjectProgressConfig = {
     leaseSeconds: number;
     heartbeatSeconds: number;
   };
+  concurrency: {
+    github: number;
+    agent: number;
+    oaWrite: 1;
+  };
+  workspaceRoot: string;
   stateDatabasePath: string;
   writeEnabled: boolean;
   writeAuthorization: "disabled" | "unsafe-test" | "production";
@@ -125,6 +131,16 @@ export function loadProjectProgressConfig(
       "PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS 不能小于单文件 Patch 上限。",
     );
   }
+  const oaWriteConcurrency = parseIntegerInRange(
+    environment.PROJECT_PROGRESS_OA_WRITE_CONCURRENCY,
+    1,
+    1,
+    20,
+    "PROJECT_PROGRESS_OA_WRITE_CONCURRENCY",
+  );
+  if (oaWriteConcurrency !== 1) {
+    throw new Error("PROJECT_PROGRESS_OA_WRITE_CONCURRENCY 当前必须为 1。");
+  }
 
   return {
     oa: {
@@ -175,6 +191,28 @@ export function loadProjectProgressConfig(
       leaseSeconds,
       heartbeatSeconds,
     },
+    concurrency: {
+      github: parseIntegerInRange(
+        environment.PROJECT_PROGRESS_GITHUB_CONCURRENCY,
+        6,
+        1,
+        20,
+        "PROJECT_PROGRESS_GITHUB_CONCURRENCY",
+      ),
+      agent: parseIntegerInRange(
+        environment.PROJECT_PROGRESS_AGENT_CONCURRENCY,
+        2,
+        1,
+        4,
+        "PROJECT_PROGRESS_AGENT_CONCURRENCY",
+      ),
+      oaWrite: oaWriteConcurrency,
+    },
+    workspaceRoot: path.resolve(
+      repoRoot,
+      environment.PROJECT_PROGRESS_WORKSPACE_ROOT?.trim() ||
+        path.join(repoRoot, ".context", "project-progress-workspaces"),
+    ),
     stateDatabasePath: environment.PROJECT_PROGRESS_STATE_DB?.trim() ||
       path.join(repoRoot, ".context", "project-progress.sqlite"),
     writeEnabled,

@@ -4,6 +4,7 @@ import type {
   GitHubRepositorySnapshot,
   ProjectProgressGitHubReader,
 } from "./githubTypes.js";
+import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
 
 const DEFAULT_LOOKBACK_HOURS = 24 * 30;
 const PAGE_SIZE = 100;
@@ -31,18 +32,20 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     private readonly fetchImpl: GitHubFetch = fetch,
     private readonly apiBaseUrl = "https://api.github.com",
     private readonly lookbackHours = DEFAULT_LOOKBACK_HOURS,
+    private readonly requestLimiter?: AsyncSemaphore,
   ) {}
 
   readRepository(
     repository: GitHubRepositoryIdentity,
     observedAt: Date,
+    signal?: AbortSignal,
   ): Promise<GitHubRepositorySnapshot> {
     const key = repository.fullName.toLowerCase();
     const cached = this.cache.get(key);
     if (cached) {
       return cached;
     }
-    const request = this.readRepositoryUncached(repository, observedAt);
+    const request = this.readRepositoryUncached(repository, observedAt, signal);
     this.cache.set(key, request);
     return request;
   }
@@ -50,11 +53,17 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   private async readRepositoryUncached(
     repository: GitHubRepositoryIdentity,
     observedAt: Date,
+    signal?: AbortSignal,
   ): Promise<GitHubRepositorySnapshot> {
     const metadata = decodeRepository(
-      await this.request(`/repos/${encode(repository.owner)}/${encode(repository.repository)}`),
+      await this.request(
+        `/repos/${encode(repository.owner)}/${encode(repository.repository)}`,
+        {},
+        [],
+        signal,
+      ),
     );
-    const branches = await this.listBranches(repository);
+    const branches = await this.listBranches(repository, signal);
     const since = new Date(
       observedAt.getTime() - this.lookbackHours * 60 * 60 * 1_000,
     ).toISOString();
@@ -66,6 +75,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
           `/repos/${encode(repository.owner)}/${encode(repository.repository)}/commits`,
           { sha: branch, since, per_page: PAGE_SIZE, page },
           [409],
+          signal,
         );
         if (payload === null) {
           break;
@@ -97,12 +107,17 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     };
   }
 
-  private async listBranches(repository: GitHubRepositoryIdentity): Promise<string[]> {
+  private async listBranches(
+    repository: GitHubRepositoryIdentity,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
     const branches: string[] = [];
     for (let page = 1; ; page += 1) {
       const payload = await this.request(
         `/repos/${encode(repository.owner)}/${encode(repository.repository)}/branches`,
         { per_page: PAGE_SIZE, page },
+        [],
+        signal,
       );
       const pageBranches = decodeBranches(payload);
       branches.push(...pageBranches);
@@ -116,20 +131,26 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     path: string,
     query: Record<string, string | number> = {},
     nullableStatuses: number[] = [],
+    signal?: AbortSignal,
   ): Promise<unknown | null> {
     const url = new URL(path, ensureTrailingSlash(this.apiBaseUrl));
     for (const [name, value] of Object.entries(query)) {
       url.searchParams.set(name, String(value));
     }
-    const response = await this.fetchImpl(url, {
+    const execute = () => this.fetchImpl(url, {
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${this.token}`,
         "x-github-api-version": "2022-11-28",
         "user-agent": "oa-project-progress-worker",
       },
-      signal: AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
+        : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
     });
+    const response = this.requestLimiter
+      ? await this.requestLimiter.run(execute, signal)
+      : await execute();
     if (nullableStatuses.includes(response.status)) {
       return null;
     }

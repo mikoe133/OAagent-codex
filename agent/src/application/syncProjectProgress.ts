@@ -3,9 +3,13 @@ import {
   decideProjectStatus,
   formatDateInTimeZone,
   PROJECT_PROGRESS_TIME_ZONE,
+  type NormalizedProjectProgressCommit,
+  type ProjectDailyCommitGroup,
   type ProjectStatus,
 } from "../domain/projectProgress.js";
+import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 import { normalizeGitHubRepositoryUrl } from "../infrastructure/github/githubUrl.js";
+import type { GitHubRepositoryIdentity } from "../infrastructure/github/githubUrl.js";
 import type {
   GitHubRepositorySnapshot,
   ProjectProgressGitHubReader,
@@ -21,6 +25,18 @@ import type {
   ProjectProgressAiInteraction,
   ProjectProgressSummarizer,
 } from "./projectProgressSummarizer.js";
+import { DeterministicProjectProgressSummarizer } from "./projectProgressSummarizer.js";
+
+export type ProjectProgressConcurrency = {
+  github: number;
+  agent: number;
+  oaWrite: 1;
+};
+
+export type ProjectProgressRepositoryInteraction = {
+  repositoryKey: string;
+  interaction: ProjectProgressAiInteraction;
+};
 
 export type ProjectProgressSummaryProposal = {
   summaryDate: string;
@@ -30,6 +46,7 @@ export type ProjectProgressSummaryProposal = {
   aiConfidence: number;
   aiNote: string;
   interaction?: ProjectProgressAiInteraction;
+  repositoryInteractions?: ProjectProgressRepositoryInteraction[];
 };
 
 export type ProjectProgressProjectReport = {
@@ -51,8 +68,75 @@ export type ProjectProgressSyncReport = {
   mutationsApplied: number;
   retryRecommended: boolean;
   cancelled: boolean;
+  metrics: {
+    repositoriesDiscovered: number;
+    repositoriesWithCommits: number;
+    repositoryTasksTotal: number;
+    repositoryTasksSucceeded: number;
+    repositoryTasksFallback: number;
+    repositoryTasksFailed: number;
+    githubPeakConcurrency: number;
+    agentPeakConcurrency: number;
+    oaWritePeakConcurrency: number;
+  };
   projects: ProjectProgressProjectReport[];
 };
+
+type PreparedProject = {
+  project: OaProject & { status: Exclude<ProjectStatus, "archived"> };
+  repositories: GitHubRepositoryIdentity[];
+};
+
+type ProjectEntry =
+  | { kind: "report"; report: ProjectProgressProjectReport }
+  | { kind: "project"; prepared: PreparedProject };
+
+type RepositorySnapshotResult =
+  | { snapshot: GitHubRepositorySnapshot; error?: never }
+  | { snapshot?: never; error: unknown };
+
+type ProjectGroupPlan = {
+  group: ProjectDailyCommitGroup;
+  cached: ProjectProgressSummaryProposal | null;
+};
+
+type ProjectEvaluation = {
+  prepared: PreparedProject;
+  snapshots: GitHubRepositorySnapshot[];
+  warnings: string[];
+  complete: boolean;
+  targetStatus: Exclude<ProjectStatus, "archived">;
+  groups: ProjectGroupPlan[];
+};
+
+type RepositorySummaryTask = {
+  key: string;
+  repositoryKey: string;
+  summaryDate: string;
+  projectId: number;
+  projectName: string;
+  commits: NormalizedProjectProgressCommit[];
+};
+
+type SuccessfulRepositorySummaryResult = {
+  key: string;
+  repositoryKey: string;
+  summary: string;
+  limitations: string[];
+  interaction?: ProjectProgressAiInteraction;
+  status: "succeeded" | "fallback";
+};
+
+type FailedRepositorySummaryResult = {
+  key: string;
+  repositoryKey: string;
+  status: "failed";
+  error: string;
+};
+
+type RepositorySummaryResult =
+  | SuccessfulRepositorySummaryResult
+  | FailedRepositorySummaryResult;
 
 type ProjectProgressStateSink = {
   saveProjectRepositoryWatermark(
@@ -109,7 +193,7 @@ type WritableProjectProgressState = Required<
   >
 >;
 
-export async function syncProjectProgress(input: {
+export type ProjectProgressSyncInput = {
   observedAt: Date;
   oaClient: ProjectProgressOaReader;
   githubReader: ProjectProgressGitHubReader;
@@ -117,9 +201,30 @@ export async function syncProjectProgress(input: {
   store?: ProjectProgressStateSink;
   projectId?: number;
   writeMode?: "dry-run" | "unsafe-test" | "production";
+  concurrency?: ProjectProgressConcurrency;
+  githubRequestLimiter?: AsyncSemaphore;
   shouldCancel?: () => boolean;
-}): Promise<ProjectProgressSyncReport> {
+};
+
+export async function syncProjectProgress(
+  input: ProjectProgressSyncInput,
+): Promise<ProjectProgressSyncReport> {
+  const cancellation = createCancellationMonitor(input.shouldCancel);
+  try {
+    return await executeProjectProgressSync({
+      ...input,
+      ...(cancellation.signal ? { cancellationSignal: cancellation.signal } : {}),
+    });
+  } finally {
+    cancellation.dispose();
+  }
+}
+
+async function executeProjectProgressSync(
+  input: ProjectProgressSyncInput & { cancellationSignal?: AbortSignal },
+): Promise<ProjectProgressSyncReport> {
   const writeMode = input.writeMode ?? "dry-run";
+  const concurrency = resolveConcurrency(input.concurrency);
   if (writeMode === "unsafe-test" && input.projectId === undefined) {
     throw new Error("unsafe-test 写入必须指定单个 projectId。");
   }
@@ -133,7 +238,11 @@ export async function syncProjectProgress(input: {
   const projects = input.projectId === undefined
     ? listedProjects
     : listedProjects.filter((project) => project.id === input.projectId);
-  const repositoryCache = new Map<string, Promise<GitHubRepositorySnapshot>>();
+  const githubLimiter = new AsyncSemaphore(concurrency.github);
+  const agentLimiter = new AsyncSemaphore(concurrency.agent);
+  const oaWriteLimiter = new AsyncSemaphore(concurrency.oaWrite);
+  const entries: ProjectEntry[] = [];
+  const repositoriesByKey = new Map<string, GitHubRepositoryIdentity>();
   const reports: ProjectProgressProjectReport[] = [];
   let mutationsApplied = 0;
   let cancelled = false;
@@ -144,7 +253,7 @@ export async function syncProjectProgress(input: {
       break;
     }
     if (listedProject.status === "archived") {
-      reports.push(archivedReport(listedProject));
+      entries.push({ kind: "report", report: archivedReport(listedProject) });
       continue;
     }
 
@@ -152,22 +261,28 @@ export async function syncProjectProgress(input: {
     try {
       project = await input.oaClient.getProject(listedProject.id);
     } catch (error) {
-      reports.push(incompleteReport(listedProject, `project_detail_failed:${errorMessage(error)}`));
+      entries.push({
+        kind: "report",
+        report: incompleteReport(listedProject, `project_detail_failed:${errorMessage(error)}`),
+      });
       continue;
     }
     if (project.status === "archived") {
-      reports.push(archivedReport(project));
+      entries.push({ kind: "report", report: archivedReport(project) });
       continue;
     }
     if (project.githubUrls.length === 0) {
-      reports.push({
-        projectId: project.id,
-        projectName: project.projectName,
-        currentStatus: project.status,
-        targetStatus: project.status,
-        outcome: "no_github_urls",
-        warnings: ["no_github_urls"],
-        summaries: [],
+      entries.push({
+        kind: "report",
+        report: {
+          projectId: project.id,
+          projectName: project.projectName,
+          currentStatus: project.status,
+          targetStatus: project.status,
+          outcome: "no_github_urls",
+          warnings: ["no_github_urls"],
+          summaries: [],
+        },
       });
       continue;
     }
@@ -181,43 +296,70 @@ export async function syncProjectProgress(input: {
         }),
       ).values()];
     } catch (error) {
-      reports.push({
-        projectId: project.id,
-        projectName: project.projectName,
-        currentStatus: project.status,
-        targetStatus: project.status,
-        outcome: "invalid_github_urls",
-        warnings: [`invalid_github_url:${errorMessage(error)}`],
-        summaries: [],
+      entries.push({
+        kind: "report",
+        report: {
+          projectId: project.id,
+          projectName: project.projectName,
+          currentStatus: project.status,
+          targetStatus: project.status,
+          outcome: "invalid_github_urls",
+          warnings: [`invalid_github_url:${errorMessage(error)}`],
+          summaries: [],
+        },
       });
       continue;
     }
-
-    const snapshots: GitHubRepositorySnapshot[] = [];
-    const warnings: string[] = [];
+    const prepared: PreparedProject = {
+      project: project as OaProject & { status: Exclude<ProjectStatus, "archived"> },
+      repositories,
+    };
+    entries.push({ kind: "project", prepared });
     for (const repository of repositories) {
-      try {
-        const cacheKey = repository.fullName.toLowerCase();
-        let pending = repositoryCache.get(cacheKey);
-        if (!pending) {
-          pending = input.githubReader.readRepository(repository, input.observedAt);
-          repositoryCache.set(cacheKey, pending);
-        }
-        const snapshot = await pending;
-        snapshots.push(snapshot);
-      } catch (error) {
-        warnings.push(`repository_read_failed:${repository.fullName}:${errorMessage(error)}`);
-        snapshots.push({
-          repositoryId: -1,
-          fullName: repository.fullName,
-          canonicalUrl: repository.canonicalUrl,
-          complete: false,
-          lastActivityAt: null,
-          commits: [],
-        });
-      }
+      repositoriesByKey.set(repository.fullName.toLowerCase(), repository);
     }
+  }
 
+  const repositorySnapshots = new Map<string, RepositorySnapshotResult>();
+  await Promise.all([...repositoriesByKey.entries()].map(async ([key, repository]) => {
+    try {
+      const snapshot = await githubLimiter.run(
+        () => input.githubReader.readRepository(
+          repository,
+          input.observedAt,
+          input.cancellationSignal,
+        ),
+        input.cancellationSignal,
+      );
+      repositorySnapshots.set(key, { snapshot });
+    } catch (error) {
+      repositorySnapshots.set(key, { error });
+    }
+  }));
+  cancelled ||= input.cancellationSignal?.aborted ?? false;
+
+  const currentBusinessDate = formatDateInTimeZone(
+    input.observedAt,
+    PROJECT_PROGRESS_TIME_ZONE,
+  );
+  const evaluations = new Map<number, ProjectEvaluation>();
+  const repositoryTasks = new Map<string, RepositorySummaryTask>();
+  for (const entry of entries) {
+    if (entry.kind !== "project") {
+      continue;
+    }
+    const { project, repositories } = entry.prepared;
+    const warnings: string[] = [];
+    const snapshots = repositories.map((repository) => {
+      const result = repositorySnapshots.get(repository.fullName.toLowerCase());
+      if (result?.snapshot) {
+        return result.snapshot;
+      }
+      warnings.push(
+        `repository_read_failed:${repository.fullName}:${errorMessage(result?.error)}`,
+      );
+      return incompleteRepositorySnapshot(repository);
+    });
     const decision = decideProjectStatus({
       currentStatus: project.status,
       observedAt: input.observedAt,
@@ -227,7 +369,7 @@ export async function syncProjectProgress(input: {
       })),
     });
     const complete = snapshots.every((snapshot) => snapshot.complete);
-    const summaries: ProjectProgressSummaryProposal[] = [];
+    const groups: ProjectGroupPlan[] = [];
     if (complete) {
       for (const snapshot of snapshots) {
         input.store?.saveProjectRepositoryWatermark(
@@ -240,53 +382,190 @@ export async function syncProjectProgress(input: {
         snapshots.flatMap((snapshot) => snapshot.commits),
         input.observedAt,
       );
-      const currentBusinessDate = formatDateInTimeZone(
-        input.observedAt,
-        PROJECT_PROGRESS_TIME_ZONE,
-      );
-      const groups = writeMode === "production"
+      const selectedGroups = writeMode === "production"
         ? allGroups.filter((group) => group.summaryDate === currentBusinessDate)
         : allGroups;
-      for (const group of groups) {
+      for (const group of selectedGroups) {
         const existing = input.store?.getDailySummaryDraft?.(
           project.id,
           group.summaryDate,
         );
-        if (existing?.sourceDigest === group.sourceDigest) {
-          summaries.push({
+        const cached = existing?.sourceDigest === group.sourceDigest
+          ? {
             summaryDate: group.summaryDate,
             commitCount: group.commits.length,
             sourceDigest: group.sourceDigest,
             summary: existing.summary,
             aiConfidence: existing.aiConfidence,
             aiNote: existing.aiNote,
-          });
+          }
+          : null;
+        groups.push({ group, cached });
+        if (cached) {
           continue;
         }
-        const generated = await input.summarizer.summarize({
-          projectId: project.id,
-          projectName: project.projectName,
-          summaryDate: group.summaryDate,
-          commits: group.commits,
+        for (const [repositoryKey, commits] of groupCommitsByRepository(group.commits)) {
+          const taskKey = `${repositoryKey}:${group.summaryDate}`;
+          if (!repositoryTasks.has(taskKey)) {
+            repositoryTasks.set(taskKey, {
+              key: taskKey,
+              repositoryKey,
+              summaryDate: group.summaryDate,
+              projectId: project.id,
+              projectName: project.projectName,
+              commits,
+            });
+          }
+        }
+      }
+    }
+    evaluations.set(project.id, {
+      prepared: entry.prepared,
+      snapshots,
+      warnings,
+      complete,
+      targetStatus: decision.targetStatus,
+      groups,
+    });
+  }
+
+  const deterministicFallback = new DeterministicProjectProgressSummarizer();
+  const repositoryResults = new Map<string, RepositorySummaryResult>();
+  if (!cancelled) {
+    await Promise.all([...repositoryTasks.values()].map(async (task) => {
+      try {
+        const result = await agentLimiter.run(async () => {
+          try {
+            const generated = await input.summarizer.summarize({
+              projectId: task.projectId,
+              projectName: task.projectName,
+              repositoryFullName: task.repositoryKey,
+              summaryDate: task.summaryDate,
+              commits: task.commits,
+              ...(input.cancellationSignal ? { signal: input.cancellationSignal } : {}),
+            });
+            return {
+              key: task.key,
+              repositoryKey: task.repositoryKey,
+              summary: generated.summary,
+              limitations: generated.limitations,
+              ...(generated.interaction ? { interaction: generated.interaction } : {}),
+              status: generated.interaction?.fallbackUsed
+                ? "fallback" as const
+                : "succeeded" as const,
+            };
+          } catch (error) {
+            if (input.cancellationSignal?.aborted) {
+              throw input.cancellationSignal.reason;
+            }
+            const fallback = await deterministicFallback.summarize({
+              projectId: task.projectId,
+              projectName: task.projectName,
+              repositoryFullName: task.repositoryKey,
+              summaryDate: task.summaryDate,
+              commits: task.commits,
+            });
+            return {
+              key: task.key,
+              repositoryKey: task.repositoryKey,
+              summary: fallback.summary,
+              limitations: [
+                `仓库 Agent 总结失败，已使用确定性兜底:${errorMessage(error)}`,
+              ],
+              status: "fallback" as const,
+            };
+          }
+        }, input.cancellationSignal);
+        repositoryResults.set(task.key, result);
+      } catch (error) {
+        if (input.cancellationSignal?.aborted) {
+          cancelled = true;
+          return;
+        }
+        repositoryResults.set(task.key, {
+          key: task.key,
+          repositoryKey: task.repositoryKey,
+          status: "failed",
+          error: errorMessage(error),
         });
-        const anomalyCount = group.commits.filter((commit) => commit.timestampAnomaly).length;
+      }
+    }));
+  }
+
+  for (const entry of entries) {
+    if (entry.kind === "report") {
+      reports.push(entry.report);
+      continue;
+    }
+    const evaluation = evaluations.get(entry.prepared.project.id)!;
+    const { project } = entry.prepared;
+    const summaries: ProjectProgressSummaryProposal[] = [];
+    if (evaluation.complete) {
+      for (const plan of evaluation.groups) {
+        if (plan.cached) {
+          summaries.push(plan.cached);
+          continue;
+        }
+        const expectedRepositoryKeys = [...groupCommitsByRepository(
+          plan.group.commits,
+        ).keys()].sort();
+        const repositoryGroupResults = expectedRepositoryKeys
+          .map((repositoryKey) => repositoryResults.get(
+            `${repositoryKey}:${plan.group.summaryDate}`,
+          ))
+          .filter((result): result is RepositorySummaryResult => result !== undefined);
+        if (
+          repositoryGroupResults.length !== expectedRepositoryKeys.length ||
+          repositoryGroupResults.some((result) => result.status === "failed")
+        ) {
+          evaluation.complete = false;
+          evaluation.warnings.push(
+            `repository_summary_incomplete:${plan.group.summaryDate}`,
+          );
+          for (const result of repositoryGroupResults) {
+            if (result.status === "failed") {
+              evaluation.warnings.push(
+                `repository_summary_failed:${result.repositoryKey}:${result.error}`,
+              );
+            }
+          }
+          continue;
+        }
+        const results = repositoryGroupResults as SuccessfulRepositorySummaryResult[];
+        const limitations = [...new Set(results.flatMap((result) => result.limitations))];
+        const anomalyCount = plan.group.commits.filter(
+          (commit) => commit.timestampAnomaly,
+        ).length;
         const aiConfidence = Math.max(
           35,
-          90 - anomalyCount * 10 - (generated.limitations.length > 0 ? 20 : 0),
+          90 - anomalyCount * 10 - (limitations.length > 0 ? 20 : 0),
         );
         const aiNoteParts = [
-          `基于 ${snapshots.length} 个仓库的 ${group.commits.length} 条提交`,
+          `基于 ${evaluation.snapshots.length} 个仓库的 ${plan.group.commits.length} 条提交`,
           ...(anomalyCount > 0 ? [`${anomalyCount} 条提交时间异常`] : []),
-          ...generated.limitations,
+          ...limitations,
         ];
-        const proposal = {
-          summaryDate: group.summaryDate,
-          commitCount: group.commits.length,
-          sourceDigest: group.sourceDigest,
-          summary: generated.summary,
+        const repositoryInteractions = results
+          .filter((result): result is SuccessfulRepositorySummaryResult & {
+            interaction: ProjectProgressAiInteraction;
+          } => result.interaction !== undefined)
+          .map((result) => ({
+            repositoryKey: result.repositoryKey,
+            interaction: result.interaction,
+          }));
+        const proposal: ProjectProgressSummaryProposal = {
+          summaryDate: plan.group.summaryDate,
+          commitCount: plan.group.commits.length,
+          sourceDigest: plan.group.sourceDigest,
+          summary: combineRepositorySummaries(results),
           aiConfidence,
           aiNote: `${aiNoteParts.join("；")}。`,
-          ...(generated.interaction ? { interaction: generated.interaction } : {}),
+          ...(repositoryInteractions.length > 0
+            ? {
+              repositoryInteractions,
+              interaction: repositoryInteractions[0]!.interaction,
+            }
+            : {}),
         };
         summaries.push(proposal);
         input.store?.saveDailySummaryDraft?.({
@@ -303,28 +582,30 @@ export async function syncProjectProgress(input: {
     let projectMutationsApplied = 0;
     if (input.shouldCancel?.()) {
       cancelled = true;
-      warnings.push("cancel_requested");
-    } else if (writer && writableStore && complete) {
+      evaluation.warnings.push("cancel_requested");
+    } else if (writer && writableStore && evaluation.complete) {
       try {
         const applied = await applyMutations({
           project,
           observedAt: input.observedAt,
-          targetStatus: decision.targetStatus,
+          targetStatus: evaluation.targetStatus,
           summaries,
           writer,
+          writeLimiter: oaWriteLimiter,
+          cancellationSignal: input.cancellationSignal,
           store: writableStore,
-          warnings,
+          warnings: evaluation.warnings,
           shouldCancel: input.shouldCancel,
         });
         mutationsApplied += applied;
         projectMutationsApplied += applied;
       } catch (error) {
-        warnings.push(`write_failed:${errorMessage(error)}`);
+        evaluation.warnings.push(`write_failed:${errorMessage(error)}`);
       }
       if (input.shouldCancel?.()) {
         cancelled = true;
-        if (!warnings.includes("cancel_requested")) {
-          warnings.push("cancel_requested");
+        if (!evaluation.warnings.includes("cancel_requested")) {
+          evaluation.warnings.push("cancel_requested");
         }
       }
     }
@@ -333,11 +614,11 @@ export async function syncProjectProgress(input: {
       projectId: project.id,
       projectName: project.projectName,
       currentStatus: project.status,
-      targetStatus: decision.targetStatus,
-      outcome: complete ? "evaluated" : "incomplete",
-      warnings,
+      targetStatus: evaluation.targetStatus,
+      outcome: evaluation.complete ? "evaluated" : "incomplete",
+      warnings: evaluation.warnings,
       summaries,
-      repositoryCount: snapshots.length,
+      repositoryCount: evaluation.snapshots.length,
       commitCount: summaries.reduce((total, summary) => total + summary.commitCount, 0),
       mutationsApplied: projectMutationsApplied,
     });
@@ -345,6 +626,16 @@ export async function syncProjectProgress(input: {
       break;
     }
   }
+
+  const repositoriesWithCommits = new Set(
+    [...repositorySnapshots.entries()]
+      .filter(([, result]) => result.snapshot?.complete &&
+        buildProjectDailyCommitGroups(
+          result.snapshot.commits,
+          input.observedAt,
+        ).some((group) => group.summaryDate === currentBusinessDate))
+      .map(([repositoryKey]) => repositoryKey),
+  );
 
   return {
     mode: writeMode === "production"
@@ -356,8 +647,107 @@ export async function syncProjectProgress(input: {
     mutationsApplied,
     retryRecommended: reports.some(projectNeedsRetry),
     cancelled,
+    metrics: {
+      repositoriesDiscovered: repositoriesByKey.size,
+      repositoriesWithCommits: repositoriesWithCommits.size,
+      repositoryTasksTotal: repositoryTasks.size,
+      repositoryTasksSucceeded: [...repositoryResults.values()].filter(
+        (result) => result.status === "succeeded",
+      ).length,
+      repositoryTasksFallback: [...repositoryResults.values()].filter(
+        (result) => result.status === "fallback",
+      ).length,
+      repositoryTasksFailed: [...repositoryResults.values()].filter(
+        (result) => result.status === "failed",
+      ).length,
+      githubPeakConcurrency: input.githubRequestLimiter?.metrics.peakActive ??
+        githubLimiter.metrics.peakActive,
+      agentPeakConcurrency: agentLimiter.metrics.peakActive,
+      oaWritePeakConcurrency: oaWriteLimiter.metrics.peakActive,
+    },
     projects: reports,
   };
+}
+
+function createCancellationMonitor(
+  shouldCancel: (() => boolean) | undefined,
+): { signal?: AbortSignal; dispose(): void } {
+  if (!shouldCancel) {
+    return { dispose: () => undefined };
+  }
+  const controller = new AbortController();
+  const poll = () => {
+    try {
+      if (shouldCancel() && !controller.signal.aborted) {
+        controller.abort(new Error("cancel_requested"));
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        controller.abort(error);
+      }
+    }
+  };
+  poll();
+  const timer = setInterval(poll, 10);
+  timer.unref();
+  return {
+    signal: controller.signal,
+    dispose: () => clearInterval(timer),
+  };
+}
+
+function resolveConcurrency(
+  value: ProjectProgressConcurrency | undefined,
+): ProjectProgressConcurrency {
+  const resolved = value ?? { github: 6, agent: 2, oaWrite: 1 };
+  if (
+    !Number.isInteger(resolved.github) ||
+    resolved.github < 1 ||
+    !Number.isInteger(resolved.agent) ||
+    resolved.agent < 1 ||
+    resolved.oaWrite !== 1
+  ) {
+    throw new Error("项目进度并发配置无效，必须满足 GitHub>=1、Agent>=1、OA 写入=1。");
+  }
+  return resolved;
+}
+
+function incompleteRepositorySnapshot(
+  repository: GitHubRepositoryIdentity,
+): GitHubRepositorySnapshot {
+  return {
+    repositoryId: -1,
+    fullName: repository.fullName,
+    canonicalUrl: repository.canonicalUrl,
+    complete: false,
+    lastActivityAt: null,
+    commits: [],
+  };
+}
+
+function groupCommitsByRepository(
+  commits: NormalizedProjectProgressCommit[],
+): Map<string, NormalizedProjectProgressCommit[]> {
+  const grouped = new Map<string, NormalizedProjectProgressCommit[]>();
+  for (const commit of commits) {
+    const key = commit.repositoryFullName.toLowerCase();
+    const repositoryCommits = grouped.get(key) ?? [];
+    repositoryCommits.push(commit);
+    grouped.set(key, repositoryCommits);
+  }
+  return grouped;
+}
+
+function combineRepositorySummaries(
+  results: SuccessfulRepositorySummaryResult[],
+): string {
+  if (results.length === 1) {
+    return results[0]!.summary;
+  }
+  const parts = results
+    .map((result) => result.summary.replace(/[。；;]+$/u, "").trim())
+    .filter(Boolean);
+  return parts.length > 0 ? `${parts.join("；")}。` : "完成当日代码更新。";
 }
 
 function projectNeedsRetry(report: ProjectProgressProjectReport): boolean {
@@ -377,6 +767,8 @@ async function applyMutations(input: {
   targetStatus: Exclude<ProjectStatus, "archived">;
   summaries: ProjectProgressSummaryProposal[];
   writer: ProjectProgressOaWriter;
+  writeLimiter: AsyncSemaphore;
+  cancellationSignal?: AbortSignal;
   store: WritableProjectProgressState;
   warnings: string[];
   shouldCancel?: () => boolean;
@@ -411,7 +803,10 @@ async function applyMutations(input: {
       payload: { status: input.targetStatus },
     });
     try {
-      await input.writer.updateProjectStatus(latest.id, input.targetStatus);
+      await input.writeLimiter.run(
+        () => input.writer.updateProjectStatus(latest.id, input.targetStatus),
+        input.cancellationSignal,
+      );
       input.store.markOutboxApplied(intentKey);
       applied += 1;
     } catch (error) {
@@ -431,6 +826,8 @@ async function applyMutations(input: {
         projectId: latest.id,
         proposal,
         writer: input.writer,
+        writeLimiter: input.writeLimiter,
+        cancellationSignal: input.cancellationSignal,
         store: input.store,
         warnings: input.warnings,
       });
@@ -447,6 +844,8 @@ async function reconcileSummary(input: {
   projectId: number;
   proposal: ProjectProgressSummaryProposal;
   writer: ProjectProgressOaWriter;
+  writeLimiter: AsyncSemaphore;
+  cancellationSignal?: AbortSignal;
   store: WritableProjectProgressState;
   warnings: string[];
 }): Promise<number> {
@@ -470,11 +869,14 @@ async function reconcileSummary(input: {
     });
     let created: OaCommitSummary;
     try {
-      created = await input.writer.createCommitSummary({
-        projectId: input.projectId,
-        summaryDate: input.proposal.summaryDate,
-        ...desired,
-      });
+      created = await input.writeLimiter.run(
+        () => input.writer.createCommitSummary({
+          projectId: input.projectId,
+          summaryDate: input.proposal.summaryDate,
+          ...desired,
+        }),
+        input.cancellationSignal,
+      );
     } catch (createError) {
       const raced = await input.writer.listCommitSummaries(
         input.projectId,
@@ -527,7 +929,10 @@ async function reconcileSummary(input: {
     projectId: input.projectId,
     payload: { summaryId: current.id, ...desired },
   });
-  await input.writer.updateCommitSummary(current.id, desired);
+  await input.writeLimiter.run(
+    () => input.writer.updateCommitSummary(current.id, desired),
+    input.cancellationSignal,
+  );
   markSummaryApplied(input, current.id);
   input.store.markOutboxApplied(intentKey);
   return 1;

@@ -4,6 +4,8 @@ import {
   type ThreadItem,
   type Usage,
 } from "@openai/codex-sdk";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectProgressConfig } from "../config/projectProgressConfig.js";
 import type { NormalizedProjectProgressCommit } from "../domain/projectProgress.js";
@@ -12,6 +14,7 @@ import {
   type ProjectProgressAgentLimits,
   type ProjectProgressGitHubMcpServer,
 } from "../infrastructure/github/projectProgressMcpServer.js";
+import type { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 import {
   DeterministicProjectProgressSummarizer,
   type ProjectProgressAiInteraction,
@@ -38,10 +41,12 @@ export const PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT = [
 
 export type ProjectProgressAgentRunInput = {
   model: ProjectProgressConfig["model"];
+  codexExecutablePath: string;
   workingDirectory: string;
   mcpUrl: string;
   mcpBearerToken: string;
   prompt: string;
+  signal?: AbortSignal;
 };
 
 export type ProjectProgressAgentRunResult = {
@@ -69,6 +74,9 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       githubApiBaseUrl: string;
       agent: ProjectProgressAgentLimits & { maxCandidateCommits: number };
       workingDirectory: string;
+      workspaceRoot?: string;
+      runId?: string;
+      githubRequestLimiter?: AsyncSemaphore;
       promptProfile?: ProjectProgressPromptProfile | null;
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
@@ -78,6 +86,18 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
   async summarize(input: ProjectProgressSummaryInput): Promise<ProjectProgressSummaryOutput> {
     const startedAt = Date.now();
     const candidates = input.commits.slice(0, this.config.agent.maxCandidateCommits);
+    const workspace = await createThreadWorkspace({
+      root: this.config.workspaceRoot ?? path.join(
+        this.config.workingDirectory,
+        ".context",
+        "project-progress-workspaces",
+      ),
+      runId: this.config.runId ?? randomUUID(),
+      repositoryKey: input.repositoryFullName ??
+        input.commits[0]?.repositoryFullName ??
+        `project-${input.projectId}`,
+      summaryDate: input.summaryDate,
+    });
     let mcpServer: ProjectProgressGitHubMcpServer | null = null;
     let agentRun: ProjectProgressAgentRunResult | null = null;
     try {
@@ -86,10 +106,18 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         githubApiBaseUrl: this.config.githubApiBaseUrl,
         candidates,
         limits: this.config.agent,
+        requestLimiter: this.config.githubRequestLimiter,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
       agentRun = await this.runner({
         model: this.config.model,
-        workingDirectory: this.config.workingDirectory,
+        codexExecutablePath: path.join(
+          this.config.workingDirectory,
+          "agent",
+          "scripts",
+          "isolatedCodexExec.mjs",
+        ),
+        workingDirectory: workspace,
         mcpUrl: mcpServer.url,
         mcpBearerToken: mcpServer.bearerToken,
         prompt: buildProjectProgressAgentPrompt(
@@ -98,6 +126,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           this.config.agent,
           this.config.promptProfile ?? null,
         ),
+        ...(input.signal ? { signal: input.signal } : {}),
       });
       if (agentRun.prohibitedToolUseCount > 0) {
         throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
@@ -124,6 +153,9 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         }),
       };
     } catch (error) {
+      if (input.signal?.aborted) {
+        throw input.signal.reason;
+      }
       const fallback = await this.fallback.summarize(input);
       const output = {
         summary: fallback.summary,
@@ -145,6 +177,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       };
     } finally {
       await mcpServer?.close();
+      await removeThreadWorkspace(workspace);
     }
   }
 }
@@ -153,12 +186,7 @@ export async function runProjectProgressAgent(
   input: ProjectProgressAgentRunInput,
 ): Promise<ProjectProgressAgentRunResult> {
   const codex = new Codex({
-    codexPathOverride: path.join(
-      input.workingDirectory,
-      "agent",
-      "scripts",
-      "isolatedCodexExec.mjs",
-    ),
+    codexPathOverride: input.codexExecutablePath,
     env: buildAgentChildEnvironment(input),
     config: {
       model_provider: input.model.provider,
@@ -219,7 +247,9 @@ export async function runProjectProgressAgent(
   });
   const turn = await thread.run(input.prompt, {
     outputSchema: projectProgressOutputSchema(),
-    signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
+    signal: input.signal
+      ? AbortSignal.any([input.signal, AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
   });
   if (!turn.finalResponse.trim()) {
     throw new Error("Agent 未返回项目进度总结。");
@@ -230,6 +260,33 @@ export async function runProjectProgressAgent(
     upstreamRequestId: thread.id,
     prohibitedToolUseCount: countProhibitedToolUse(turn.items),
   };
+}
+
+async function createThreadWorkspace(input: {
+  root: string;
+  runId: string;
+  repositoryKey: string;
+  summaryDate: string;
+}): Promise<string> {
+  const root = path.resolve(input.root);
+  const safeRunId = input.runId
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 100) || "run";
+  const repositoryHash = createHash("sha256")
+    .update(`${input.repositoryKey.toLowerCase()}:${input.summaryDate}`)
+    .digest("hex")
+    .slice(0, 24);
+  const workspace = path.resolve(root, safeRunId, repositoryHash);
+  if (!workspace.startsWith(`${root}${path.sep}`)) {
+    throw new Error("仓库 Thread 工作区超出配置根目录。");
+  }
+  await mkdir(workspace, { recursive: true });
+  return workspace;
+}
+
+async function removeThreadWorkspace(workspace: string): Promise<void> {
+  await rm(workspace, { recursive: true, force: true });
 }
 
 function buildAgentChildEnvironment(

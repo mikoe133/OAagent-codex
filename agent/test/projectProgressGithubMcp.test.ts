@@ -7,6 +7,7 @@ import {
   startProjectProgressGitHubMcpServer,
   type ProjectProgressAgentLimits,
 } from "../src/infrastructure/github/projectProgressMcpServer.js";
+import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
 
 const limits: ProjectProgressAgentLimits = {
   maxDetailCalls: 3,
@@ -159,6 +160,41 @@ describe("GitHubCommitDetailTool", () => {
     assert.match(result.summary, /HTTP 429/);
     assert.doesNotMatch(JSON.stringify(result), /github-secret|abcdef123456|example\/api/);
   });
+
+  it("shares the GitHub HTTP limiter across independent repository tools", async () => {
+    const limiter = new AsyncSemaphore(1);
+    let activeRequests = 0;
+    let peakRequests = 0;
+    const createTool = (repositoryFullName: string, sha: string) => new GitHubCommitDetailTool(
+      {
+        githubToken: "github-secret",
+        githubApiBaseUrl: "https://api.github.test",
+        candidates: [{ repositoryFullName, sha }],
+        limits,
+        requestLimiter: limiter,
+      },
+      async () => {
+        activeRequests += 1;
+        peakRequests = Math.max(peakRequests, activeRequests);
+        await delay(5);
+        activeRequests -= 1;
+        return Response.json({
+          stats: { additions: 1, deletions: 0, total: 1 },
+          files: [],
+        });
+      },
+    );
+    const first = createTool("example/api", "abcdef123456");
+    const second = createTool("example/web", "fedcba654321");
+
+    await Promise.all([
+      first.readCommitDetails({ repository: "example/api", sha: "abcdef123456" }),
+      second.readCommitDetails({ repository: "example/web", sha: "fedcba654321" }),
+    ]);
+
+    assert.equal(peakRequests, 1);
+    assert.equal(limiter.metrics.peakActive, 1);
+  });
 });
 
 describe("startProjectProgressGitHubMcpServer", () => {
@@ -202,3 +238,7 @@ describe("startProjectProgressGitHubMcpServer", () => {
     }
   });
 });
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}

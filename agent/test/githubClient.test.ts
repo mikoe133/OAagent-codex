@@ -4,6 +4,7 @@ import {
   GitHubRequestError,
   GitHubRestProjectReader,
 } from "../src/infrastructure/github/githubClient.js";
+import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
 import { normalizeGitHubRepositoryUrl } from "../src/infrastructure/github/githubUrl.js";
 
 describe("GitHubRestProjectReader", () => {
@@ -109,6 +110,42 @@ describe("GitHubRestProjectReader", () => {
       /branches 响应不是数组/,
     );
   });
+
+  it("shares a global HTTP request limiter across repository reads", async () => {
+    const limiter = new AsyncSemaphore(2);
+    let activeRequests = 0;
+    let peakRequests = 0;
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async (input) => {
+        activeRequests += 1;
+        peakRequests = Math.max(peakRequests, activeRequests);
+        await delay(5);
+        activeRequests -= 1;
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/branches")) {
+          return Response.json([]);
+        }
+        const fullName = url.pathname.replace(/^\/repos\//, "");
+        return Response.json({
+          id: Number(fullName.split("-").at(-1)),
+          full_name: fullName,
+          created_at: "2026-07-24T01:00:00Z",
+        });
+      },
+      "https://api.github.test",
+      undefined,
+      limiter,
+    );
+
+    await Promise.all(Array.from({ length: 5 }, (_, index) => reader.readRepository(
+      normalizeGitHubRepositoryUrl(`https://github.com/example/repository-${index + 1}`),
+      new Date("2026-07-24T12:00:00Z"),
+    )));
+
+    assert.equal(peakRequests, 2);
+    assert.equal(limiter.metrics.peakActive, 2);
+  });
 });
 
 function githubCommit(sha: string, date: string) {
@@ -119,4 +156,8 @@ function githubCommit(sha: string, date: string) {
       committer: { date },
     },
   };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
