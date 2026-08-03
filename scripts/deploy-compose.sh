@@ -15,6 +15,48 @@ function validate_image() {
   fi
 }
 
+function read_runtime_env_value() {
+  local env_file="$1"
+  local name="$2"
+  local line
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$name="* ]]; then
+      printf '%s\n' "${line#*=}"
+      return 0
+    fi
+  done < "$env_file"
+
+  return 1
+}
+
+function validate_runtime_ports() {
+  local env_file="$1"
+  local agent_port
+  local web_port
+
+  if ! agent_port="$(read_runtime_env_value "$env_file" "AGENT_PORT")"; then
+    echo "[deploy] missing AGENT_PORT in runtime environment: $env_file" >&2
+    return 1
+  fi
+  if ! web_port="$(read_runtime_env_value "$env_file" "WEB_PORT")"; then
+    echo "[deploy] missing WEB_PORT in runtime environment: $env_file" >&2
+    return 1
+  fi
+  if [[ ! "$agent_port" =~ ^[0-9]+$ ]] || (( 10#$agent_port < 1 || 10#$agent_port > 65535 )); then
+    echo "[deploy] AGENT_PORT must be between 1 and 65535" >&2
+    return 1
+  fi
+  if [[ ! "$web_port" =~ ^[0-9]+$ ]] || (( 10#$web_port < 1 || 10#$web_port > 65535 )); then
+    echo "[deploy] WEB_PORT must be between 1 and 65535" >&2
+    return 1
+  fi
+  if [[ "$agent_port" == "$web_port" ]]; then
+    echo "[deploy] AGENT_PORT and WEB_PORT must use different host ports" >&2
+    return 1
+  fi
+}
+
 function write_deployment_env() {
   local next_agent_image="$1"
   local next_web_image="$2"
@@ -84,6 +126,12 @@ function rollback() {
 
   cp "$previous_env_file" "$deployment_env_file"
   chmod 600 "$deployment_env_file"
+
+  if [[ ! -f "$runtime_env_file" ]] || ! validate_runtime_ports "$runtime_env_file"; then
+    echo "[deploy] rollback runtime environment is invalid; manual intervention is required" >&2
+    return
+  fi
+
   echo "[deploy] rolling back with $previous_env_file" >&2
   pull_images || echo "[deploy] rollback image pull failed" >&2
   start_release "rollback" \
@@ -146,8 +194,14 @@ docker compose version >/dev/null
 
 had_previous_runtime=0
 runtime_env_changed=0
+if [[ -f "$staged_runtime_env_file" ]]; then
+  validate_runtime_ports "$staged_runtime_env_file" \
+    || fail "invalid staged runtime environment"
+fi
 promote_runtime_env
 [[ -f "$runtime_env_file" ]] || fail "missing $deploy_dir/$runtime_env_file"
+validate_runtime_ports "$runtime_env_file" \
+  || fail "invalid runtime environment"
 
 had_previous=0
 if [[ -f "$deployment_env_file" ]]; then

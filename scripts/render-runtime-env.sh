@@ -125,6 +125,8 @@ done
   || fail "WEB_PORT must be a number"
 (( WEB_PORT >= 1 && WEB_PORT <= 65535 )) \
   || fail "WEB_PORT must be between 1 and 65535"
+[[ "$AGENT_PORT" != "$WEB_PORT" ]] \
+  || fail "AGENT_PORT and WEB_PORT must use different host ports"
 
 umask 077
 readonly temp_path="$(mktemp "${output_path}.XXXXXX")"

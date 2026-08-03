@@ -176,7 +176,7 @@ jobs:
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
       COMPOSE_PROJECT_NAME: oa-agent-test
       AGENT_BIND_ADDRESS: 127.0.0.1
-      AGENT_PORT: '3002'
+      AGENT_PORT: '3003'
       WEB_BIND_ADDRESS: 127.0.0.1
       WEB_PORT: '3001'
     steps:
