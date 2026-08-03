@@ -59,6 +59,40 @@ test("retries a transient Docker port binding failure without removing volumes",
   assert.doesNotMatch(dockerLog, / down .* (?:-v|--volumes)(?: |$)/)
 })
 
+test("rejects a runtime env without an explicit agent port", async (context) => {
+  const fixture = await createFixture(context)
+  await writeFile(
+    path.join(fixture.deployDir, ".env"),
+    "COMPOSE_PROJECT_NAME=oa-agent-test\nWEB_PORT=3001\n",
+  )
+
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:abc123",
+    webImage: "ghcr.io/example/oa-web:abc123",
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /missing AGENT_PORT in runtime environment/)
+  assert.doesNotMatch(await readFile(fixture.logPath, "utf8"), / up /)
+})
+
+test("rejects agent and web services that share a host port", async (context) => {
+  const fixture = await createFixture(context)
+  await writeFile(
+    path.join(fixture.deployDir, ".env"),
+    "COMPOSE_PROJECT_NAME=oa-agent-test\nAGENT_PORT=3001\nWEB_PORT=3001\n",
+  )
+
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:abc123",
+    webImage: "ghcr.io/example/oa-web:abc123",
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /AGENT_PORT and WEB_PORT must use different host ports/)
+  assert.doesNotMatch(await readFile(fixture.logPath, "utf8"), / up /)
+})
+
 test("restores the previous image tags when the new deployment fails", async (context) => {
   const fixture = await createFixture(context)
   const previous =
@@ -87,8 +121,8 @@ test("restores the previous image tags when the new deployment fails", async (co
 
 test("promotes a staged runtime env only when deployment succeeds", async (context) => {
   const fixture = await createFixture(context)
-  const previousRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nWEB_PORT=3001\n"
-  const nextRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nWEB_PORT=3011\n"
+  const previousRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nAGENT_PORT=3003\nWEB_PORT=3001\n"
+  const nextRuntime = "COMPOSE_PROJECT_NAME=oa-agent-test\nAGENT_PORT=3013\nWEB_PORT=3011\n"
   await writeFile(path.join(fixture.deployDir, ".env"), previousRuntime)
   await writeFile(path.join(fixture.deployDir, ".env.next"), nextRuntime)
 
@@ -106,8 +140,8 @@ test("promotes a staged runtime env only when deployment succeeds", async (conte
 
 test("restores the previous runtime env when deployment fails", async (context) => {
   const fixture = await createFixture(context)
-  const previousRuntime = "COMPOSE_PROJECT_NAME=oa-agent-prod\nWEB_PORT=3000\n"
-  const nextRuntime = "COMPOSE_PROJECT_NAME=oa-agent-prod\nWEB_PORT=3010\n"
+  const previousRuntime = "COMPOSE_PROJECT_NAME=oa-agent-prod\nAGENT_PORT=3001\nWEB_PORT=3000\n"
+  const nextRuntime = "COMPOSE_PROJECT_NAME=oa-agent-prod\nAGENT_PORT=3011\nWEB_PORT=3010\n"
   await writeFile(path.join(fixture.deployDir, ".env"), previousRuntime)
   await writeFile(path.join(fixture.deployDir, ".env.next"), nextRuntime)
 
@@ -131,7 +165,10 @@ async function createFixture(context) {
   const logPath = path.join(root, "docker.log")
   const markerPath = path.join(root, "failed-once")
   await Promise.all([mkdir(binDir), mkdir(deployDir)])
-  await writeFile(path.join(deployDir, ".env"), "OA_DOCKER_API_BASE_URL=http://oa.test\n")
+  await writeFile(
+    path.join(deployDir, ".env"),
+    "COMPOSE_PROJECT_NAME=oa-agent-test\nAGENT_PORT=3003\nWEB_PORT=3001\nOA_DOCKER_API_BASE_URL=http://oa.test\n",
+  )
   await writeFile(path.join(deployDir, "compose.yml"), "services: {}\n")
 
   const dockerPath = path.join(binDir, "docker")
