@@ -83,7 +83,7 @@ test("assistant replies render without a visible agent header or animated avatar
   assert.doesNotMatch(html, /orb-circle-/)
 })
 
-test("completed assistant replies show their response duration instead of a clock time", () => {
+test("completed assistant replies show their processed duration instead of a clock time", () => {
   const message = {
     id: "assistant-with-duration",
     role: "assistant",
@@ -95,7 +95,7 @@ test("completed assistant replies show their response duration instead of a cloc
 
   const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
 
-  assert.match(html, /本次回复耗时: 12\.3 秒/)
+  assert.match(html, /已处理: 12\.3 秒/)
 })
 
 test("response durations under one second are shown in milliseconds", () => {
