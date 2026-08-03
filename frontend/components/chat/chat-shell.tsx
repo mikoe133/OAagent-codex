@@ -25,6 +25,7 @@ import {
   isToolTimelineEvent,
   mergeMessageTraceDelta,
   mergeToolTimelineEvent,
+  withTraceMessages,
   type ChatStreamEvent,
   type TraceMessage,
   type ToolStep,
@@ -82,6 +83,7 @@ type StoredMessage = {
   durationMs?: unknown
   imageData?: unknown
   toolSteps?: unknown
+  traceMessages?: unknown
   status?: unknown
   error?: unknown
   feedback?: unknown
@@ -322,6 +324,9 @@ function normalizeStoredMessage(value: unknown): Message | null {
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof message.imageData === "string" ? { imageData: message.imageData } : {}),
     ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
+    ...(Array.isArray(message.traceMessages)
+      ? { traceMessages: normalizeStoredTraceMessages(message.traceMessages) }
+      : {}),
     ...(status ? { status } : {}),
     ...(messageError ? { error: messageError } : {}),
     ...(feedback ? { feedback } : {}),
@@ -343,6 +348,30 @@ function normalizeStoredMessageStatus(value: unknown, role: "user" | "assistant"
 
 function normalizeStoredToolSteps(value: unknown[]): ToolStep[] {
   return value.map(normalizeStoredToolStep).filter((step): step is ToolStep => Boolean(step))
+}
+
+function normalizeStoredTraceMessages(value: unknown[]): TraceMessage[] {
+  return value.map(normalizeStoredTraceMessage).filter((message): message is TraceMessage => Boolean(message))
+}
+
+function normalizeStoredTraceMessage(value: unknown): TraceMessage | null {
+  const message = toRecord(value)
+  if (!message) {
+    return null
+  }
+
+  const id = stringValue(message.id)
+  const content = stringValue(message.content)
+  const afterStepId = stringValue(message.afterStepId)
+  if (!id || !content) {
+    return null
+  }
+
+  return {
+    id,
+    content,
+    ...(afterStepId ? { afterStepId } : {}),
+  }
 }
 
 function normalizeStoredToolStep(value: unknown): ToolStep | null {
@@ -1044,13 +1073,16 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         const completedMessages: Message[] = [
           ...conversationMessages,
           userMessage,
-          {
-            ...assistantMessage,
-            content: accumulatedContent,
-            status: "completed",
-            durationMs,
-            ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
-          },
+          withTraceMessages(
+            {
+              ...assistantMessage,
+              content: accumulatedContent,
+              status: "completed",
+              durationMs,
+              ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
+            },
+            currentTraceMessages,
+          ),
         ]
 
         publishSessionMessages(completedMessages)
@@ -1071,14 +1103,17 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         const terminalMessages: Message[] = [
           ...conversationMessages,
           userMessage,
-          {
-            ...assistantMessage,
-            content: accumulatedContent || visibleContent,
-            status: wasStopped ? "stopped" : "failed",
-            durationMs,
-            ...(!wasStopped ? { error: errorMessage } : {}),
-            ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
-          },
+          withTraceMessages(
+            {
+              ...assistantMessage,
+              content: accumulatedContent || visibleContent,
+              status: wasStopped ? "stopped" : "failed",
+              durationMs,
+              ...(!wasStopped ? { error: errorMessage } : {}),
+              ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
+            },
+            currentTraceMessages,
+          ),
         ]
 
         publishSessionMessages(terminalMessages)

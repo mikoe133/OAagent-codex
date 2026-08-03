@@ -64,19 +64,17 @@ export function MessageBubble({
   const toolSteps = message.toolSteps ?? []
   const hasAssistantText = message.content.trim().length > 0
   const latestToolStepId = toolSteps[toolSteps.length - 1]?.id
-  const streamingMessages = assistantIsStreaming
-    ? message.traceMessages?.length
-      ? message.traceMessages
-      : hasAssistantText
-        ? [
-            {
-              id: "message-current",
-              content: message.content,
-              ...(latestToolStepId ? { afterStepId: latestToolStepId } : {}),
-            },
-          ]
-        : []
-    : []
+  const traceMessages = message.traceMessages?.length
+    ? message.traceMessages
+    : assistantIsStreaming && hasAssistantText
+      ? [
+          {
+            id: "message-current",
+            content: message.content,
+            ...(latestToolStepId ? { afterStepId: latestToolStepId } : {}),
+          },
+        ]
+      : []
 
   return (
     <article
@@ -111,11 +109,11 @@ export function MessageBubble({
           </div>
         ) : (
           <div className="min-w-0 max-w-full">
-            {(toolSteps.length > 0 || streamingMessages.length > 0) && (
+            {(toolSteps.length > 0 || traceMessages.length > 0) && (
               <ToolTimeline
                 steps={toolSteps}
                 isStreaming={assistantIsStreaming}
-                streamingMessages={streamingMessages}
+                traceMessages={traceMessages}
                 fallbackText={message.content}
                 status={message.status}
               />
@@ -331,20 +329,20 @@ export function resolveTraceOpenState(
 function ToolTimeline({
   steps,
   isStreaming,
-  streamingMessages,
+  traceMessages,
   fallbackText,
   status,
 }: {
   steps: ToolStep[]
   isStreaming: boolean
-  streamingMessages: TraceMessage[]
+  traceMessages: TraceMessage[]
   fallbackText: string
   status: Message["status"]
 }) {
   const hasRunningStep = steps.some((step) => step.status === "running")
   const failedCount = steps.filter((step) => step.status === "failed").length
-  const timelineItems = buildTraceTimelineItems(steps, streamingMessages)
-  const activeMessageId = streamingMessages[streamingMessages.length - 1]?.id
+  const timelineItems = buildTraceTimelineItems(steps, traceMessages)
+  const activeMessageId = traceMessages[traceMessages.length - 1]?.id
   const isTraceActive = isStreaming || hasRunningStep
   const traceState = isTraceActive
     ? "active"
@@ -363,7 +361,7 @@ function ToolTimeline({
   }, [isTraceActive])
 
   const summaryText = isTraceActive
-    ? resolveTraceSummaryText(streamingMessages, fallbackText, steps)
+    ? resolveTraceSummaryText(traceMessages, fallbackText, steps)
     : status === "failed"
       ? "Failed"
       : status === "stopped"
