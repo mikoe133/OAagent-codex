@@ -28,7 +28,9 @@ test("maps test and main branches to their deployment environments", async () =>
 test("publishes release images and transfers private deployment artifacts", async () => {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
 
-  assert.match(workflow, /DEPLOY_HOST: \$\{\{ vars\.DEPLOY_HOST \}\}/)
+  assert.equal(workflow.match(/DEPLOY_HOST: \$\{\{ secrets\.DEPLOY_HOST \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/DEPLOY_USER: \$\{\{ secrets\.DEPLOY_USER \}\}/g)?.length, 2)
+  assert.doesNotMatch(workflow, /DEPLOY_(?:HOST|USER): \$\{\{ vars\./)
   assert.match(workflow, /uses: docker\/setup-qemu-action@v3/)
   assert.match(workflow, /NEXTTOKEN_API_KEY: \$\{\{ secrets\.NEXTTOKEN_API_KEY \}\}/)
   assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/)
