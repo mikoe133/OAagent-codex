@@ -10,6 +10,7 @@ import {
   getAutomationModelCatalog,
   getAutomationPromptProfile,
   getAutomationRun,
+  getAutomationRunTrace,
   listAutomationJobs,
   listAutomationRuns,
   listAutomationTags,
@@ -29,9 +30,11 @@ test("uses the automation BFF for list and audit requests", async () => {
   try {
     await listAutomationJobs({ name: "日报", enabled: true })
     await getAutomationRun("run/unsafe", "attempts")
+    await getAutomationRunTrace("run/unsafe")
 
     assert.equal(requests[0], "/api/automation/jobs?page=1&size=100&sort=-updated_at&name=%E6%97%A5%E6%8A%A5&enabled=true")
     assert.equal(requests[1], "/api/automation/runs/run%2Funsafe?include=attempts")
+    assert.equal(requests[2], "/api/automation/runs/run%2Funsafe/trace-events")
   } finally {
     globalThis.fetch = originalFetch
   }

@@ -146,6 +146,10 @@ function resolveUpstreamPath(segments: string[], method: HttpMethod): string | n
   if (runMatch && method === "GET") {
     return `/automation-job-runs/${runMatch[1]}`
   }
+  const traceMatch = path.match(/^runs\/([A-Za-z0-9-]{1,64})\/trace-events$/)
+  if (traceMatch && method === "GET") {
+    return `/automation-job-runs/${traceMatch[1]}/trace-events`
+  }
   const cancelMatch = path.match(/^runs\/([A-Za-z0-9-]{1,64})\/cancel$/)
   if (cancelMatch && method === "POST") {
     return `/automation-job-runs/${cancelMatch[1]}/cancel`

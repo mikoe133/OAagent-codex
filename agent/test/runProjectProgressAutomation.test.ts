@@ -4,6 +4,7 @@ import { runProjectProgressAutomation } from "../src/application/runProjectProgr
 import type { ProjectProgressSyncReport } from "../src/application/syncProjectProgress.js";
 import {
   AutomationLeaseLostError,
+  AutomationOaRequestError,
   type AutomationJobClaim,
   type AutomationOaClient,
   type AutomationRunStatus,
@@ -75,6 +76,117 @@ describe("runProjectProgressAutomation", () => {
     assert.equal(projectCalls, 1);
     assert.equal(interactionCalls, 1);
     assert.ok(heartbeatCalls > 0, "AI 审计期间应继续 heartbeat");
+  });
+
+  it("uploads one AI audit record for every repository Thread", async () => {
+    const interactionKeys: string[] = [];
+    let activeUploads = 0;
+    let peakUploads = 0;
+    const client = fakeClient({
+      claim: async () => promptAwareClaim(),
+      upsertAiInteraction: async ({ interaction }) => {
+        activeUploads += 1;
+        peakUploads = Math.max(peakUploads, activeUploads);
+        interactionKeys.push(interaction.interactionKey);
+        assert.match(
+          String(interaction.requestPayloadSanitized.repository_full_name),
+          /^example\/(api|web)$/,
+        );
+        assert.equal(
+          interaction.requestPayloadSanitized.summary_date,
+          "2026-07-30",
+        );
+        assert.match(interaction.upstreamRequestId ?? "", /^thread-(api|web)$/);
+        await delay(5);
+        activeUploads -= 1;
+        return interactionKeys.length;
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async () => report({
+        withProject: true,
+        withRepositoryInteractions: true,
+      }),
+    });
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(interactionKeys.length, 2);
+    assert.equal(new Set(interactionKeys).size, 2);
+    assert.equal(peakUploads, 1);
+  });
+
+  it("reports live trace stages while the run is active", async () => {
+    const traceEvents: Array<{ eventKey: string; status: string }> = [];
+    const client = fakeClient({
+      upsertTraceEvent: async ({ event }) => {
+        traceEvents.push({ eventKey: event.eventKey, status: event.status });
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async (_shouldCancel, trace) => {
+        await trace?.({
+          eventKey: "read_github",
+          sequence: 300,
+          phase: "read_github",
+          status: "running",
+          title: "读取 GitHub 分支与 Commit",
+        });
+        return report();
+      },
+    });
+
+    assert.equal(result.status, "succeeded");
+    assert.deepEqual(
+      [...new Set(traceEvents.map((event) => event.eventKey))],
+      [
+        "worker_claimed",
+        "validate_configuration",
+        "read_github",
+        "upload_run_audit",
+        "finalize_run",
+      ],
+    );
+    assert.deepEqual(
+      traceEvents.filter((event) => event.eventKey === "upload_run_audit")
+        .map((event) => event.status),
+      ["running", "succeeded"],
+    );
+    assert.equal(traceEvents.at(-1)?.status, "succeeded");
+  });
+
+  it("keeps the business run working when OA has not enabled trace events", async () => {
+    let traceCalls = 0;
+    const client = fakeClient({
+      upsertTraceEvent: async () => {
+        traceCalls += 1;
+        throw new AutomationOaRequestError(
+          "trace endpoint missing",
+          404,
+          "automation_trace_not_found",
+        );
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async () => report(),
+    });
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(traceCalls, 1);
   });
 
   it("stops at a safe checkpoint when heartbeat requests cancellation", async () => {
@@ -168,6 +280,7 @@ type AutomationClientMethods = Pick<
   | "heartbeat"
   | "upsertProjectResult"
   | "upsertAiInteraction"
+  | "upsertTraceEvent"
 >;
 
 function fakeClient(
@@ -179,6 +292,7 @@ function fakeClient(
     heartbeat: async () => heartbeatResult(false),
     upsertProjectResult: async () => 123,
     upsertAiInteraction: async () => 456,
+    upsertTraceEvent: async () => undefined,
     ...overrides,
   } as unknown as AutomationOaClient;
 }
@@ -223,6 +337,7 @@ function promptAwareClaim(): AutomationJobClaim {
 
 function report(options: {
   withProject?: boolean;
+  withRepositoryInteractions?: boolean;
   cancelled?: boolean;
 } = {}): ProjectProgressSyncReport {
   return {
@@ -231,6 +346,17 @@ function report(options: {
     mutationsApplied: options.withProject ? 1 : 0,
     retryRecommended: false,
     cancelled: options.cancelled ?? false,
+    metrics: {
+      repositoriesDiscovered: options.withProject ? 1 : 0,
+      repositoriesWithCommits: options.withProject ? 1 : 0,
+      repositoryTasksTotal: options.withProject ? 1 : 0,
+      repositoryTasksSucceeded: options.withProject ? 1 : 0,
+      repositoryTasksFallback: 0,
+      repositoryTasksFailed: 0,
+      githubPeakConcurrency: options.withProject ? 1 : 0,
+      agentPeakConcurrency: options.withProject ? 1 : 0,
+      oaWritePeakConcurrency: options.withProject ? 1 : 0,
+    },
     projects: options.withProject ? [{
       projectId: 51,
       projectName: "OA 服务端",
@@ -248,26 +374,42 @@ function report(options: {
         summary: "完成联调。",
         aiConfidence: 90,
         aiNote: "提交完整。",
-        interaction: {
-          provider: "nexttoken",
-          model: "gpt-5.6-terra",
-          promptVersion: "prompt-v1",
-          systemPromptSnapshot: "system prompt",
-          requestPayloadSanitized: { commit_count: 2 },
-          responsePayloadSanitized: { output_count: 1 },
-          finalSummary: "完成联调。",
-          limitations: ["仅依据 commit"],
-          fallbackUsed: false,
-          upstreamRequestId: "request-01",
-          inputTokens: 100,
-          outputTokens: 20,
-          latencyMs: 500,
-          status: "succeeded",
-          errorCode: null,
-          errorSummary: null,
-        },
+        interaction: interaction("request-01"),
+        ...(options.withRepositoryInteractions ? {
+          repositoryInteractions: [
+            {
+              repositoryKey: "example/api",
+              interaction: interaction("thread-api"),
+            },
+            {
+              repositoryKey: "example/web",
+              interaction: interaction("thread-web"),
+            },
+          ],
+        } : {}),
       }],
     }] : [],
+  };
+}
+
+function interaction(upstreamRequestId: string) {
+  return {
+    provider: "nexttoken",
+    model: "gpt-5.6-terra",
+    promptVersion: "prompt-v1",
+    systemPromptSnapshot: "system prompt",
+    requestPayloadSanitized: { commit_count: 2 },
+    responsePayloadSanitized: { output_count: 1 },
+    finalSummary: "完成联调。",
+    limitations: ["仅依据 commit"],
+    fallbackUsed: false,
+    upstreamRequestId,
+    inputTokens: 100,
+    outputTokens: 20,
+    latencyMs: 500,
+    status: "succeeded" as const,
+    errorCode: null,
+    errorSummary: null,
   };
 }
 

@@ -10,8 +10,10 @@ export const PROJECT_PROGRESS_SYSTEM_PROMPT =
 export type ProjectProgressSummaryInput = {
   projectId: number;
   projectName: string;
+  repositoryFullName?: string;
   summaryDate: string;
   commits: NormalizedProjectProgressCommit[];
+  signal?: AbortSignal;
 };
 
 export type ProjectProgressSummaryOutput = {
@@ -78,7 +80,9 @@ export class ResponsesProjectProgressSummarizer implements ProjectProgressSummar
               input,
             ),
           ),
-          signal: AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
+          signal: input.signal
+            ? AbortSignal.any([input.signal, AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS)])
+            : AbortSignal.timeout(MODEL_REQUEST_TIMEOUT_MS),
         },
       );
       if (!response.ok) {

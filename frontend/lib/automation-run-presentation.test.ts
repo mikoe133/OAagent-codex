@@ -1,13 +1,37 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import type { AutomationRun } from "./automation-api"
+import type { AutomationRun, AutomationRunProject } from "./automation-api"
 import {
+  buildAutomationProjectOutcomeChartData,
   hasActiveAutomationRuns,
   hasPollableAutomationRuns,
   resolveAutomationRunReply,
   shouldRefreshAutomationRunDetail,
 } from "./automation-run-presentation"
+
+test("aggregates project outcome tags and accounts for unloaded project details", () => {
+  const data = buildAutomationProjectOutcomeChartData([
+    project({ id: 1, outcome: "evaluated", commit_count: 3, generated_summary: "完成" }),
+    project({ id: 2, outcome: "evaluated", commit_count: 0, generated_summary: null }),
+    project({ id: 3, outcome: "archived" }),
+    project({ id: 4, outcome: "archived" }),
+    project({ id: 5, outcome: "incomplete" }),
+    project({ id: 6, outcome: "future_outcome" }),
+  ], 8)
+
+  assert.deepEqual(
+    data.map(({ id, label, value }) => ({ id, label, value })),
+    [
+      { id: "evaluated", label: "完成评估", value: 1 },
+      { id: "no_commits", label: "当天无提交", value: 1 },
+      { id: "archived", label: "已归档", value: 2 },
+      { id: "incomplete", label: "处理不完整", value: 1 },
+      { id: "other", label: "其他结果", value: 1 },
+      { id: "unloaded", label: "明细未加载", value: 2 },
+    ],
+  )
+})
 
 test("keeps polling while an automation run is active", () => {
   assert.equal(hasActiveAutomationRuns([run({ status: "pending" })]), true)
@@ -126,6 +150,27 @@ function run(overrides: Partial<AutomationRun>): AutomationRun {
     error_summary: null,
     cancel_requested_at: null,
     duration_ms: null,
+    ...overrides,
+  }
+}
+
+function project(overrides: Partial<AutomationRunProject>): AutomationRunProject {
+  return {
+    id: 1,
+    project_id: 1,
+    project_name: "测试项目",
+    status_before: "updating",
+    status_after: "updating",
+    outcome: "evaluated",
+    repository_count: 1,
+    commit_count: 1,
+    summary_date: "2026-08-04",
+    generated_summary: "项目总结",
+    ai_confidence: 90,
+    ai_note: null,
+    warnings: [],
+    mutations_applied: false,
+    duration_ms: 100,
     ...overrides,
   }
 }

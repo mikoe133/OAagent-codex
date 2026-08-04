@@ -34,6 +34,9 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.match(workflow, /OPENROUTER_API_KEY: \$\{\{ secrets\.OPENROUTER_API_KEY \}\}/)
   assert.equal(workflow.match(/OA_PROJECT_SYNC_TOKEN: \$\{\{ secrets\.OA_PROJECT_SYNC_TOKEN \}\}/g)?.length, 2)
   assert.equal(workflow.match(/PROJECT_PROGRESS_GITHUB_TOKEN: \$\{\{ secrets\.PROJECT_PROGRESS_GITHUB_TOKEN \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/PROJECT_PROGRESS_GITHUB_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_GITHUB_CONCURRENCY \|\| '6' \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/PROJECT_PROGRESS_AGENT_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_AGENT_CONCURRENCY \|\| '2' \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \|\| '1' \}\}/g)?.length, 2)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
   assert.equal(workflow.match(/OA_AGENT_SSO_SHARED_SECRET: \$\{\{ secrets\.OA_AGENT_SSO_SHARED_SECRET \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_AUTOMATION_TOKEN: \$\{\{ secrets\.OA_AGENT_AUTOMATION_TOKEN \}\}/g)?.length, 2)
@@ -73,6 +76,13 @@ test("limits container resources and log growth on the shared server", async () 
   assert.equal(compose.match(/^    pids_limit: /gm)?.length, 3)
   assert.equal(compose.match(/^        max-size: 10m$/gm)?.length, 3)
   assert.equal(compose.match(/^        max-file: "3"$/gm)?.length, 3)
+  const workerService = compose.slice(
+    compose.indexOf("  project-progress-worker:"),
+    compose.indexOf("\n  web:"),
+  )
+  assert.match(workerService, /^    cpus: 2\.0$/m)
+  assert.match(workerService, /^    mem_limit: 3g$/m)
+  assert.match(workerService, /^    pids_limit: 256$/m)
 })
 
 test("uses Docker as the Codex command isolation boundary", async () => {

@@ -35,6 +35,9 @@ readonly oa_project_sync_token_prefix="${OA_PROJECT_SYNC_TOKEN_PREFIX:-Bearer}"
 readonly project_progress_worker_instance="${PROJECT_PROGRESS_WORKER_INSTANCE:-oaagent-${COMPOSE_PROJECT_NAME}}"
 readonly project_progress_lease_seconds="${PROJECT_PROGRESS_LEASE_SECONDS:-300}"
 readonly project_progress_heartbeat_seconds="${PROJECT_PROGRESS_HEARTBEAT_SECONDS:-60}"
+readonly project_progress_github_concurrency="${PROJECT_PROGRESS_GITHUB_CONCURRENCY:-6}"
+readonly project_progress_agent_concurrency="${PROJECT_PROGRESS_AGENT_CONCURRENCY:-2}"
+readonly project_progress_oa_write_concurrency="${PROJECT_PROGRESS_OA_WRITE_CONCURRENCY:-1}"
 readonly project_progress_agent_max_detail_calls="${PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS:-12}"
 readonly project_progress_agent_max_files_per_commit="${PROJECT_PROGRESS_AGENT_MAX_FILES_PER_COMMIT:-20}"
 readonly project_progress_agent_max_patch_chars_per_file="${PROJECT_PROGRESS_AGENT_MAX_PATCH_CHARS_PER_FILE:-1200}"
@@ -56,6 +59,9 @@ for name in \
   PROJECT_PROGRESS_WORKER_INSTANCE \
   PROJECT_PROGRESS_LEASE_SECONDS \
   PROJECT_PROGRESS_HEARTBEAT_SECONDS \
+  PROJECT_PROGRESS_GITHUB_CONCURRENCY \
+  PROJECT_PROGRESS_AGENT_CONCURRENCY \
+  PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \
   PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS \
   PROJECT_PROGRESS_AGENT_MAX_FILES_PER_COMMIT \
   PROJECT_PROGRESS_AGENT_MAX_PATCH_CHARS_PER_FILE \
@@ -93,6 +99,16 @@ done
   || fail "PROJECT_PROGRESS_HEARTBEAT_SECONDS must be between 10 and 300"
 (( project_progress_heartbeat_seconds < project_progress_lease_seconds )) \
   || fail "PROJECT_PROGRESS_HEARTBEAT_SECONDS must be less than PROJECT_PROGRESS_LEASE_SECONDS"
+[[ "$project_progress_github_concurrency" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_GITHUB_CONCURRENCY must be a number"
+(( project_progress_github_concurrency >= 1 && project_progress_github_concurrency <= 20 )) \
+  || fail "PROJECT_PROGRESS_GITHUB_CONCURRENCY must be between 1 and 20"
+[[ "$project_progress_agent_concurrency" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_AGENT_CONCURRENCY must be a number"
+(( project_progress_agent_concurrency >= 1 && project_progress_agent_concurrency <= 4 )) \
+  || fail "PROJECT_PROGRESS_AGENT_CONCURRENCY must be between 1 and 4"
+[[ "$project_progress_oa_write_concurrency" == "1" ]] \
+  || fail "PROJECT_PROGRESS_OA_WRITE_CONCURRENCY must be 1"
 [[ "$project_progress_agent_max_detail_calls" =~ ^[0-9]+$ ]] \
   || fail "PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS must be a number"
 (( project_progress_agent_max_detail_calls >= 1 && project_progress_agent_max_detail_calls <= 50 )) \
@@ -157,6 +173,10 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'PROJECT_PROGRESS_WRITE_ENABLED=true\n'
   printf 'PROJECT_PROGRESS_PRODUCTION_WRITES=I_UNDERSTAND_PRODUCTION_WRITES\n'
   printf 'PROJECT_PROGRESS_STATE_DB=/app/.context/project-progress.sqlite\n'
+  printf 'PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces\n'
+  printf 'PROJECT_PROGRESS_GITHUB_CONCURRENCY=%s\n' "$project_progress_github_concurrency"
+  printf 'PROJECT_PROGRESS_AGENT_CONCURRENCY=%s\n' "$project_progress_agent_concurrency"
+  printf 'PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=%s\n' "$project_progress_oa_write_concurrency"
   printf 'PROJECT_PROGRESS_MODEL_PROVIDER=nexttoken\n'
   printf 'PROJECT_PROGRESS_MODEL=gpt-5.6-terra\n'
   printf 'PROJECT_PROGRESS_MODEL_REASONING_EFFORT=medium\n'

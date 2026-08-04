@@ -1,19 +1,30 @@
 "use client"
 
 import * as React from "react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
+  Activity,
   Ban,
   Bot,
   CheckCircle2,
+  Circle,
+  CircleCheckBig,
+  CircleX,
   Clock3,
+  Clock5,
   GitCommitHorizontal,
   Loader2,
+  ScanSearch,
   TriangleAlert,
+  CircleCheck,
+  CircleDashed,
+  type LucideIcon,
 } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { DonutChart, type DonutChartSegment } from "@/components/ui/donut-chart"
 import {
   Dialog,
   DialogContent,
@@ -25,13 +36,23 @@ import {
 import {
   AutomationApiError,
   type AutomationRun,
+  type AutomationRunProject,
+  type AutomationRunTraceEvent,
   cancelAutomationRun,
 } from "@/lib/automation-api"
+import {
+  buildAutomationProjectOutcomeChartData,
+  projectOutcomeForDisplay,
+} from "@/lib/automation-run-presentation"
+import { cn } from "@/lib/utils"
 
 interface AutomationRunDetailDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   run: AutomationRun | null
+  traceEvents?: AutomationRunTraceEvent[]
+  traceLoading?: boolean
+  traceError?: string | null
   loading?: boolean
   error?: string | null
   auditWarning?: string | null
@@ -44,6 +65,9 @@ export function AutomationRunDetailDialog({
   open,
   onOpenChange,
   run,
+  traceEvents = [],
+  traceLoading = false,
+  traceError,
   loading = false,
   error,
   auditWarning,
@@ -113,6 +137,13 @@ export function AutomationRunDetailDialog({
               </Alert>
             ) : null}
 
+            <RunTraceSection
+              events={traceEvents}
+              loading={traceLoading}
+              error={traceError}
+              active={ACTIVE_STATUSES.has(run.status)}
+            />
+
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Metric label="状态" value={runStatusLabel(run.status)} />
               <Metric label="触发方式" value={triggerLabel(run.trigger_source)} />
@@ -137,6 +168,12 @@ export function AutomationRunDetailDialog({
                   <Badge variant="outline">AI 调用：{run.ai_interaction_count ?? run.ai_interactions?.length ?? 0}</Badge>
                 </div>
               </div>
+              {run.projects ? (
+                <ProjectOutcomeBreakdown
+                  projects={run.projects}
+                  projectsTotal={run.projects_total}
+                />
+              ) : null}
               {run.error_summary ? (
                 <Alert variant="destructive" className="mt-4">
                   <AlertDescription>
@@ -152,6 +189,16 @@ export function AutomationRunDetailDialog({
                   <GitCommitHorizontal className="h-4 w-4" />
                   <h3 className="font-medium">项目明细</h3>
                 </div>
+                {run.projects.length < run.projects_total ? (
+                  <Alert>
+                    <TriangleAlert className="text-amber-600" />
+                    <AlertDescription>
+                      当前仅加载 {run.projects.length}/{run.projects_total} 个项目明细。其余项目可能因当前账号缺少
+                      <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">automation:audit</code>
+                      权限，或 OA 详情接口未返回完整项目结果。
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
                 {run.projects.length ? run.projects.map((project) => (
                   <article key={project.id} className="rounded-xl border p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -161,9 +208,7 @@ export function AutomationRunDetailDialog({
                           项目 #{project.project_id} · {project.repository_count} 个仓库 · {project.commit_count} 条 Commit
                         </p>
                       </div>
-                      <Badge variant={isSuccessfulOutcome(project.outcome) ? "secondary" : "destructive"}>
-                        {project.outcome}
-                      </Badge>
+                      <ProjectOutcomeTag outcome={projectOutcomeForDisplay(project)} />
                     </div>
                     <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
                       <Detail label="状态变化" value={`${project.status_before ?? "—"} → ${project.status_after ?? "—"}`} />
@@ -176,6 +221,9 @@ export function AutomationRunDetailDialog({
                       </div>
                     ) : null}
                     {project.ai_note ? <p className="mt-2 text-xs text-muted-foreground">AI 备注：{project.ai_note}</p> : null}
+                    {project.outcome === "incomplete" && project.warnings.length > 0 ? (
+                      <ProjectWarnings warnings={project.warnings} />
+                    ) : null}
                   </article>
                 )) : <Empty text="本次运行尚无项目处理明细。" />}
               </section>
@@ -254,6 +302,278 @@ export function AutomationRunDetailDialog({
   )
 }
 
+function RunTraceSection({
+  events,
+  loading,
+  error,
+  active,
+}: {
+  events: AutomationRunTraceEvent[]
+  loading: boolean
+  error?: string | null
+  active: boolean
+}) {
+  const orderedEvents = [...events].sort((left, right) =>
+    left.sequence - right.sequence ||
+    Date.parse(left.occurred_at) - Date.parse(right.occurred_at),
+  )
+  const currentEvent = [...orderedEvents].reverse().find(
+    (event) => event.status === "running" || event.status === "pending",
+  ) ?? orderedEvents.at(-1)
+
+  return (
+    <section data-slot="automation-run-trace" className="rounded-xl border p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Activity className="h-4 w-4" />
+          <div>
+            <h3 className="font-medium">执行 Trace</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {currentEvent?.title ?? (active ? "等待 Worker 上报当前阶段" : "本次运行没有阶段记录")}
+            </p>
+          </div>
+        </div>
+        {active ? (
+          <Badge variant="outline" className="gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin" />实时更新
+          </Badge>
+        ) : null}
+      </div>
+
+      {error ? (
+        <Alert className="mt-4 border-amber-200 bg-amber-50/60 theme-dark:border-amber-900 theme-dark:bg-amber-950/20">
+          <TriangleAlert className="text-amber-600" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {loading && orderedEvents.length === 0 ? (
+        <div className="flex min-h-24 items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />正在读取执行阶段…
+        </div>
+      ) : orderedEvents.length ? (
+        <ol className="mt-4 space-y-1">
+          {orderedEvents.map((event, index) => (
+            <TraceEventItem
+              key={event.event_key}
+              event={event}
+              last={index === orderedEvents.length - 1}
+            />
+          ))}
+        </ol>
+      ) : !error ? (
+        <p className="mt-4 rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
+          {active ? "任务已开始，等待第一条 Trace。" : "本次运行没有可展示的 Trace。"}
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
+function TraceEventItem({
+  event,
+  last,
+}: {
+  event: AutomationRunTraceEvent
+  last: boolean
+}) {
+  const progress = traceProgress(event)
+  const status = traceStatusPresentation(event.status)
+  const TraceIcon = status.icon
+  return (
+    <li className="relative grid grid-cols-[1.5rem_minmax(0,1fr)] gap-3 pb-4 last:pb-0">
+      {!last ? <span className="absolute left-[11px] top-6 h-[calc(100%-1rem)] w-px bg-border" /> : null}
+      <span className={`relative z-10 mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-background ${status.color}`}>
+        <TraceIcon className={event.status === "running" ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />
+      </span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="truncate text-sm font-medium">{event.title}</p>
+            <Badge variant="outline" className="h-5 px-1.5 text-[0.625rem]">{status.label}</Badge>
+          </div>
+          <time className="text-[0.6875rem] text-muted-foreground">
+            {formatTraceTime(event.updated_at || event.occurred_at)}
+          </time>
+        </div>
+        {event.message ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{event.message}</p> : null}
+        {event.repository_full_name ? (
+          <p className="mt-1 truncate font-mono text-[0.6875rem] text-muted-foreground">
+            {event.repository_full_name}
+          </p>
+        ) : null}
+        {progress ? (
+          <div className="mt-2 flex items-center gap-2">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-sky-500 transition-[width]" style={{ width: `${progress.percent}%` }} />
+            </div>
+            <span className="text-[0.6875rem] tabular-nums text-muted-foreground">
+              {progress.label}
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </li>
+  )
+}
+
+function traceProgress(event: AutomationRunTraceEvent): { percent: number; label: string } | null {
+  if (
+    event.progress_current === null ||
+    event.progress_total === null ||
+    event.progress_total <= 0
+  ) {
+    return null
+  }
+  return {
+    percent: Math.min(100, Math.max(0, event.progress_current / event.progress_total * 100)),
+    label: `${event.progress_current}/${event.progress_total}`,
+  }
+}
+
+function traceStatusPresentation(status: AutomationRunTraceEvent["status"]): {
+  label: string
+  color: string
+  icon: typeof Circle
+} {
+  if (status === "running") return { label: "进行中", color: "text-sky-600", icon: Circle }
+  if (status === "succeeded") return { label: "已完成", color: "text-emerald-600", icon: CircleCheckBig }
+  if (status === "fallback") return { label: "已兜底", color: "text-amber-600", icon: TriangleAlert }
+  if (status === "failed") return { label: "失败", color: "text-red-600", icon: CircleX }
+  if (status === "cancelled") return { label: "已取消", color: "text-stone-500", icon: Ban }
+  return { label: "等待中", color: "text-stone-400", icon: Circle }
+}
+
+function formatTraceTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(date)
+}
+
+function ProjectOutcomeBreakdown({
+  projects,
+  projectsTotal,
+}: {
+  projects: AutomationRunProject[]
+  projectsTotal: number
+}) {
+  const shouldReduceMotion = useReducedMotion()
+  const data = React.useMemo(
+    () => buildAutomationProjectOutcomeChartData(projects, projectsTotal),
+    [projects, projectsTotal],
+  )
+  const [activeSegmentId, setActiveSegmentId] = React.useState<string | null>(null)
+  const activeSegment = data.find((segment) => segment.id === activeSegmentId) ?? null
+  const totalValue = data.reduce((sum, segment) => sum + segment.value, 0)
+
+  React.useEffect(() => {
+    if (activeSegmentId && !data.some((segment) => segment.id === activeSegmentId)) {
+      setActiveSegmentId(null)
+    }
+  }, [activeSegmentId, data])
+
+  if (totalValue === 0) {
+    return null
+  }
+
+  const chartData: DonutChartSegment[] = data.map((segment) => ({ ...segment }))
+  const displayValue = activeSegment?.value ?? totalValue
+  const displayLabel = activeSegment?.label ?? "全部项目"
+  const displayPercentage = displayValue / totalValue * 100
+
+  return (
+    <div
+      data-slot="automation-project-outcome-breakdown"
+      className="mt-5 grid items-center gap-5 border-t pt-5 md:grid-cols-[12rem_minmax(0,1fr)]"
+    >
+      <div className="flex justify-center">
+        <DonutChart
+          data={chartData}
+          totalValue={totalValue}
+          size={176}
+          strokeWidth={22}
+          animationDuration={0.7}
+          animationDelayPerSegment={0.04}
+          activeSegmentId={activeSegmentId}
+          chartLabel="本次运行项目处理结果分布"
+          onSegmentHover={(segment) => setActiveSegmentId(segment?.id ?? null)}
+          centerContent={(
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={activeSegment?.id ?? "total"}
+                initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.94 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.94 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.16 }}
+                className="flex max-w-28 flex-col items-center text-center"
+              >
+                <span className="text-3xl font-semibold tabular-nums">{displayValue}</span>
+                <span className="mt-1 text-xs leading-4 text-muted-foreground">{displayLabel}</span>
+                {activeSegment ? (
+                  <span className="mt-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+                    {formatChartPercentage(displayPercentage)}
+                  </span>
+                ) : null}
+              </motion.div>
+            </AnimatePresence>
+          )}
+        />
+      </div>
+
+      <div className="grid min-w-0 gap-1 sm:grid-cols-2" role="list" aria-label="项目处理结果标签统计">
+        {data.map((segment, index) => {
+          const isActive = segment.id === activeSegmentId
+          const percentage = segment.value / totalValue * 100
+          return (
+            <motion.button
+              key={segment.id}
+              type="button"
+              role="listitem"
+              initial={shouldReduceMotion ? false : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: shouldReduceMotion ? 0 : 0.24,
+                delay: shouldReduceMotion ? 0 : 0.08 + index * 0.035,
+              }}
+              className={cn(
+                "grid min-h-10 grid-cols-[0.75rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                isActive ? "bg-muted" : "hover:bg-muted/60",
+              )}
+              aria-label={`${segment.label}：${segment.value} 个，占 ${formatChartPercentage(percentage)}`}
+              aria-pressed={isActive}
+              onMouseEnter={() => setActiveSegmentId(segment.id)}
+              onMouseLeave={() => setActiveSegmentId(null)}
+              onClick={() => setActiveSegmentId((current) => current === segment.id ? null : segment.id)}
+            >
+              <span
+                className="h-3 w-3 rounded-full"
+                style={{ backgroundColor: segment.color }}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 truncate text-xs font-medium">{segment.label}</span>
+              <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                <strong className="font-semibold text-foreground">{segment.value} 个</strong>
+                <span className="mx-1">·</span>
+                <span>{formatChartPercentage(percentage)}</span>
+              </span>
+            </motion.button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function formatChartPercentage(value: number): string {
+  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 }).format(value)}%`
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border bg-muted/20 p-3">
@@ -291,8 +611,155 @@ function resolveError(error: unknown): string {
   return error instanceof Error ? error.message : "取消运行失败"
 }
 
-function isSuccessfulOutcome(outcome: string): boolean {
-  return ["evaluated", "summarized", "no_commits", "status_updated"].includes(outcome)
+function ProjectOutcomeTag({ outcome }: { outcome: string }) {
+  const presentation = projectOutcomePresentation(outcome)
+  const Icon = presentation.icon
+  return (
+    <div
+      className={`inline-flex min-h-[35px] min-w-40 items-center justify-center rounded-xl px-4 ${presentation.backgroundClass}`}
+      title={presentation.description}
+      aria-label={presentation.description}
+    >
+      <span className={`flex items-center whitespace-nowrap text-xs font-medium ${presentation.textClass}`}>
+        <Icon className="mr-2 h-4 w-4" strokeWidth={3} />
+        {presentation.label}
+      </span>
+    </div>
+  )
+}
+
+function ProjectWarnings({ warnings }: { warnings: Array<Record<string, unknown>> }) {
+  return (
+    <div className="mt-3 rounded-lg border border-red-200 bg-red-50/70 p-3 text-sm text-red-700 theme-dark:border-red-900/60 theme-dark:bg-red-950/20 theme-dark:text-red-300">
+      <div className="flex items-center gap-2 font-medium">
+        <TriangleAlert className="h-4 w-4" />
+        处理警告
+      </div>
+      <ul className="mt-2 space-y-1.5 pl-6 text-xs leading-5">
+        {warnings.map((warning, index) => (
+          <li key={`${warning.code ?? "warning"}-${index}`}>
+            {formatProjectWarning(warning)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function formatProjectWarning(warning: Record<string, unknown>): string {
+  const code = typeof warning.code === "string" ? warning.code : ""
+  if (!code) {
+    return JSON.stringify(warning)
+  }
+  const separatorIndex = code.indexOf(":")
+  const prefix = separatorIndex >= 0 ? code.slice(0, separatorIndex) : code
+  const detail = separatorIndex >= 0 ? code.slice(separatorIndex + 1) : ""
+  const labels: Record<string, string> = {
+    project_detail_failed: "读取 OA 项目详情失败",
+    repository_read_failed: "读取 GitHub 仓库失败",
+    repository_configuration_error: "GitHub 仓库配置错误",
+    repository_summary_incomplete: "仓库 Commit 总结不完整",
+    repository_summary_failed: "仓库 Commit 总结失败",
+    write_failed: "写入项目结果失败",
+    status_write_failed: "写入项目状态失败",
+    summary_write_failed: "写入项目总结失败",
+    cancel_requested: "任务收到取消请求",
+  }
+  return detail ? `${labels[prefix] ?? "处理警告"}：${detail}` : labels[prefix] ?? code
+}
+
+function projectOutcomePresentation(outcome: string): {
+  label: string
+  description: string
+  icon: LucideIcon
+  backgroundClass: string
+  textClass: string
+} {
+  const presentations: Record<string, {
+    label: string
+    description: string
+    icon: LucideIcon
+    backgroundClass: string
+    textClass: string
+  }> = {
+    evaluated: {
+      label: "已完成评估并生成结果",
+      description: "已完成评估并生成结果",
+      icon: CircleCheck,
+      backgroundClass: "bg-emerald-50",
+      textClass: "text-[#57BC6C]",
+    },
+    archived: {
+      label: "项目已归档，已跳过处理",
+      description: "项目已归档，已跳过处理",
+      icon: Clock5,
+      backgroundClass: "bg-zinc-100",
+      textClass: "text-[#777777]",
+    },
+    no_github_urls: {
+      label: "无 GitHub 地址，已跳过处理",
+      description: "无 GitHub 地址，已跳过处理",
+      icon: ScanSearch,
+      backgroundClass: "bg-yellow-50",
+      textClass: "text-[#F0B13D]",
+    },
+    invalid_github_urls: {
+      label: "GitHub 地址无效，处理失败",
+      description: "GitHub 地址无效，处理失败",
+      icon: CircleX,
+      backgroundClass: "bg-red-50",
+      textClass: "text-red-600",
+    },
+    incomplete: {
+      label: "处理不完整，未写入结果",
+      description: "处理不完整，未写入结果",
+      icon: TriangleAlert,
+      backgroundClass: "bg-orange-50",
+      textClass: "text-[#EAA65D]",
+    },
+    write_conflict: {
+      label: "写入冲突，未完成更新",
+      description: "写入冲突，未完成更新",
+      icon: TriangleAlert,
+      backgroundClass: "bg-orange-50",
+      textClass: "text-[#EAA65D]",
+    },
+    failed: {
+      label: "处理失败",
+      description: "处理失败",
+      icon: CircleX,
+      backgroundClass: "bg-red-50",
+      textClass: "text-red-600",
+    },
+    summarized: {
+      label: "已生成项目总结",
+      description: "已生成项目总结",
+      icon: CircleCheck,
+      backgroundClass: "bg-emerald-50",
+      textClass: "text-[#57BC6C]",
+    },
+    no_commits: {
+      label: "仓库读取完成，当天无新增 Commit",
+      description: "仓库读取完成，当天无新增 Commit",
+      icon: CircleDashed,
+      backgroundClass: "bg-sky-100",
+      textClass: "text-[#008AF5]",
+    },
+    status_updated: {
+      label: "已更新项目状态",
+      description: "已更新项目状态",
+      icon: CircleCheck,
+      backgroundClass: "bg-emerald-50",
+      textClass: "text-[#57BC6C]",
+    },
+  }
+  return presentations[outcome] ?? {
+    label: "处理结果未知",
+    description: `处理结果：${outcome}`,
+    icon: TriangleAlert,
+    backgroundClass: "bg-orange-50",
+    textClass: "text-[#EAA65D]",
+  }
 }
 
 function runStatusLabel(status: AutomationRun["status"]): string {

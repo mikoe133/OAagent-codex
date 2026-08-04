@@ -71,6 +71,9 @@ Environment Variables:
 | 两者可选 | `PROJECT_PROGRESS_WORKER_INSTANCE` | Worker 稳定实例名；默认按环境生成 |
 | 两者可选 | `PROJECT_PROGRESS_LEASE_SECONDS` | claim 租约秒数，默认 `300` |
 | 两者可选 | `PROJECT_PROGRESS_HEARTBEAT_SECONDS` | heartbeat 间隔秒数，默认 `60` 且必须小于租约 |
+| 两者可选 | `PROJECT_PROGRESS_GITHUB_CONCURRENCY` | GitHub HTTP 全局并发，默认 `6` |
+| 两者可选 | `PROJECT_PROGRESS_AGENT_CONCURRENCY` | 同时运行的仓库 Codex Thread 数，默认 `2` |
+| 两者可选 | `PROJECT_PROGRESS_OA_WRITE_CONCURRENCY` | OA mutation 并发，当前固定为 `1` |
 
 Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份,同时通过私有 Artifact 和 SSH 把镜像加载到服务器。服务器不登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
 

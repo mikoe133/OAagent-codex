@@ -7,6 +7,7 @@ import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
+import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 import { parseProjectProgressOptions } from "./projectProgressOptions.js";
 
 async function main(): Promise<void> {
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
     );
   }
   const store = new ProjectProgressStore(config.stateDatabasePath);
+  const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
 
   try {
     const report = await syncProjectProgress({
@@ -46,6 +48,8 @@ async function main(): Promise<void> {
         config.githubToken,
         fetch,
         config.githubApiBaseUrl,
+        undefined,
+        githubRequestLimiter,
       ),
       summarizer: new CodexProjectProgressSummarizer({
         model: config.model,
@@ -53,9 +57,14 @@ async function main(): Promise<void> {
         githubApiBaseUrl: config.githubApiBaseUrl,
         agent: config.agent,
         workingDirectory: repoRoot,
+        workspaceRoot: config.workspaceRoot,
+        runId: `manual-${Date.now()}`,
+        githubRequestLimiter,
       }),
       store,
       writeMode: options.writeMode,
+      concurrency: config.concurrency,
+      githubRequestLimiter,
       ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
     });
     console.log(JSON.stringify({

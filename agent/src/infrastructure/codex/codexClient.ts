@@ -6,6 +6,7 @@ import {
 } from "@openai/codex-sdk";
 import type { AppConfig } from "../../config/config.js";
 import type { ModelProviderId } from "../../config/modelCatalog.js";
+import { resolveCodexModelCatalogPath } from "./modelMetadataCatalog.js";
 
 /**
  * codex 子进程只拿到运行必需的变量。.env 中的其余凭证
@@ -39,9 +40,11 @@ export function createCodexClient(
   toolSessionId?: string,
 ): Codex {
   const providerConfig = config.modelProviders[config.modelProvider];
+  const modelCatalogPath = resolveCodexModelCatalogPath(config.model);
   return new Codex({
     env: buildChildEnv(config, providerConfig, toolSessionId),
     config: {
+      ...(modelCatalogPath ? { model_catalog_json: modelCatalogPath } : {}),
       model_provider: config.modelProvider,
       model_providers: {
         [config.modelProvider]: {

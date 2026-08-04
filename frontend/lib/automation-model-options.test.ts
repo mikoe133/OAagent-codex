@@ -5,6 +5,7 @@ import type { AutomationModelCatalog } from "./automation-api"
 import {
   getAutomationModelOptions,
   getAutomationProviderOptions,
+  resolveAutomationModelSelection,
 } from "./automation-model-options"
 
 const catalog: AutomationModelCatalog = {
@@ -65,4 +66,32 @@ test("keeps a removed model visible without duplicating an available current mod
   assert.equal(removed.at(-1)?.label, "gpt-removed（当前不可用）")
   assert.equal(removed.at(-1)?.available, false)
   assert.equal(available.filter((option) => option.value === "gpt-current").length, 1)
+})
+
+test("preserves a historical task model selection exactly", () => {
+  assert.deepEqual(
+    resolveAutomationModelSelection(catalog, "nexttoken", "gpt-retired"),
+    { provider: "nexttoken", modelId: "gpt-retired" },
+  )
+})
+
+test("recovers a provider from a historical model when the provider field is missing", () => {
+  assert.deepEqual(
+    resolveAutomationModelSelection(catalog, "", "gpt-retired"),
+    { provider: "nexttoken", modelId: "gpt-retired" },
+  )
+})
+
+test("fills a missing model from the selected provider default", () => {
+  assert.deepEqual(
+    resolveAutomationModelSelection(catalog, "nexttoken", ""),
+    { provider: "nexttoken", modelId: "gpt-current" },
+  )
+})
+
+test("uses the first available default when both task model fields are missing", () => {
+  assert.deepEqual(
+    resolveAutomationModelSelection(catalog),
+    { provider: "nexttoken", modelId: "gpt-current" },
+  )
 })

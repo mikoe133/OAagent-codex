@@ -63,7 +63,7 @@ function BentoGrid({ items, className }: BentoGridProps) {
             </div>
 
             <div className="min-w-0 flex-1">
-              <h2 className="truncate text-[15px] font-medium tracking-tight text-gray-900 theme-dark:text-gray-100">
+              <h2 className="truncate text-[0.9375rem] font-medium tracking-tight text-gray-900 theme-dark:text-gray-100">
                 {item.title}
               </h2>
               {item.meta ? (

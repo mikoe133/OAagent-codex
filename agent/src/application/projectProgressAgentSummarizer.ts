@@ -4,6 +4,8 @@ import {
   type ThreadItem,
   type Usage,
 } from "@openai/codex-sdk";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectProgressConfig } from "../config/projectProgressConfig.js";
 import type { NormalizedProjectProgressCommit } from "../domain/projectProgress.js";
@@ -12,6 +14,8 @@ import {
   type ProjectProgressAgentLimits,
   type ProjectProgressGitHubMcpServer,
 } from "../infrastructure/github/projectProgressMcpServer.js";
+import type { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
+import { resolveCodexModelCatalogPath } from "../infrastructure/codex/modelMetadataCatalog.js";
 import {
   DeterministicProjectProgressSummarizer,
   type ProjectProgressAiInteraction,
@@ -38,10 +42,13 @@ export const PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT = [
 
 export type ProjectProgressAgentRunInput = {
   model: ProjectProgressConfig["model"];
+  codexExecutablePath: string;
   workingDirectory: string;
   mcpUrl: string;
   mcpBearerToken: string;
+  developerInstructions: string;
   prompt: string;
+  signal?: AbortSignal;
 };
 
 export type ProjectProgressAgentRunResult = {
@@ -69,6 +76,9 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       githubApiBaseUrl: string;
       agent: ProjectProgressAgentLimits & { maxCandidateCommits: number };
       workingDirectory: string;
+      workspaceRoot?: string;
+      runId?: string;
+      githubRequestLimiter?: AsyncSemaphore;
       promptProfile?: ProjectProgressPromptProfile | null;
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
@@ -78,6 +88,18 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
   async summarize(input: ProjectProgressSummaryInput): Promise<ProjectProgressSummaryOutput> {
     const startedAt = Date.now();
     const candidates = input.commits.slice(0, this.config.agent.maxCandidateCommits);
+    const workspace = await createThreadWorkspace({
+      root: this.config.workspaceRoot ?? path.join(
+        this.config.workingDirectory,
+        ".context",
+        "project-progress-workspaces",
+      ),
+      runId: this.config.runId ?? randomUUID(),
+      repositoryKey: input.repositoryFullName ??
+        input.commits[0]?.repositoryFullName ??
+        `project-${input.projectId}`,
+      summaryDate: input.summaryDate,
+    });
     let mcpServer: ProjectProgressGitHubMcpServer | null = null;
     let agentRun: ProjectProgressAgentRunResult | null = null;
     try {
@@ -86,23 +108,37 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         githubApiBaseUrl: this.config.githubApiBaseUrl,
         candidates,
         limits: this.config.agent,
+        requestLimiter: this.config.githubRequestLimiter,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
       agentRun = await this.runner({
         model: this.config.model,
-        workingDirectory: this.config.workingDirectory,
+        codexExecutablePath: path.join(
+          this.config.workingDirectory,
+          "agent",
+          "scripts",
+          "isolatedCodexExec.mjs",
+        ),
+        workingDirectory: workspace,
         mcpUrl: mcpServer.url,
         mcpBearerToken: mcpServer.bearerToken,
+        developerInstructions: buildProjectProgressAgentInstructions(
+          this.config.promptProfile ?? null,
+        ),
         prompt: buildProjectProgressAgentPrompt(
           input,
           candidates,
           this.config.agent,
-          this.config.promptProfile ?? null,
         ),
+        ...(input.signal ? { signal: input.signal } : {}),
       });
       if (agentRun.prohibitedToolUseCount > 0) {
         throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
       }
       const output = decodeAgentOutput(agentRun.finalResponse);
+      if (isLikelyProcessSummary(output.summary)) {
+        throw new Error("Agent 输出了分析步骤而非最终项目总结。");
+      }
       const metrics = mcpServer.tool.getMetrics();
       const limitations = mergeLimitations(
         output.limitations,
@@ -124,6 +160,9 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         }),
       };
     } catch (error) {
+      if (input.signal?.aborted) {
+        throw input.signal.reason;
+      }
       const fallback = await this.fallback.summarize(input);
       const output = {
         summary: fallback.summary,
@@ -145,6 +184,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       };
     } finally {
       await mcpServer?.close();
+      await removeThreadWorkspace(workspace);
     }
   }
 }
@@ -152,15 +192,12 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
 export async function runProjectProgressAgent(
   input: ProjectProgressAgentRunInput,
 ): Promise<ProjectProgressAgentRunResult> {
+  const modelCatalogPath = resolveCodexModelCatalogPath(input.model.model);
   const codex = new Codex({
-    codexPathOverride: path.join(
-      input.workingDirectory,
-      "agent",
-      "scripts",
-      "isolatedCodexExec.mjs",
-    ),
+    codexPathOverride: input.codexExecutablePath,
     env: buildAgentChildEnvironment(input),
     config: {
+      ...(modelCatalogPath ? { model_catalog_json: modelCatalogPath } : {}),
       model_provider: input.model.provider,
       model_providers: {
         [input.model.provider]: {
@@ -170,6 +207,7 @@ export async function runProjectProgressAgent(
           wire_api: "responses",
         },
       },
+      developer_instructions: input.developerInstructions,
       mcp_servers: {
         [MCP_SERVER_NAME]: {
           url: input.mcpUrl,
@@ -219,7 +257,9 @@ export async function runProjectProgressAgent(
   });
   const turn = await thread.run(input.prompt, {
     outputSchema: projectProgressOutputSchema(),
-    signal: AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
+    signal: input.signal
+      ? AbortSignal.any([input.signal, AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS)])
+      : AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
   });
   if (!turn.finalResponse.trim()) {
     throw new Error("Agent 未返回项目进度总结。");
@@ -230,6 +270,33 @@ export async function runProjectProgressAgent(
     upstreamRequestId: thread.id,
     prohibitedToolUseCount: countProhibitedToolUse(turn.items),
   };
+}
+
+async function createThreadWorkspace(input: {
+  root: string;
+  runId: string;
+  repositoryKey: string;
+  summaryDate: string;
+}): Promise<string> {
+  const root = path.resolve(input.root);
+  const safeRunId = input.runId
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 100) || "run";
+  const repositoryHash = createHash("sha256")
+    .update(`${input.repositoryKey.toLowerCase()}:${input.summaryDate}`)
+    .digest("hex")
+    .slice(0, 24);
+  const workspace = path.resolve(root, safeRunId, repositoryHash);
+  if (!workspace.startsWith(`${root}${path.sep}`)) {
+    throw new Error("仓库 Thread 工作区超出配置根目录。");
+  }
+  await mkdir(workspace, { recursive: true });
+  return workspace;
+}
+
+async function removeThreadWorkspace(workspace: string): Promise<void> {
+  await rm(workspace, { recursive: true, force: true });
 }
 
 function buildAgentChildEnvironment(
@@ -252,7 +319,6 @@ function buildProjectProgressAgentPrompt(
   input: ProjectProgressSummaryInput,
   commits: NormalizedProjectProgressCommit[],
   limits: ProjectProgressAgentLimits,
-  promptProfile: ProjectProgressPromptProfile | null,
 ): string {
   const repositories = new Map<string, Array<Record<string, unknown>>>();
   for (const commit of commits) {
@@ -280,9 +346,17 @@ function buildProjectProgressAgentPrompt(
     })),
   };
   return [
-    "<system_prompt>",
+    "<project_commit_data>",
+    escapePromptData(JSON.stringify(payload)),
+    "</project_commit_data>",
+  ].join("\n");
+}
+
+function buildProjectProgressAgentInstructions(
+  promptProfile: ProjectProgressPromptProfile | null,
+): string {
+  return [
     PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT,
-    "</system_prompt>",
     ...(promptProfile
       ? [
         "",
@@ -292,9 +366,12 @@ function buildProjectProgressAgentPrompt(
       ]
       : []),
     "",
-    "<project_commit_data>",
-    escapePromptData(JSON.stringify(payload)),
-    "</project_commit_data>",
+    "<final_output_contract>",
+    "summary 是最终展示给用户的项目进展，不是计划、思考过程、工具调用说明或下一步动作。",
+    "禁止使用“分析候选 Commits”“选择性读取关键提交详情”或同类过程性表述作为 summary。",
+    "必须根据已读取的 Commit 事实描述已经完成的工程变化；如果无法形成事实总结，返回简短的已完成提交概括，由调用方负责兜底。",
+    "只返回符合 output schema 的 JSON，不要返回 Markdown 或额外文字。",
+    "</final_output_contract>",
   ].join("\n");
 }
 
@@ -346,6 +423,15 @@ function decodeAgentOutput(value: string): ProjectProgressSummaryOutput {
       .filter(Boolean)
       .slice(0, 10),
   };
+}
+
+function isLikelyProcessSummary(summary: string): boolean {
+  const normalized = summary.replace(/\s+/gu, " ").trim();
+  return [
+    /分析候选\s+(?:commits?|提交)/iu,
+    /选择性读取.*(?:关键.*)?(?:commits?|提交).*(?:详情|信息)/iu,
+    /^(?:先|将|准备|开始|继续|下一步|接下来).{0,100}(?:分析|读取|查看|检查)/u,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 function buildAgentInteraction(input: {

@@ -1,7 +1,7 @@
 "use client"
 
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
-import { ChevronsUpDown, Clock, LogOut, Network, Pin, Search, SquarePen, SunMoon, Trash2, UserRound, X } from "lucide-react"
+import { ChevronsUpDown, Clock, LogOut, Network, Pin, Search, SquarePen, SunMoon, Trash2, Type, UserRound, X } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
@@ -101,6 +101,7 @@ type NavLinkProps = {
 const DEFAULT_TITLE = "New Section"
 const TITLE_LENGTH = 18
 const PINNED_SESSIONS_STORAGE_KEY = "oa-agent-pinned-session-ids"
+const FONT_SIZE_STORAGE_KEY = "oa-agent-font-size-mode"
 const THEME_MODES = [
   { value: "system", label: "跟随系统" },
   { value: "light", label: "浅色模式" },
@@ -108,6 +109,15 @@ const THEME_MODES = [
 ] as const
 
 type ThemeMode = (typeof THEME_MODES)[number]["value"]
+
+const FONT_SIZE_MODES = [
+  { value: "small", label: "小", rootFontSize: "87.5%" },
+  { value: "default", label: "标准", rootFontSize: "100%" },
+  { value: "large", label: "大", rootFontSize: "112.5%" },
+  { value: "extra-large", label: "特大", rootFontSize: "125%" },
+] as const
+
+type FontSizeMode = (typeof FONT_SIZE_MODES)[number]["value"]
 
 const defaultItem: NavItem = {
   name: DEFAULT_TITLE,
@@ -162,7 +172,7 @@ const SearchBox = ({
     <input
       {...props}
       type="search"
-      className="h-full w-full appearance-none rounded-lg bg-transparent pl-9 pr-10 text-[13px] leading-5 text-[#565657] outline-none placeholder:text-[#565657] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+      className="h-full w-full appearance-none rounded-lg bg-transparent pl-9 pr-10 text-[0.8125rem] leading-5 text-[#565657] outline-none placeholder:text-[#565657] [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
     />
     {hasValue ? (
       <button
@@ -199,7 +209,7 @@ const UserInfo = ({
     <DropdownMenu>
       <DropdownMenuTrigger
         type="button"
-        className="h-8 w-8 shrink-0 rounded-md text-slate-950 transition-colors duration-150 hover:bg-slate-100 data-[state=open]:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:text-zinc-100 theme-dark:hover:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800 theme-dark:focus-visible:ring-white/15"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-950 transition-colors duration-150 hover:bg-slate-100 data-[state=open]:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:text-zinc-100 theme-dark:hover:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800 theme-dark:focus-visible:ring-white/15"
         aria-label="Open user menu"
       >
         <ChevronsUpDown className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
@@ -242,6 +252,7 @@ const UserInfo = ({
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        <FontSizeMenu />
         <ThemeModeMenu />
         <DropdownMenuSeparator className="mx-1 bg-slate-100 theme-dark:bg-zinc-800" />
         <DropdownMenuItem
@@ -255,6 +266,55 @@ const UserInfo = ({
     </DropdownMenu>
   </div>
 )
+
+const FontSizeMenu = () => {
+  const [selectedFontSize, setSelectedFontSize] = useState<FontSizeMode>("default")
+
+  useEffect(() => {
+    const storedMode = readStoredFontSizeMode()
+    setSelectedFontSize(storedMode)
+    applyFontSizeMode(storedMode)
+  }, [])
+
+  function handleFontSizeChange(value: string) {
+    if (!isFontSizeMode(value)) {
+      return
+    }
+
+    setSelectedFontSize(value)
+    applyFontSizeMode(value)
+    try {
+      window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, value)
+    } catch (error) {
+      console.error("Failed to persist font size preference:", error)
+    }
+  }
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="h-11 rounded-lg px-3 text-sm text-slate-700 focus:bg-slate-100 data-[state=open]:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800">
+        <Type className="h-4 w-4 text-slate-500 theme-dark:text-zinc-400" aria-hidden="true" />
+        字体大小
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent
+        sideOffset={8}
+        className="z-[10000] w-40 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
+      >
+        <DropdownMenuRadioGroup value={selectedFontSize} onValueChange={handleFontSizeChange}>
+          {FONT_SIZE_MODES.map((mode) => (
+            <DropdownMenuRadioItem
+              key={mode.value}
+              value={mode.value}
+              className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+            >
+              {mode.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
 
 const ThemeModeMenu = () => {
   const { theme, setTheme } = useTheme()
@@ -821,6 +881,29 @@ export default Sider
 
 function isThemeMode(value: string | undefined): value is ThemeMode {
   return THEME_MODES.some((mode) => mode.value === value)
+}
+
+function isFontSizeMode(value: string | null): value is FontSizeMode {
+  return FONT_SIZE_MODES.some((mode) => mode.value === value)
+}
+
+function readStoredFontSizeMode(): FontSizeMode {
+  try {
+    const storedMode = window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)
+    return isFontSizeMode(storedMode) ? storedMode : "default"
+  } catch {
+    return "default"
+  }
+}
+
+function applyFontSizeMode(mode: FontSizeMode) {
+  const selectedMode = FONT_SIZE_MODES.find((candidate) => candidate.value === mode)
+  if (!selectedMode) {
+    return
+  }
+
+  document.documentElement.dataset.fontSize = mode
+  document.documentElement.style.fontSize = selectedMode.rootFontSize
 }
 
 function readPinnedSessionIds(): string[] {

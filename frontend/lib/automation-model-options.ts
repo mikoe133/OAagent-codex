@@ -7,6 +7,50 @@ export type AutomationModelSelectOption = {
   isDefault?: boolean
 }
 
+export type AutomationModelSelection = {
+  provider: string
+  modelId: string
+}
+
+export function resolveAutomationModelSelection(
+  catalog: AutomationModelCatalog | null | undefined,
+  currentProvider?: string | null,
+  currentModel?: string | null,
+): AutomationModelSelection {
+  const providerValue = currentProvider?.trim() ?? ""
+  const modelValue = currentModel?.trim() ?? ""
+
+  if (providerValue && modelValue) {
+    return { provider: providerValue, modelId: modelValue }
+  }
+
+  if (modelValue) {
+    const inferredProvider = catalog?.providers.find((provider) => (
+      provider.models.some((model) => model.model_id === modelValue)
+    ))
+    if (inferredProvider) {
+      return { provider: inferredProvider.provider, modelId: modelValue }
+    }
+  }
+
+  if (providerValue) {
+    const provider = catalog?.providers.find((item) => item.provider === providerValue)
+    return {
+      provider: providerValue,
+      modelId: findAvailableModel(provider)?.model_id ?? "",
+    }
+  }
+
+  for (const provider of catalog?.providers ?? []) {
+    const model = findAvailableModel(provider)
+    if (model) {
+      return { provider: provider.provider, modelId: model.model_id }
+    }
+  }
+
+  return { provider: "", modelId: "" }
+}
+
 export function getAutomationProviderOptions(
   catalog: AutomationModelCatalog | null | undefined,
   currentProvider: string,
@@ -58,4 +102,11 @@ export function getAutomationModelOptions(
 
 function unavailableLabel(label: string): string {
   return `${label}（当前不可用）`
+}
+
+function findAvailableModel(
+  provider: AutomationModelCatalog["providers"][number] | undefined,
+) {
+  return provider?.models.find((model) => model.enabled && model.is_default)
+    ?? provider?.models.find((model) => model.enabled)
 }

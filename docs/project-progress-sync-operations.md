@@ -6,13 +6,14 @@ OA 是调度事实来源：OA 按任务配置在工作日 20:00 创建运行，O
 
 1. claim 成功后先上报 `running`，并按约 60 秒发送 heartbeat。
 2. 使用项目同步接口分页读取项目；`archived` 项目不读取详情或 GitHub。
-3. 规范化、去重全部 `github_urls`，读取各仓库分支的提交记录。
+3. 规范化、去重全部 `github_urls`，通过全局并发 6 的请求池读取各仓库分支的提交记录。
 4. 任一仓库读取失败时不生成部分总结，也不自动降级项目状态。
-5. 按 `Asia/Shanghai` 聚合项目当天提交，同一项目每天最多一条总结。
-6. 最近一次提交距计划执行时间达到 240 小时，状态改为 `maintenance`；维护中项目再次出现提交时改为 `updating`。
-7. Codex Agent 先阅读当天候选 Commit，再按需调用受限的 `read_commit_details` 工具；工具只允许本批次仓库与 SHA，返回裁剪后的文件名、增删统计和 Patch 片段。
-8. 项目结果和 AI interaction 使用稳定幂等键写入 OA，再回传运行终态。
-9. 收到取消请求或失去租约时，在安全检查点停止后续业务写入。
+5. 只为 `Asia/Shanghai` 当天实际有 Commit 的仓库创建 Codex Thread；每仓库一个，同时最多运行 2 个。
+6. 同一项目的仓库结果全部完成后再聚合，同一项目每天最多写入一条总结。
+7. 最近一次提交距计划执行时间达到 240 小时，状态改为 `maintenance`；维护中项目再次出现提交时改为 `updating`。
+8. Codex Agent 先阅读单仓库当天候选 Commit，再按需调用受限的 `read_commit_details` 工具；工具只允许本批次仓库与 SHA，返回裁剪后的文件名、增删统计和 Patch 片段。
+9. 项目结果和每个仓库 Thread 的 AI interaction 使用稳定幂等键写入 OA；OA mutation 全局并发固定为 1。
+10. 收到取消请求或失去租约时，立即取消排队和在途 Thread，并停止后续业务写入。
 
 已有人工总结不会被覆盖。Worker 只更新本地持久化状态确认由它管理、且未被人工修改的记录；并发创建冲突会按项目和日期重新查询后处理。
 
@@ -30,6 +31,10 @@ PROJECT_PROGRESS_PRODUCTION_WRITES=I_UNDERSTAND_PRODUCTION_WRITES
 PROJECT_PROGRESS_WORKER_INSTANCE=oaagent-local-01
 PROJECT_PROGRESS_LEASE_SECONDS=300
 PROJECT_PROGRESS_HEARTBEAT_SECONDS=60
+PROJECT_PROGRESS_GITHUB_CONCURRENCY=6
+PROJECT_PROGRESS_AGENT_CONCURRENCY=2
+PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=1
+PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces
 PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS=12
 PROJECT_PROGRESS_AGENT_MAX_FILES_PER_COMMIT=20
 PROJECT_PROGRESS_AGENT_MAX_PATCH_CHARS_PER_FILE=1200
@@ -38,7 +43,9 @@ PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS=12000
 
 GitHub PAT 只需目标仓库的 `Metadata: Read` 和 `Contents: Read`。两个 OA token 用途不同，不能互换，也不能使用用户 `sessionid`。
 
-GitHub PAT 只保留在 Worker 内存。每次项目总结会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单项目合计 12000 个 Patch 字符。CI/CD 中这四个预算使用 GitHub Environment Variables，不需要新增 Secret。
+GitHub PAT 只保留在 Worker 内存。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables，不需要新增 Secret。
+
+一个 Worker 内可以有任意数量的仓库任务排队，但只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个并发 6 请求池；OA 总结、状态和审计写入按顺序执行。容器建议至少分配 `2 CPU / 3GB`。
 
 项目总结 Agent 使用隔离的 Codex `exec`：忽略用户级配置和规则、不持久化 thread、禁用 shell、网页、插件能力及多 Agent，并固定 65536 token 上下文窗口和 6000 token 工具输出上限。若运行记录出现任何未授权工具调用，OAagent 会拒绝该输出并使用确定性兜底，同时把越权计数写入 AI interaction 审计。
 
