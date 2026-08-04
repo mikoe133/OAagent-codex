@@ -80,6 +80,8 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 
 | Secret | 填写内容 | 获取方式 |
 | --- | --- | --- |
+| `DEPLOY_HOST` | 服务器 IP 或域名 | 云服务器控制台或 SSH 配置 |
+| `DEPLOY_USER` | 可以直接运行 Docker 的 SSH 用户 | 登录服务器执行 `whoami` |
 | `DEPLOY_SSH_KEY` | `~/.ssh/oa_agent_deploy` 私钥完整内容 | 第 2 步生成 |
 | `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan` 完整输出 | 第 2 步生成并核对 |
 | `NEXTTOKEN_API_KEY` | Nexttoken Key | Nexttoken 控制台创建 |
@@ -108,8 +110,6 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Variables
 
 | Variable | 示例 | 怎么获得 |
 | --- | --- | --- |
-| `DEPLOY_HOST` | `1.2.3.4` | 服务器公网 IP 或 SSH 域名 |
-| `DEPLOY_USER` | `deploy` | 登录服务器执行 `whoami` |
 | `DEPLOY_PORT` | `22` | SSH 端口,默认 22 |
 | `DEPLOY_PLATFORM` | `linux/amd64` | 服务器执行 `uname -m`;`x86_64` 用 `linux/amd64`,`aarch64` 用 `linux/arm64` |
 

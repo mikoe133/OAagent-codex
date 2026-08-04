@@ -32,6 +32,8 @@ Repository Secrets:
 
 | Secret | 用途 |
 | --- | --- |
+| `DEPLOY_HOST` | 服务器 IP 或域名 |
+| `DEPLOY_USER` | 可以直接运行 Docker 的 SSH 用户 |
 | `DEPLOY_SSH_KEY` | GitHub Actions 登录服务器的 SSH 私钥 |
 | `DEPLOY_KNOWN_HOSTS` | 已核对的服务器 SSH Host Key |
 | `NEXTTOKEN_API_KEY` | Agent 模型服务凭证 |
@@ -43,8 +45,6 @@ Repository Variables:
 
 | Variable | 用途 |
 | --- | --- |
-| `DEPLOY_HOST` | 服务器 IP 或域名 |
-| `DEPLOY_USER` | 可以直接运行 Docker 的 SSH 用户 |
 | `DEPLOY_PORT` | SSH 端口,默认 `22` |
 | `DEPLOY_PLATFORM` | 默认 `linux/amd64`;ARM 使用 `linux/arm64` |
 
