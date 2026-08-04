@@ -131,6 +131,7 @@ test("whitelists every documented OA automation management endpoint", async () =
     { method: "POST", segments: ["jobs", "7", "runs"], expected: "/automation-jobs/7/runs" },
     { method: "GET", segments: ["runs"], query: "status=failed", expected: "/automation-job-runs?status=failed" },
     { method: "GET", segments: ["runs", "run-id"], query: "include=attempts", expected: "/automation-job-runs/run-id?include=attempts" },
+    { method: "GET", segments: ["runs", "run-id", "trace-events"], expected: "/automation-job-runs/run-id/trace-events" },
     { method: "POST", segments: ["runs", "run-id", "cancel"], expected: "/automation-job-runs/run-id/cancel" },
   ]
 

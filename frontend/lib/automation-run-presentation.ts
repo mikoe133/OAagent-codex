@@ -1,6 +1,7 @@
 import type {
   AutomationAiInteraction,
   AutomationRun,
+  AutomationRunProject,
 } from "./automation-api"
 
 const ACTIVE_AUTOMATION_RUN_STATUSES = new Set<AutomationRun["status"]>([
@@ -8,6 +9,30 @@ const ACTIVE_AUTOMATION_RUN_STATUSES = new Set<AutomationRun["status"]>([
   "claimed",
   "running",
 ])
+
+export type AutomationProjectOutcomeChartItem = {
+  id: string
+  label: string
+  color: string
+  value: number
+}
+
+const PROJECT_OUTCOME_CHART_PRESENTATIONS: Record<string, Omit<AutomationProjectOutcomeChartItem, "value">> = {
+  evaluated: { id: "evaluated", label: "完成评估", color: "#16A34A" },
+  summarized: { id: "summarized", label: "生成总结", color: "#10B981" },
+  status_updated: { id: "status_updated", label: "更新状态", color: "#0D9488" },
+  no_commits: { id: "no_commits", label: "当天无提交", color: "#0284C7" },
+  archived: { id: "archived", label: "已归档", color: "#71717A" },
+  no_github_urls: { id: "no_github_urls", label: "无 GitHub 地址", color: "#CA8A04" },
+  invalid_github_urls: { id: "invalid_github_urls", label: "GitHub 地址无效", color: "#DC2626" },
+  incomplete: { id: "incomplete", label: "处理不完整", color: "#EA580C" },
+  write_conflict: { id: "write_conflict", label: "写入冲突", color: "#D97706" },
+  failed: { id: "failed", label: "处理失败", color: "#B91C1C" },
+}
+
+const PROJECT_OUTCOME_ORDER = Object.keys(PROJECT_OUTCOME_CHART_PRESENTATIONS)
+const OTHER_OUTCOME_PRESENTATION = { id: "other", label: "其他结果", color: "#7C3AED" }
+const UNLOADED_OUTCOME_PRESENTATION = { id: "unloaded", label: "明细未加载", color: "#94A3B8" }
 
 export function isActiveAutomationRun(run: AutomationRun): boolean {
   return ACTIVE_AUTOMATION_RUN_STATUSES.has(run.status)
@@ -34,6 +59,49 @@ export function shouldRefreshAutomationRunDetail(
   previousRun?: AutomationRun,
 ): boolean {
   return !previousRun || run.status !== previousRun.status
+}
+
+export function projectOutcomeForDisplay(
+  project: Pick<AutomationRunProject, "outcome" | "commit_count" | "generated_summary">,
+): string {
+  if (
+    project.outcome === "evaluated" &&
+    project.commit_count === 0 &&
+    !project.generated_summary?.trim()
+  ) {
+    return "no_commits"
+  }
+  return project.outcome
+}
+
+export function buildAutomationProjectOutcomeChartData(
+  projects: AutomationRunProject[],
+  projectsTotal: number,
+): AutomationProjectOutcomeChartItem[] {
+  const counts = new Map<string, number>()
+
+  for (const project of projects) {
+    const outcome = projectOutcomeForDisplay(project)
+    const key = PROJECT_OUTCOME_CHART_PRESENTATIONS[outcome] ? outcome : "other"
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  const data = PROJECT_OUTCOME_ORDER.flatMap((key) => {
+    const value = counts.get(key) ?? 0
+    return value > 0
+      ? [{ ...PROJECT_OUTCOME_CHART_PRESENTATIONS[key]!, value }]
+      : []
+  })
+  const otherCount = counts.get("other") ?? 0
+  if (otherCount > 0) {
+    data.push({ ...OTHER_OUTCOME_PRESENTATION, value: otherCount })
+  }
+
+  const unloadedCount = Math.max(0, projectsTotal - projects.length)
+  if (unloadedCount > 0) {
+    data.push({ ...UNLOADED_OUTCOME_PRESENTATION, value: unloadedCount })
+  }
+  return data
 }
 
 export function resolveAutomationRunReply(

@@ -627,7 +627,7 @@ export default function Dialog11({
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-medium">{runStatusLabel(run.status)}</span>
-                            <span className="text-[11px] text-muted-foreground">{shortId(run.id)}</span>
+                            <span className="text-[0.6875rem] text-muted-foreground">{shortId(run.id)}</span>
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(run.scheduled_at)}</p>
                         </button>

@@ -4,6 +4,7 @@ import { runProjectProgressAutomation } from "../src/application/runProjectProgr
 import type { ProjectProgressSyncReport } from "../src/application/syncProjectProgress.js";
 import {
   AutomationLeaseLostError,
+  AutomationOaRequestError,
   type AutomationJobClaim,
   type AutomationOaClient,
   type AutomationRunStatus,
@@ -119,6 +120,75 @@ describe("runProjectProgressAutomation", () => {
     assert.equal(peakUploads, 1);
   });
 
+  it("reports live trace stages while the run is active", async () => {
+    const traceEvents: Array<{ eventKey: string; status: string }> = [];
+    const client = fakeClient({
+      upsertTraceEvent: async ({ event }) => {
+        traceEvents.push({ eventKey: event.eventKey, status: event.status });
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async (_shouldCancel, trace) => {
+        await trace?.({
+          eventKey: "read_github",
+          sequence: 300,
+          phase: "read_github",
+          status: "running",
+          title: "读取 GitHub 分支与 Commit",
+        });
+        return report();
+      },
+    });
+
+    assert.equal(result.status, "succeeded");
+    assert.deepEqual(
+      [...new Set(traceEvents.map((event) => event.eventKey))],
+      [
+        "worker_claimed",
+        "validate_configuration",
+        "read_github",
+        "upload_run_audit",
+        "finalize_run",
+      ],
+    );
+    assert.deepEqual(
+      traceEvents.filter((event) => event.eventKey === "upload_run_audit")
+        .map((event) => event.status),
+      ["running", "succeeded"],
+    );
+    assert.equal(traceEvents.at(-1)?.status, "succeeded");
+  });
+
+  it("keeps the business run working when OA has not enabled trace events", async () => {
+    let traceCalls = 0;
+    const client = fakeClient({
+      upsertTraceEvent: async () => {
+        traceCalls += 1;
+        throw new AutomationOaRequestError(
+          "trace endpoint missing",
+          404,
+          "automation_trace_not_found",
+        );
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async () => report(),
+    });
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(traceCalls, 1);
+  });
+
   it("stops at a safe checkpoint when heartbeat requests cancellation", async () => {
     const statuses: AutomationRunStatus[] = [];
     const client = fakeClient({
@@ -210,6 +280,7 @@ type AutomationClientMethods = Pick<
   | "heartbeat"
   | "upsertProjectResult"
   | "upsertAiInteraction"
+  | "upsertTraceEvent"
 >;
 
 function fakeClient(
@@ -221,6 +292,7 @@ function fakeClient(
     heartbeat: async () => heartbeatResult(false),
     upsertProjectResult: async () => 123,
     upsertAiInteraction: async () => 456,
+    upsertTraceEvent: async () => undefined,
     ...overrides,
   } as unknown as AutomationOaClient;
 }

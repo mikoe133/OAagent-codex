@@ -336,6 +336,38 @@ test("loads full run audit and supports permission fallback and cancellation", (
   assert.match(runDetailSource, /cancelAutomationRun\(run\.id\)/)
 })
 
+test("uses readable Chinese labels for project outcomes", () => {
+  assert.match(runDetailSource, /<ProjectOutcomeTag outcome=\{projectOutcomeForDisplay\(project\)\} \/>/)
+  assert.match(runDetailSource, /label: "已完成评估并生成结果"/)
+  assert.match(runDetailSource, /label: "项目已归档，已跳过处理"/)
+  assert.match(runDetailSource, /label: "无 GitHub 地址，已跳过处理"/)
+  assert.match(runDetailSource, /label: "仓库读取完成，当天无新增 Commit"/)
+  assert.match(runDetailSource, /backgroundClass: "bg-sky-100"/)
+  assert.match(runDetailSource, /textClass: "text-\[#008AF5\]"/)
+  assert.match(runDetailSource, /label: "处理不完整，未写入结果"/)
+  assert.match(runDetailSource, /backgroundClass: "bg-orange-50"/)
+  assert.match(runDetailSource, /textClass: "text-\[#EAA65D\]"/)
+})
+
+test("shows project warnings and incomplete project visibility hints", () => {
+  assert.match(runDetailSource, /project\.outcome === "incomplete" && project\.warnings\.length > 0/)
+  assert.match(runDetailSource, /<ProjectWarnings warnings=\{project\.warnings\} \/>/)
+  assert.match(runDetailSource, /automation:audit/)
+  assert.match(runDetailSource, /当前仅加载 \{run\.projects\.length\}\/\{run\.projects_total\} 个项目明细/)
+  assert.match(runDetailSource, /repository_read_failed: "读取 GitHub 仓库失败"/)
+})
+
+test("polls and renders live automation run trace stages", () => {
+  assert.match(automatedTasksSource, /getAutomationRunTrace\(runId\)/)
+  assert.match(automatedTasksSource, /isActiveAutomationRun\(selectedRun\)/)
+  assert.match(automatedTasksSource, /setInterval[\s\S]*?3_000/)
+  assert.match(runDetailSource, /data-slot="automation-run-trace"/)
+  assert.match(runDetailSource, /执行 Trace/)
+  assert.match(runDetailSource, /repository_full_name/)
+  assert.match(runDetailSource, /progress_current/)
+  assert.match(runDetailSource, /实时更新/)
+})
+
 test("soft deletes jobs and keeps deleted task history readable", () => {
   assert.match(automatedTasksSource, /includeDeleted: true/)
   assert.match(automatedTasksSource, /job\.deleted/)

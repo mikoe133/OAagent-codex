@@ -5,6 +5,23 @@
 /* HeroUI's bundled dark variant also follows the OS media query. */
 @custom-variant theme-dark (&:is(.dark *));
 
+/* The sidebar font-size preference scales rem-based text across the whole app. */
+html {
+  font-size: 100%;
+}
+
+html[data-font-size="small"] {
+  font-size: 87.5%;
+}
+
+html[data-font-size="large"] {
+  font-size: 112.5%;
+}
+
+html[data-font-size="extra-large"] {
+  font-size: 125%;
+}
+
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

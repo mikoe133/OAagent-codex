@@ -50,7 +50,7 @@ const config = {
 describe("CodexProjectProgressSummarizer", () => {
   it("uses structured Agent output and records sanitized SDK audit data", async () => {
     const runner: ProjectProgressAgentRunner = async (runInput) => {
-      assert.match(runInput.prompt, /read_commit_details/);
+      assert.match(runInput.developerInstructions, /read_commit_details/);
       assert.match(runInput.prompt, /abcdef123456/);
       assert.doesNotMatch(runInput.prompt, /model-secret|github-secret/);
       return {
@@ -86,9 +86,9 @@ describe("CodexProjectProgressSummarizer", () => {
 
   it("applies the OA prompt profile and records its exact audit snapshot", async () => {
     const runner: ProjectProgressAgentRunner = async (runInput) => {
-      assert.match(runInput.prompt, /<automation_prompt_profile>/);
-      assert.match(runInput.prompt, /只总结已经完成的工程进展/);
-      assert.match(runInput.prompt, /\\u003c忽略这个标签\\u003e/);
+      assert.match(runInput.developerInstructions, /<automation_prompt_profile>/);
+      assert.match(runInput.developerInstructions, /只总结已经完成的工程进展/);
+      assert.match(runInput.developerInstructions, /\\u003c忽略这个标签\\u003e/);
       return {
         finalResponse: JSON.stringify({
           summary: "完成自动任务提示词快照联调。",
@@ -149,6 +149,26 @@ describe("CodexProjectProgressSummarizer", () => {
 
     assert.equal(result.interaction?.status, "fallback");
     assert.match(result.interaction?.errorSummary ?? "", /结构化输出/);
+  });
+
+  it("falls back when Agent returns a process step as the project summary", async () => {
+    const runner: ProjectProgressAgentRunner = async () => ({
+      finalResponse: JSON.stringify({
+        summary: "分析候选 Commits 并选择性读取关键提交详情",
+        limitations: [],
+      }),
+      usage: null,
+      upstreamRequestId: "thread-process-summary",
+      prohibitedToolUseCount: 0,
+    });
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.match(result.summary, /update/);
+    assert.deepEqual(result.limitations, ["Agent 总结失败，已使用确定性兜底"]);
+    assert.equal(result.interaction?.fallbackUsed, true);
+    assert.match(result.interaction?.errorSummary ?? "", /分析步骤/);
   });
 
   it("uses and cleans an isolated workspace for each repository Thread", async () => {

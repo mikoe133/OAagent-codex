@@ -8,6 +8,7 @@ import {
   type ProjectStatus,
 } from "../domain/projectProgress.js";
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
+import { GitHubRequestError } from "../infrastructure/github/githubClient.js";
 import { normalizeGitHubRepositoryUrl } from "../infrastructure/github/githubUrl.js";
 import type { GitHubRepositoryIdentity } from "../infrastructure/github/githubUrl.js";
 import type {
@@ -33,6 +34,24 @@ export type ProjectProgressConcurrency = {
   oaWrite: 1;
 };
 
+export type ProjectProgressTraceEvent = {
+  eventKey: string;
+  sequence: number;
+  phase: string;
+  status: "pending" | "running" | "succeeded" | "fallback" | "failed" | "cancelled";
+  title: string;
+  message?: string;
+  progressCurrent?: number;
+  progressTotal?: number;
+  projectId?: number;
+  repositoryFullName?: string;
+  metadataSanitized?: Record<string, unknown>;
+};
+
+export type ProjectProgressTraceSink = (
+  event: ProjectProgressTraceEvent,
+) => void | Promise<void>;
+
 export type ProjectProgressRepositoryInteraction = {
   repositoryKey: string;
   interaction: ProjectProgressAiInteraction;
@@ -54,7 +73,7 @@ export type ProjectProgressProjectReport = {
   projectName: string;
   currentStatus: ProjectStatus;
   targetStatus: ProjectStatus;
-  outcome: "archived" | "no_github_urls" | "invalid_github_urls" | "incomplete" | "evaluated";
+  outcome: "archived" | "no_github_urls" | "invalid_github_urls" | "incomplete" | "no_commits" | "evaluated";
   warnings: string[];
   summaries: ProjectProgressSummaryProposal[];
   repositoryCount?: number;
@@ -204,6 +223,7 @@ export type ProjectProgressSyncInput = {
   concurrency?: ProjectProgressConcurrency;
   githubRequestLimiter?: AsyncSemaphore;
   shouldCancel?: () => boolean;
+  trace?: ProjectProgressTraceSink;
 };
 
 export async function syncProjectProgress(
@@ -234,10 +254,27 @@ async function executeProjectProgressSync(
   const writableStore = writeMode !== "dry-run"
     ? requireWritableStore(input.store)
     : null;
+  await emitTrace(input.trace, {
+    eventKey: "load_projects",
+    sequence: 100,
+    phase: "load_projects",
+    status: "running",
+    title: "读取 OA 项目列表",
+  });
   const listedProjects = await input.oaClient.listProjects();
   const projects = input.projectId === undefined
     ? listedProjects
     : listedProjects.filter((project) => project.id === input.projectId);
+  await emitTrace(input.trace, {
+    eventKey: "load_projects",
+    sequence: 100,
+    phase: "load_projects",
+    status: "succeeded",
+    title: "读取 OA 项目列表",
+    message: `已读取 ${projects.length} 个候选项目`,
+    progressCurrent: projects.length,
+    progressTotal: projects.length,
+  });
   const githubLimiter = new AsyncSemaphore(concurrency.github);
   const agentLimiter = new AsyncSemaphore(concurrency.agent);
   const oaWriteLimiter = new AsyncSemaphore(concurrency.oaWrite);
@@ -247,6 +284,15 @@ async function executeProjectProgressSync(
   let mutationsApplied = 0;
   let cancelled = false;
 
+  await emitTrace(input.trace, {
+    eventKey: "discover_repositories",
+    sequence: 200,
+    phase: "discover_repositories",
+    status: "running",
+    title: "解析项目与 GitHub 仓库",
+    progressCurrent: 0,
+    progressTotal: projects.length,
+  });
   for (const listedProject of projects) {
     if (input.shouldCancel?.()) {
       cancelled = true;
@@ -319,8 +365,31 @@ async function executeProjectProgressSync(
       repositoriesByKey.set(repository.fullName.toLowerCase(), repository);
     }
   }
+  await emitTrace(input.trace, {
+    eventKey: "discover_repositories",
+    sequence: 200,
+    phase: "discover_repositories",
+    status: cancelled ? "cancelled" : "succeeded",
+    title: "解析项目与 GitHub 仓库",
+    message: `发现 ${repositoriesByKey.size} 个唯一仓库`,
+    progressCurrent: entries.length,
+    progressTotal: projects.length,
+    metadataSanitized: {
+      repositories_discovered: repositoriesByKey.size,
+      archived_or_skipped_projects: entries.filter((entry) => entry.kind === "report").length,
+    },
+  });
 
   const repositorySnapshots = new Map<string, RepositorySnapshotResult>();
+  await emitTrace(input.trace, {
+    eventKey: "read_github",
+    sequence: 300,
+    phase: "read_github",
+    status: "running",
+    title: "读取 GitHub 分支与 Commit",
+    progressCurrent: 0,
+    progressTotal: repositoriesByKey.size,
+  });
   await Promise.all([...repositoriesByKey.entries()].map(async ([key, repository]) => {
     try {
       const snapshot = await githubLimiter.run(
@@ -337,6 +406,32 @@ async function executeProjectProgressSync(
     }
   }));
   cancelled ||= input.cancellationSignal?.aborted ?? false;
+  const repositoryReadFailures = [...repositorySnapshots.values()].filter(
+    (result) => result.error !== undefined,
+  ).length;
+  const repositoryConfigurationErrors = [...repositorySnapshots.values()].filter(
+    (result) => result.error !== undefined && isRepositoryConfigurationError(result.error),
+  ).length;
+  await emitTrace(input.trace, {
+    eventKey: "read_github",
+    sequence: 300,
+    phase: "read_github",
+    status: cancelled
+      ? "cancelled"
+      : repositoryReadFailures > 0
+        ? "fallback"
+        : "succeeded",
+    title: "读取 GitHub 分支与 Commit",
+    message: repositoryReadFailures > 0
+      ? `${repositoryReadFailures} 个仓库读取失败，关联项目将跳过写入`
+      : `已完成 ${repositorySnapshots.size} 个仓库读取`,
+    progressCurrent: repositorySnapshots.size,
+    progressTotal: repositoriesByKey.size,
+    metadataSanitized: {
+      repository_read_failures: repositoryReadFailures,
+      repository_configuration_errors: repositoryConfigurationErrors,
+    },
+  });
 
   const currentBusinessDate = formatDateInTimeZone(
     input.observedAt,
@@ -355,9 +450,7 @@ async function executeProjectProgressSync(
       if (result?.snapshot) {
         return result.snapshot;
       }
-      warnings.push(
-        `repository_read_failed:${repository.fullName}:${errorMessage(result?.error)}`,
-      );
+      warnings.push(repositoryReadWarning(repository.fullName, result?.error));
       return incompleteRepositorySnapshot(repository);
     });
     const decision = decideProjectStatus({
@@ -428,13 +521,46 @@ async function executeProjectProgressSync(
       groups,
     });
   }
+  await emitTrace(input.trace, {
+    eventKey: "prepare_repository_tasks",
+    sequence: 400,
+    phase: "prepare_repository_tasks",
+    status: cancelled ? "cancelled" : "succeeded",
+    title: "生成当天仓库总结任务",
+    message: `${repositoryTasks.size} 个仓库当天有 Commit，需要运行 Agent`,
+    progressCurrent: repositoryTasks.size,
+    progressTotal: repositoriesByKey.size,
+  });
 
   const deterministicFallback = new DeterministicProjectProgressSummarizer();
   const repositoryResults = new Map<string, RepositorySummaryResult>();
+  let completedRepositoryTasks = 0;
+  await emitTrace(input.trace, {
+    eventKey: "summarize_repositories",
+    sequence: 500,
+    phase: "summarize_repositories",
+    status: cancelled ? "cancelled" : repositoryTasks.size > 0 ? "running" : "succeeded",
+    title: "并发生成仓库 Commit 总结",
+    message: repositoryTasks.size > 0
+      ? `最多同时运行 ${concurrency.agent} 个 Codex Thread`
+      : "当天没有需要调用 AI 的仓库",
+    progressCurrent: 0,
+    progressTotal: repositoryTasks.size,
+  });
   if (!cancelled) {
     await Promise.all([...repositoryTasks.values()].map(async (task) => {
       try {
         const result = await agentLimiter.run(async () => {
+          await emitTrace(input.trace, {
+            eventKey: `repository_summary:${task.repositoryKey}:${task.summaryDate}`,
+            sequence: 510,
+            phase: "repository_summary",
+            status: "running",
+            title: "总结仓库 Commit",
+            message: task.repositoryKey,
+            repositoryFullName: task.repositoryKey,
+            metadataSanitized: { commit_count: task.commits.length },
+          });
           try {
             const generated = await input.summarizer.summarize({
               projectId: task.projectId,
@@ -477,9 +603,45 @@ async function executeProjectProgressSync(
           }
         }, input.cancellationSignal);
         repositoryResults.set(task.key, result);
+        completedRepositoryTasks += 1;
+        await emitTrace(input.trace, {
+          eventKey: `repository_summary:${task.repositoryKey}:${task.summaryDate}`,
+          sequence: 510,
+          phase: "repository_summary",
+          status: result.status,
+          title: "总结仓库 Commit",
+          message: result.status === "fallback"
+            ? `${task.repositoryKey} 使用确定性兜底总结`
+            : `${task.repositoryKey} 总结完成`,
+          progressCurrent: task.commits.length,
+          progressTotal: task.commits.length,
+          repositoryFullName: task.repositoryKey,
+          metadataSanitized: { commit_count: task.commits.length },
+        });
+        await emitTrace(input.trace, {
+          eventKey: "summarize_repositories",
+          sequence: 500,
+          phase: "summarize_repositories",
+          status: completedRepositoryTasks === repositoryTasks.size
+            ? "succeeded"
+            : "running",
+          title: "并发生成仓库 Commit 总结",
+          message: `已完成 ${completedRepositoryTasks}/${repositoryTasks.size} 个仓库`,
+          progressCurrent: completedRepositoryTasks,
+          progressTotal: repositoryTasks.size,
+        });
       } catch (error) {
         if (input.cancellationSignal?.aborted) {
           cancelled = true;
+          await emitTrace(input.trace, {
+            eventKey: `repository_summary:${task.repositoryKey}:${task.summaryDate}`,
+            sequence: 510,
+            phase: "repository_summary",
+            status: "cancelled",
+            title: "总结仓库 Commit",
+            message: `${task.repositoryKey} 已取消`,
+            repositoryFullName: task.repositoryKey,
+          });
           return;
         }
         repositoryResults.set(task.key, {
@@ -488,13 +650,66 @@ async function executeProjectProgressSync(
           status: "failed",
           error: errorMessage(error),
         });
+        completedRepositoryTasks += 1;
+        await emitTrace(input.trace, {
+          eventKey: `repository_summary:${task.repositoryKey}:${task.summaryDate}`,
+          sequence: 510,
+          phase: "repository_summary",
+          status: "failed",
+          title: "总结仓库 Commit",
+          message: `${task.repositoryKey} 总结失败`,
+          repositoryFullName: task.repositoryKey,
+          metadataSanitized: { error_code: "repository_summary_failed" },
+        });
       }
     }));
   }
 
+  const failedRepositoryTasks = [...repositoryResults.values()].filter(
+    (result) => result.status === "failed",
+  ).length;
+  await emitTrace(input.trace, {
+    eventKey: "summarize_repositories",
+    sequence: 500,
+    phase: "summarize_repositories",
+    status: cancelled
+      ? "cancelled"
+      : failedRepositoryTasks > 0
+        ? "fallback"
+        : "succeeded",
+    title: "并发生成仓库 Commit 总结",
+    message: failedRepositoryTasks > 0
+      ? `${failedRepositoryTasks} 个仓库总结失败`
+      : `已完成 ${completedRepositoryTasks}/${repositoryTasks.size} 个仓库`,
+    progressCurrent: completedRepositoryTasks,
+    progressTotal: repositoryTasks.size,
+    metadataSanitized: { repository_tasks_failed: failedRepositoryTasks },
+  });
+
+  await emitTrace(input.trace, {
+    eventKey: "persist_projects",
+    sequence: 600,
+    phase: "persist_projects",
+    status: cancelled ? "cancelled" : "running",
+    title: "聚合项目结果并写入 OA",
+    progressCurrent: 0,
+    progressTotal: entries.length,
+  });
+  let completedProjectEntries = 0;
   for (const entry of entries) {
     if (entry.kind === "report") {
       reports.push(entry.report);
+      completedProjectEntries += 1;
+      await emitTrace(input.trace, {
+        eventKey: "persist_projects",
+        sequence: 600,
+        phase: "persist_projects",
+        status: "running",
+        title: "聚合项目结果并写入 OA",
+        message: `已处理 ${completedProjectEntries}/${entries.length} 个项目`,
+        progressCurrent: completedProjectEntries,
+        progressTotal: entries.length,
+      });
       continue;
     }
     const evaluation = evaluations.get(entry.prepared.project.id)!;
@@ -615,17 +830,44 @@ async function executeProjectProgressSync(
       projectName: project.projectName,
       currentStatus: project.status,
       targetStatus: evaluation.targetStatus,
-      outcome: evaluation.complete ? "evaluated" : "incomplete",
+      outcome: !evaluation.complete
+        ? "incomplete"
+        : summaries.length === 0
+          ? "no_commits"
+          : "evaluated",
       warnings: evaluation.warnings,
       summaries,
       repositoryCount: evaluation.snapshots.length,
       commitCount: summaries.reduce((total, summary) => total + summary.commitCount, 0),
       mutationsApplied: projectMutationsApplied,
     });
+    completedProjectEntries += 1;
+    await emitTrace(input.trace, {
+      eventKey: "persist_projects",
+      sequence: 600,
+      phase: "persist_projects",
+      status: "running",
+      title: "聚合项目结果并写入 OA",
+      message: `已处理 ${completedProjectEntries}/${entries.length} 个项目`,
+      progressCurrent: completedProjectEntries,
+      progressTotal: entries.length,
+      projectId: project.id,
+    });
     if (cancelled) {
       break;
     }
   }
+  await emitTrace(input.trace, {
+    eventKey: "persist_projects",
+    sequence: 600,
+    phase: "persist_projects",
+    status: cancelled ? "cancelled" : "succeeded",
+    title: "聚合项目结果并写入 OA",
+    message: `已处理 ${completedProjectEntries}/${entries.length} 个项目`,
+    progressCurrent: completedProjectEntries,
+    progressTotal: entries.length,
+    metadataSanitized: { mutations_applied: mutationsApplied },
+  });
 
   const repositoriesWithCommits = new Set(
     [...repositorySnapshots.entries()]
@@ -712,6 +954,20 @@ function resolveConcurrency(
   return resolved;
 }
 
+async function emitTrace(
+  sink: ProjectProgressTraceSink | undefined,
+  event: ProjectProgressTraceEvent,
+): Promise<void> {
+  if (!sink) {
+    return;
+  }
+  try {
+    await sink(event);
+  } catch {
+    return;
+  }
+}
+
 function incompleteRepositorySnapshot(
   repository: GitHubRepositoryIdentity,
 ): GitHubRepositorySnapshot {
@@ -752,13 +1008,26 @@ function combineRepositorySummaries(
 
 function projectNeedsRetry(report: ProjectProgressProjectReport): boolean {
   if (report.outcome === "incomplete") {
-    return true;
+    return report.warnings.length === 0 || report.warnings.some(
+      (warning) => !warning.startsWith("repository_configuration_error:"),
+    );
   }
   return report.warnings.some((warning) =>
     warning.startsWith("write_failed:") ||
     warning.startsWith("status_write_failed:") ||
     warning.startsWith("summary_write_failed:")
   );
+}
+
+function repositoryReadWarning(repositoryFullName: string, error: unknown): string {
+  const kind = isRepositoryConfigurationError(error)
+    ? "repository_configuration_error"
+    : "repository_read_failed";
+  return `${kind}:${repositoryFullName}:${errorMessage(error)}`;
+}
+
+function isRepositoryConfigurationError(error: unknown): boolean {
+  return error instanceof GitHubRequestError && error.status === 404;
 }
 
 async function applyMutations(input: {

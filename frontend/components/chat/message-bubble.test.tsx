@@ -254,7 +254,7 @@ test("streaming agent messages render as separate subdued trace steps in event o
 
   assert.equal(traceMessages.length, 2)
   assert.match(html, />Now I will summarize the result\.<\/span>/)
-  assert.match(html, /flex-1 truncate text-\[13px\] font-normal/)
+  assert.match(html, /flex-1 truncate text-\[(?:13px|0\.8125rem)\] font-normal/)
   assert.match(html, /text-stone-500/)
   assert.ok(firstMessageIndex < toolIndex)
   assert.ok(toolIndex < secondMessageIndex)

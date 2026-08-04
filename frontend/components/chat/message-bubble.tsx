@@ -106,7 +106,7 @@ export function MessageBubble({
                   />
                 </div>
               )}
-              <p className="whitespace-pre-wrap break-words text-[15px] leading-6">{message.content}</p>
+              <p className="whitespace-pre-wrap break-words text-[0.9375rem] leading-6">{message.content}</p>
             </div>
           </div>
         ) : (
@@ -166,7 +166,7 @@ function UserActions({ message }: { message: Message }) {
   const showCopy = message.content.trim().length > 0
 
   return (
-    <div className="mt-1.5 flex min-h-7 items-center justify-end gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
+            <div className="mt-1.5 flex min-h-7 items-center justify-end gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
       <span>{formatTime(message.createdAt)}</span>
       {showCopy && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
@@ -200,7 +200,7 @@ function AssistantActions({
   }
 
   return (
-    <div className="mt-2 flex min-h-7 items-center gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
+            <div className="mt-2 flex min-h-7 items-center gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
       {responseDuration && <span>{`已处理: ${responseDuration}`}</span>}
       {showActions && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
@@ -411,7 +411,7 @@ function ToolTimeline({
                 )}
                 {!isTraceActive && <GitCompareArrows className="h-4 w-4" />}
               </div>
-              <span className="block min-w-0 flex-1 truncate text-[13px] font-normal leading-5 text-stone-500 theme-dark:text-zinc-400">
+              <span className="block min-w-0 flex-1 truncate text-[0.8125rem] font-normal leading-5 text-stone-500 theme-dark:text-zinc-400">
                 {summaryText}
               </span>
             </div>
@@ -564,7 +564,7 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
           <span className="text-xs font-semibold text-stone-800 theme-dark:text-zinc-200">{step.title}</span>
           <span
             data-slot="trace-tool-status"
-            className={cn("text-[10px] font-medium uppercase", statusClass(step.status))}
+            className={cn("text-[0.625rem] font-medium uppercase", statusClass(step.status))}
           >
             {statusLabel(step.status)}
           </span>
@@ -572,7 +572,7 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
         <p className="mt-0.5 break-words text-xs leading-5 text-stone-500 theme-dark:text-zinc-400">{step.description}</p>
         {hasDetails && (
           <details className="group mt-1.5" open={step.status === "running"}>
-            <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-stone-500 transition-colors hover:text-stone-800 theme-dark:text-zinc-400 theme-dark:hover:text-zinc-200">
+            <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[0.6875rem] font-medium text-stone-500 transition-colors hover:text-stone-800 theme-dark:text-zinc-400 theme-dark:hover:text-zinc-200">
               <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" aria-hidden="true" />
               Details
             </summary>
@@ -590,8 +590,8 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
 function ToolDetail({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="mb-1 text-[10px] font-semibold uppercase text-stone-400 theme-dark:text-zinc-500">{label}</div>
-      <pre className="max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-stone-950 px-3 py-2 font-mono text-[11px] leading-5 text-stone-100">
+          <div className="mb-1 text-[0.625rem] font-semibold uppercase text-stone-400 theme-dark:text-zinc-500">{label}</div>
+          <pre className="max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-stone-950 px-3 py-2 font-mono text-[0.6875rem] leading-5 text-stone-100">
         {value}
       </pre>
     </div>

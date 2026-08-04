@@ -3,6 +3,7 @@ import type {
   AutomationJobClaim,
   AutomationOaClient,
   AutomationRunProjectInput,
+  AutomationTraceEventInput,
 } from "../infrastructure/oa/automationOaClient.js";
 import {
   AutomationLeaseLostError,
@@ -12,6 +13,8 @@ import type {
   ProjectProgressProjectReport,
   ProjectProgressSyncReport,
   ProjectProgressSummaryProposal,
+  ProjectProgressTraceEvent,
+  ProjectProgressTraceSink,
 } from "./syncProjectProgress.js";
 
 export class ProjectProgressConfigurationError extends Error {
@@ -37,7 +40,10 @@ export async function runProjectProgressAutomation(input: {
   heartbeatSeconds: number;
   resolveExecution: (
     claim: AutomationJobClaim,
-  ) => Promise<(shouldCancel: () => boolean) => Promise<ProjectProgressSyncReport>>;
+  ) => Promise<(
+    shouldCancel: () => boolean,
+    trace?: ProjectProgressTraceSink,
+  ) => Promise<ProjectProgressSyncReport>>;
 }): Promise<ProjectProgressAutomationResult> {
   const claim = await input.automationClient.claim(
     input.workerInstance,
@@ -46,13 +52,37 @@ export async function runProjectProgressAutomation(input: {
   if (!claim) {
     return { claimed: false, runId: null, status: "idle", report: null };
   }
+  const traceReporter = new AutomationTraceReporter({
+    automationClient: input.automationClient,
+    claim,
+    workerInstance: input.workerInstance,
+  });
+  await traceReporter.publish({
+    eventKey: "worker_claimed",
+    sequence: 10,
+    phase: "worker_claimed",
+    status: "succeeded",
+    title: "Worker 已领取任务",
+    message: input.workerInstance,
+  });
 
-  let execute: (shouldCancel: () => boolean) => Promise<ProjectProgressSyncReport>;
+  let execute: (
+    shouldCancel: () => boolean,
+    trace?: ProjectProgressTraceSink,
+  ) => Promise<ProjectProgressSyncReport>;
   try {
     validateClaim(claim);
     execute = await input.resolveExecution(claim);
   } catch (error) {
     const summary = safeErrorSummary(error);
+    await traceReporter.publish({
+      eventKey: "validate_configuration",
+      sequence: 20,
+      phase: "validate_configuration",
+      status: "failed",
+      title: "校验任务配置",
+      message: summary,
+    });
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -75,6 +105,14 @@ export async function runProjectProgressAutomation(input: {
     workerInstance: input.workerInstance,
     status: "running",
   });
+  await traceReporter.publish({
+    eventKey: "validate_configuration",
+    sequence: 20,
+    phase: "validate_configuration",
+    status: "succeeded",
+    title: "校验任务配置",
+    message: `${claim.modelProvider}/${claim.modelId}`,
+  });
   const heartbeat = new HeartbeatController({
     automationClient: input.automationClient,
     claim,
@@ -86,9 +124,22 @@ export async function runProjectProgressAutomation(input: {
 
   try {
     const startedAt = new Date();
-    const report = await execute(() => heartbeat.shouldStop());
+    const report = await execute(
+      () => heartbeat.shouldStop(),
+      (event) => traceReporter.publish(event),
+    );
     heartbeat.assertLease();
 
+    await traceReporter.publish({
+      eventKey: "upload_run_audit",
+      sequence: 700,
+      phase: "upload_run_audit",
+      status: "running",
+      title: "写入项目结果与 AI 审计",
+      progressCurrent: 0,
+      progressTotal: report.projects.length,
+    });
+    let uploadedProjects = 0;
     for (const project of report.projects) {
       heartbeat.assertLease();
       const finishedAt = new Date();
@@ -154,11 +205,54 @@ export async function runProjectProgressAutomation(input: {
           });
         }
       }
+      uploadedProjects += 1;
+      await traceReporter.publish({
+        eventKey: "upload_run_audit",
+        sequence: 700,
+        phase: "upload_run_audit",
+        status: uploadedProjects === report.projects.length ? "succeeded" : "running",
+        title: "写入项目结果与 AI 审计",
+        message: `已上传 ${uploadedProjects}/${report.projects.length} 个项目`,
+        progressCurrent: uploadedProjects,
+        progressTotal: report.projects.length,
+        projectId: project.projectId,
+      });
+    }
+    if (report.projects.length === 0) {
+      await traceReporter.publish({
+        eventKey: "upload_run_audit",
+        sequence: 700,
+        phase: "upload_run_audit",
+        status: "succeeded",
+        title: "写入项目结果与 AI 审计",
+        message: "没有需要上传的项目结果",
+        progressCurrent: 0,
+        progressTotal: 0,
+      });
     }
 
     await heartbeat.stop();
     heartbeat.assertLease();
     const terminal = resolveTerminal(report, heartbeat.cancelRequested);
+    await traceReporter.publish({
+      eventKey: "finalize_run",
+      sequence: 900,
+      phase: "finalize_run",
+      status: terminal.status === "cancelled"
+        ? "cancelled"
+        : terminal.status === "failed"
+          ? "failed"
+          : terminal.status === "partial_failed"
+            ? "fallback"
+            : "succeeded",
+      title: "完成自动任务运行",
+      message: terminal.errorSummary ?? "运行成功完成",
+      metadataSanitized: {
+        projects_total: report.projects.length,
+        mutations_applied: report.mutationsApplied,
+        retry_recommended: terminal.retryRecommended,
+      },
+    });
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -180,6 +274,17 @@ export async function runProjectProgressAutomation(input: {
       throw error;
     }
     const retryRecommended = isRetryable(error);
+    await traceReporter.publish({
+      eventKey: "finalize_run",
+      sequence: 900,
+      phase: "finalize_run",
+      status: heartbeat.cancelRequested ? "cancelled" : "failed",
+      title: "自动任务运行终止",
+      message: heartbeat.cancelRequested
+        ? "任务已按取消请求停止"
+        : safeErrorSummary(error),
+      metadataSanitized: { retry_recommended: retryRecommended },
+    });
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -197,6 +302,56 @@ export async function runProjectProgressAutomation(input: {
       status: heartbeat.cancelRequested ? "cancelled" : "failed",
       report: null,
     };
+  }
+}
+
+class AutomationTraceReporter {
+  private disabled = false;
+  private consecutiveFailures = 0;
+
+  constructor(private readonly input: {
+    automationClient: AutomationOaClient;
+    claim: AutomationJobClaim;
+    workerInstance: string;
+  }) {}
+
+  async publish(event: ProjectProgressTraceEvent): Promise<void> {
+    if (this.disabled) {
+      return;
+    }
+    const payload: AutomationTraceEventInput = {
+      eventKey: event.eventKey.slice(0, 200),
+      sequence: event.sequence,
+      phase: event.phase.slice(0, 100),
+      status: event.status,
+      title: event.title.slice(0, 200),
+      message: event.message?.slice(0, 1_000) ?? null,
+      progressCurrent: event.progressCurrent ?? null,
+      progressTotal: event.progressTotal ?? null,
+      projectId: event.projectId ?? null,
+      repositoryFullName: event.repositoryFullName?.slice(0, 255) ?? null,
+      metadataSanitized: event.metadataSanitized ?? {},
+      occurredAt: new Date().toISOString(),
+    };
+    try {
+      await this.input.automationClient.upsertTraceEvent({
+        claim: this.input.claim,
+        workerInstance: this.input.workerInstance,
+        event: payload,
+      });
+      this.consecutiveFailures = 0;
+    } catch (error) {
+      this.consecutiveFailures += 1;
+      if (
+        error instanceof AutomationOaRequestError &&
+        error.status >= 400 &&
+        error.status < 500
+      ) {
+        this.disabled = true;
+      } else if (this.consecutiveFailures >= 3) {
+        this.disabled = true;
+      }
+    }
   }
 }
 

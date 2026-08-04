@@ -60,6 +60,9 @@ describe("AutomationOaClient", () => {
       if (pathname.endsWith("/ai-interactions")) {
         return Response.json({ data: { interaction_id: 456 } }, { status: 201 });
       }
+      if (pathname.endsWith("/trace-events")) {
+        return new Response(null, { status: 204 });
+      }
       return Response.json({ data: { run: { id: "run-01" } } });
     });
     const claim = decodeClaimForTest();
@@ -117,6 +120,24 @@ describe("AutomationOaClient", () => {
         errorSummary: null,
       },
     });
+    await client.upsertTraceEvent({
+      claim,
+      workerInstance: "worker-01",
+      event: {
+        eventKey: "read_github",
+        sequence: 300,
+        phase: "read_github",
+        status: "running",
+        title: "读取 GitHub 分支与 Commit",
+        message: "已读取 2/6 个仓库",
+        progressCurrent: 2,
+        progressTotal: 6,
+        projectId: null,
+        repositoryFullName: null,
+        metadataSanitized: { github_concurrency: 6 },
+        occurredAt: "2026-07-30T12:00:30.000Z",
+      },
+    });
     await client.updateRun({
       claim,
       workerInstance: "worker-01",
@@ -131,17 +152,36 @@ describe("AutomationOaClient", () => {
       "POST",
       "PUT",
       "POST",
+      "POST",
       "PATCH",
     ]);
     assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
       "/internal/automation-job-runs/run-01/heartbeat",
       "/internal/automation-job-runs/run-01/projects/51",
       "/internal/automation-job-runs/run-01/ai-interactions",
+      "/internal/automation-job-runs/run-01/trace-events",
       "/internal/automation-job-runs/run-01",
     ]);
     const auditBody = await requests[2]?.json() as Record<string, unknown>;
     assert.deepEqual(auditBody.request_payload_sanitized, { commit_count: 2 });
     assert.doesNotMatch(JSON.stringify(auditBody), /commit subject/);
+    const traceBody = await requests[3]?.json() as Record<string, unknown>;
+    assert.deepEqual(traceBody, {
+      worker_instance: "worker-01",
+      lease_token: "lease-secret",
+      event_key: "read_github",
+      sequence: 300,
+      phase: "read_github",
+      status: "running",
+      title: "读取 GitHub 分支与 Commit",
+      message: "已读取 2/6 个仓库",
+      progress_current: 2,
+      progress_total: 6,
+      project_id: null,
+      repository_full_name: null,
+      metadata_sanitized: { github_concurrency: 6 },
+      occurred_at: "2026-07-30T12:00:30.000Z",
+    });
   });
 
   it("classifies an expired lease as a terminal lease loss", async () => {

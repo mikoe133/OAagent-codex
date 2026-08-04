@@ -36,7 +36,7 @@ const markdownComponents: Components = {
   ),
   hr: () => <hr className="my-5 border-stone-200 theme-dark:border-zinc-800" />,
   pre: ({ children }) => (
-    <pre className="my-4 max-w-full overflow-x-auto rounded-lg border border-stone-800 bg-stone-950 px-4 py-3 font-mono text-[13px] leading-6 text-stone-100 shadow-sm theme-dark:border-zinc-700 [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:ring-0">
+    <pre className="my-4 max-w-full overflow-x-auto rounded-lg border border-stone-800 bg-stone-950 px-4 py-3 font-mono text-[0.8125rem] leading-6 text-stone-100 shadow-sm theme-dark:border-zinc-700 [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:ring-0">
       {children}
     </pre>
   ),
@@ -64,7 +64,7 @@ const markdownComponents: Components = {
 
 export function MarkdownRenderer({ content, className, isStreaming = false }: MarkdownRendererProps) {
   return (
-    <div className={cn("min-w-0 max-w-full text-[15px] leading-7 text-stone-800 theme-dark:text-zinc-200", className)}>
+    <div className={cn("min-w-0 max-w-full text-[0.9375rem] leading-7 text-stone-800 theme-dark:text-zinc-200", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
         {content}
       </ReactMarkdown>

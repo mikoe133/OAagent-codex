@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { syncProjectProgress } from "../src/application/syncProjectProgress.js";
+import {
+  syncProjectProgress,
+  type ProjectProgressTraceEvent,
+} from "../src/application/syncProjectProgress.js";
+import { GitHubRequestError } from "../src/infrastructure/github/githubClient.js";
 import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/githubTypes.js";
 
 describe("syncProjectProgress", () => {
@@ -20,10 +24,14 @@ describe("syncProjectProgress", () => {
     let activeAgentRuns = 0;
     let peakAgentRuns = 0;
     const summarizedRepositories: string[] = [];
+    const traceEvents: ProjectProgressTraceEvent[] = [];
 
     const result = await syncProjectProgress({
       observedAt: new Date("2026-07-24T12:00:00.000Z"),
       concurrency: { github: 6, agent: 2, oaWrite: 1 },
+      trace: (event) => {
+        traceEvents.push(event);
+      },
       oaClient: {
         listProjects: async () => [project],
         getProject: async () => project,
@@ -76,6 +84,16 @@ describe("syncProjectProgress", () => {
     assert.equal(result.metrics.githubPeakConcurrency, 6);
     assert.equal(result.metrics.agentPeakConcurrency, 2);
     assert.equal(result.metrics.oaWritePeakConcurrency, 0);
+    assert.equal(
+      traceEvents.filter((event) =>
+        event.phase === "repository_summary" && event.status === "succeeded"
+      ).length,
+      repositoryCount,
+    );
+    assert.equal(
+      traceEvents.findLast((event) => event.eventKey === "summarize_repositories")?.status,
+      "succeeded",
+    );
   });
 
   it("summarizes a shared repository once and fans the result into both projects", async () => {
@@ -269,6 +287,7 @@ describe("syncProjectProgress", () => {
     assert.equal(result.metrics.repositoryTasksTotal, 0);
     assert.equal(result.metrics.agentPeakConcurrency, 0);
     assert.equal(result.projects[0]?.targetStatus, "maintenance");
+    assert.equal(result.projects[0]?.outcome, "no_commits");
     assert.deepEqual(result.projects[0]?.summaries, []);
   });
 
@@ -399,6 +418,33 @@ describe("syncProjectProgress", () => {
     assert.equal(watermarks, 0);
     assert.equal(result.projects[0]?.outcome, "incomplete");
     assert.deepEqual(result.projects[0]?.summaries, []);
+    assert.equal(result.retryRecommended, true);
+  });
+
+  it("treats a GitHub 404 as a non-retryable repository configuration error", async () => {
+    const project = {
+      id: 26,
+      projectName: "missing repository",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/missing"],
+    };
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      oaClient: { listProjects: async () => [project], getProject: async () => project },
+      githubReader: {
+        readRepository: async () => {
+          throw new GitHubRequestError("GitHub 请求失败:HTTP 404", 404, null);
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+    });
+
+    assert.equal(result.projects[0]?.outcome, "incomplete");
+    assert.match(
+      result.projects[0]?.warnings.join(" ") ?? "",
+      /repository_configuration_error:alpha\/missing:GitHub 请求失败:HTTP 404/,
+    );
+    assert.equal(result.retryRecommended, false);
   });
 
   it("reuses the stored draft when the source digest is unchanged", async () => {

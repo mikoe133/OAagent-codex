@@ -51,7 +51,7 @@ async function main(): Promise<void> {
         modelParameters: claim.modelParameters,
       });
       const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
-      return async (shouldCancel) => {
+      return async (shouldCancel, trace) => {
         const store = new ProjectProgressStore(config.stateDatabasePath);
         try {
           return await syncProjectProgress({
@@ -80,6 +80,7 @@ async function main(): Promise<void> {
             concurrency: config.concurrency,
             githubRequestLimiter,
             shouldCancel,
+            trace,
           });
         } finally {
           store.close();

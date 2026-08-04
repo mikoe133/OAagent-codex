@@ -218,6 +218,33 @@ export type AutomationAiInteraction = {
   limitations?: Array<Record<string, unknown>>
 }
 
+export type AutomationRunTraceStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "fallback"
+  | "failed"
+  | "cancelled"
+
+export type AutomationRunTraceEvent = {
+  id: number
+  event_key: string
+  sequence: number
+  phase: string
+  status: AutomationRunTraceStatus
+  title: string
+  message: string | null
+  progress_current: number | null
+  progress_total: number | null
+  project_id: number | null
+  repository_full_name: string | null
+  metadata_sanitized: Record<string, unknown>
+  started_at: string | null
+  finished_at: string | null
+  occurred_at: string
+  updated_at: string
+}
+
 export type AutomationPagination<T> = {
   total: number
   items: T[]
@@ -440,6 +467,14 @@ export function getAutomationRun(
 ): Promise<AutomationRun> {
   return automationRequest<AutomationRun>(
     `/runs/${encodeURIComponent(runId)}?include=${encodeURIComponent(include)}`,
+  )
+}
+
+export function getAutomationRunTrace(
+  runId: string,
+): Promise<AutomationPagination<AutomationRunTraceEvent>> {
+  return automationRequest<AutomationPagination<AutomationRunTraceEvent>>(
+    `/runs/${encodeURIComponent(runId)}/trace-events`,
   )
 }
 

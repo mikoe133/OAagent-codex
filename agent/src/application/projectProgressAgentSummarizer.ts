@@ -15,6 +15,7 @@ import {
   type ProjectProgressGitHubMcpServer,
 } from "../infrastructure/github/projectProgressMcpServer.js";
 import type { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
+import { resolveCodexModelCatalogPath } from "../infrastructure/codex/modelMetadataCatalog.js";
 import {
   DeterministicProjectProgressSummarizer,
   type ProjectProgressAiInteraction,
@@ -45,6 +46,7 @@ export type ProjectProgressAgentRunInput = {
   workingDirectory: string;
   mcpUrl: string;
   mcpBearerToken: string;
+  developerInstructions: string;
   prompt: string;
   signal?: AbortSignal;
 };
@@ -120,11 +122,13 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         workingDirectory: workspace,
         mcpUrl: mcpServer.url,
         mcpBearerToken: mcpServer.bearerToken,
+        developerInstructions: buildProjectProgressAgentInstructions(
+          this.config.promptProfile ?? null,
+        ),
         prompt: buildProjectProgressAgentPrompt(
           input,
           candidates,
           this.config.agent,
-          this.config.promptProfile ?? null,
         ),
         ...(input.signal ? { signal: input.signal } : {}),
       });
@@ -132,6 +136,9 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
       }
       const output = decodeAgentOutput(agentRun.finalResponse);
+      if (isLikelyProcessSummary(output.summary)) {
+        throw new Error("Agent 输出了分析步骤而非最终项目总结。");
+      }
       const metrics = mcpServer.tool.getMetrics();
       const limitations = mergeLimitations(
         output.limitations,
@@ -185,10 +192,12 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
 export async function runProjectProgressAgent(
   input: ProjectProgressAgentRunInput,
 ): Promise<ProjectProgressAgentRunResult> {
+  const modelCatalogPath = resolveCodexModelCatalogPath(input.model.model);
   const codex = new Codex({
     codexPathOverride: input.codexExecutablePath,
     env: buildAgentChildEnvironment(input),
     config: {
+      ...(modelCatalogPath ? { model_catalog_json: modelCatalogPath } : {}),
       model_provider: input.model.provider,
       model_providers: {
         [input.model.provider]: {
@@ -198,6 +207,7 @@ export async function runProjectProgressAgent(
           wire_api: "responses",
         },
       },
+      developer_instructions: input.developerInstructions,
       mcp_servers: {
         [MCP_SERVER_NAME]: {
           url: input.mcpUrl,
@@ -309,7 +319,6 @@ function buildProjectProgressAgentPrompt(
   input: ProjectProgressSummaryInput,
   commits: NormalizedProjectProgressCommit[],
   limits: ProjectProgressAgentLimits,
-  promptProfile: ProjectProgressPromptProfile | null,
 ): string {
   const repositories = new Map<string, Array<Record<string, unknown>>>();
   for (const commit of commits) {
@@ -337,9 +346,17 @@ function buildProjectProgressAgentPrompt(
     })),
   };
   return [
-    "<system_prompt>",
+    "<project_commit_data>",
+    escapePromptData(JSON.stringify(payload)),
+    "</project_commit_data>",
+  ].join("\n");
+}
+
+function buildProjectProgressAgentInstructions(
+  promptProfile: ProjectProgressPromptProfile | null,
+): string {
+  return [
     PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT,
-    "</system_prompt>",
     ...(promptProfile
       ? [
         "",
@@ -349,9 +366,12 @@ function buildProjectProgressAgentPrompt(
       ]
       : []),
     "",
-    "<project_commit_data>",
-    escapePromptData(JSON.stringify(payload)),
-    "</project_commit_data>",
+    "<final_output_contract>",
+    "summary 是最终展示给用户的项目进展，不是计划、思考过程、工具调用说明或下一步动作。",
+    "禁止使用“分析候选 Commits”“选择性读取关键提交详情”或同类过程性表述作为 summary。",
+    "必须根据已读取的 Commit 事实描述已经完成的工程变化；如果无法形成事实总结，返回简短的已完成提交概括，由调用方负责兜底。",
+    "只返回符合 output schema 的 JSON，不要返回 Markdown 或额外文字。",
+    "</final_output_contract>",
   ].join("\n");
 }
 
@@ -403,6 +423,15 @@ function decodeAgentOutput(value: string): ProjectProgressSummaryOutput {
       .filter(Boolean)
       .slice(0, 10),
   };
+}
+
+function isLikelyProcessSummary(summary: string): boolean {
+  const normalized = summary.replace(/\s+/gu, " ").trim();
+  return [
+    /分析候选\s+(?:commits?|提交)/iu,
+    /选择性读取.*(?:关键.*)?(?:commits?|提交).*(?:详情|信息)/iu,
+    /^(?:先|将|准备|开始|继续|下一步|接下来).{0,100}(?:分析|读取|查看|检查)/u,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 function buildAgentInteraction(input: {

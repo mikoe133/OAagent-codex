@@ -50,6 +50,8 @@ Content-Type: application/json
 | OAagent → OA | `/internal/automation-job-runs*` | `OA_AGENT_AUTOMATION_TOKEN` |
 | OAagent → OA | `/internal/project-sync*` | `OA_PROJECT_SYNC_TOKEN` |
 
+运行 Trace 的新增内部写入与普通用户读取契约见 `docs/automation_run_trace_api.md`。Trace 使用现有 `OA_AGENT_AUTOMATION_TOKEN`，不新增 token。
+
 ```mermaid
 sequenceDiagram
     participant OA as OA 服务端
@@ -421,6 +423,7 @@ Content-Type: application/json
 | `evaluated` | 已正常评估并生成结果 | 成功 |
 | `archived` | 项目已归档，无需继续处理 | 成功 |
 | `no_github_urls` | 项目未配置 GitHub 仓库 | 成功 |
+| `no_commits` | 仓库读取完成，当天没有新增 Commit | 成功 |
 | `invalid_github_urls` | GitHub URL 不合法 | 失败 |
 | `incomplete` | 数据或处理结果不完整 | 失败 |
 | `write_conflict` | OA 业务写入冲突 | 失败 |

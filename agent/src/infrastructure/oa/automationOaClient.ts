@@ -1,4 +1,5 @@
 const OA_AUTOMATION_REQUEST_TIMEOUT_MS = 15_000;
+const OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS = 3_000;
 const SUPPORTED_JOB_TYPE = "github_project_progress_sync";
 
 type OaFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -58,6 +59,7 @@ export type AutomationRunProjectInput = {
     | "evaluated"
     | "archived"
     | "no_github_urls"
+    | "no_commits"
     | "invalid_github_urls"
     | "incomplete"
     | "write_conflict"
@@ -96,6 +98,21 @@ export type AutomationAiInteractionInput = {
   status: "succeeded" | "failed" | "fallback";
   errorCode: string | null;
   errorSummary: string | null;
+};
+
+export type AutomationTraceEventInput = {
+  eventKey: string;
+  sequence: number;
+  phase: string;
+  status: "pending" | "running" | "succeeded" | "fallback" | "failed" | "cancelled";
+  title: string;
+  message: string | null;
+  progressCurrent: number | null;
+  progressTotal: number | null;
+  projectId: number | null;
+  repositoryFullName: string | null;
+  metadataSanitized: Record<string, unknown>;
+  occurredAt: string;
 };
 
 export type AutomationOaClientConfig = {
@@ -263,11 +280,42 @@ export class AutomationOaClient {
     return data.interaction_id;
   }
 
+  async upsertTraceEvent(input: {
+    claim: AutomationJobClaim;
+    workerInstance: string;
+    event: AutomationTraceEventInput;
+  }): Promise<void> {
+    const event = input.event;
+    await this.request(
+      `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/trace-events`,
+      "POST",
+      {
+        worker_instance: input.workerInstance,
+        lease_token: input.claim.leaseToken,
+        event_key: event.eventKey,
+        sequence: event.sequence,
+        phase: event.phase,
+        status: event.status,
+        title: event.title,
+        message: event.message,
+        progress_current: event.progressCurrent,
+        progress_total: event.progressTotal,
+        project_id: event.projectId,
+        repository_full_name: event.repositoryFullName,
+        metadata_sanitized: event.metadataSanitized,
+        occurred_at: event.occurredAt,
+      },
+      true,
+      OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS,
+    );
+  }
+
   private async request(
     path: string,
     method: "POST" | "PUT" | "PATCH",
     body: Record<string, unknown>,
     allowNoContent = false,
+    timeoutMs = OA_AUTOMATION_REQUEST_TIMEOUT_MS,
   ): Promise<unknown | null> {
     const response = await this.fetchImpl(
       new URL(path, ensureTrailingSlash(this.config.baseUrl)),
@@ -279,7 +327,7 @@ export class AutomationOaClient {
           "content-type": "application/json",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(OA_AUTOMATION_REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       },
     );
     if (allowNoContent && response.status === 204) {

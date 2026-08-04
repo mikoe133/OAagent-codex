@@ -45,16 +45,19 @@ import {
   type AutomationJob,
   type AutomationModelCatalog,
   type AutomationRun,
+  type AutomationRunTraceEvent,
   type AutomationTag,
   getAutomationJob,
   getAutomationModelCatalog,
   getAutomationRun,
+  getAutomationRunTrace,
   listAutomationJobs,
   listAutomationRuns,
   listAutomationTags,
 } from "@/lib/automation-api"
 import {
   hasPollableAutomationRuns,
+  isActiveAutomationRun,
   shouldRefreshAutomationRunDetail,
 } from "@/lib/automation-run-presentation"
 
@@ -63,6 +66,10 @@ type TaskDialogMode = "create" | "edit" | null
 type LoadTaskConversationOptions = {
   background?: boolean
   previousRuns?: AutomationRun[]
+}
+
+type LoadRunDetailOptions = {
+  background?: boolean
 }
 
 export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: string }) {
@@ -84,6 +91,9 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
   const [isRunLoading, setIsRunLoading] = React.useState(false)
   const [runError, setRunError] = React.useState<string | null>(null)
   const [auditWarning, setAuditWarning] = React.useState<string | null>(null)
+  const [runTrace, setRunTrace] = React.useState<AutomationRunTraceEvent[]>([])
+  const [isRunTraceLoading, setIsRunTraceLoading] = React.useState(false)
+  const [runTraceError, setRunTraceError] = React.useState<string | null>(null)
   const [isRunAuditOpen, setIsRunAuditOpen] = React.useState(false)
   const [isTagManagementOpen, setIsTagManagementOpen] = React.useState(false)
   const [isTaskConfigOpen, setIsTaskConfigOpen] = React.useState(false)
@@ -93,6 +103,8 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
   const [conversationError, setConversationError] = React.useState<string | null>(null)
   const [conversationAuditWarning, setConversationAuditWarning] = React.useState<string | null>(null)
   const conversationRequestRef = React.useRef(0)
+  const runDetailRequestRef = React.useRef(0)
+  const traceUnsupportedRef = React.useRef(false)
 
   const loadOverview = React.useCallback(async () => {
     setIsLoading(true)
@@ -289,30 +301,100 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
     }
   }, [conversationTask, loadTaskConversation, refreshSelectedTask, selectedTask])
 
-  const openRunDetail = React.useCallback(async (runId: string) => {
-    setSelectedRunId(runId)
-    setSelectedRun(null)
-    setRunError(null)
-    setAuditWarning(null)
-    setIsRunDialogOpen(true)
-    setIsRunLoading(true)
+  const loadRunDetail = React.useCallback(async (
+    runId: string,
+    options: LoadRunDetailOptions = {},
+  ) => {
+    const requestId = ++runDetailRequestRef.current
+    const background = options.background === true
+    if (!background) {
+      setIsRunLoading(true)
+      setIsRunTraceLoading(true)
+      setRunError(null)
+      setRunTraceError(null)
+      setAuditWarning(null)
+    }
     try {
-      setSelectedRun(await getAutomationRun(runId))
+      const run = await getAutomationRun(runId)
+      if (requestId === runDetailRequestRef.current) {
+        setSelectedRun(run)
+      }
     } catch (error) {
       if (error instanceof AutomationApiError && error.status === 403) {
         try {
-          setSelectedRun(await getAutomationRun(runId, "attempts"))
-          setAuditWarning("当前 OA 账号缺少 automation:audit 权限，项目明细与完整 AI 对话审计已隐藏。")
+          const run = await getAutomationRun(runId, "attempts")
+          if (requestId === runDetailRequestRef.current) {
+            setSelectedRun(run)
+            setAuditWarning("当前 OA 账号缺少 automation:audit 权限，项目明细与完整 AI 对话审计已隐藏。")
+          }
         } catch (fallbackError) {
-          setRunError(resolvePageError(fallbackError))
+          if (requestId === runDetailRequestRef.current) {
+            setRunError(resolvePageError(fallbackError))
+          }
         }
-      } else {
+      } else if (requestId === runDetailRequestRef.current) {
         setRunError(resolvePageError(error))
       }
     } finally {
-      setIsRunLoading(false)
+      if (!background && requestId === runDetailRequestRef.current) {
+        setIsRunLoading(false)
+      }
+    }
+
+    if (!traceUnsupportedRef.current) {
+      try {
+        const tracePage = await getAutomationRunTrace(runId)
+        if (requestId === runDetailRequestRef.current) {
+          setRunTrace(tracePage.items)
+          setRunTraceError(null)
+        }
+      } catch (error) {
+        if (error instanceof AutomationApiError && error.status === 404) {
+          traceUnsupportedRef.current = true
+        }
+        if (requestId === runDetailRequestRef.current) {
+          setRunTraceError(resolveRunTraceError(error))
+        }
+      } finally {
+        if (!background && requestId === runDetailRequestRef.current) {
+          setIsRunTraceLoading(false)
+        }
+      }
+    } else if (!background && requestId === runDetailRequestRef.current) {
+      setIsRunTraceLoading(false)
     }
   }, [])
+
+  const openRunDetail = React.useCallback(async (runId: string) => {
+    traceUnsupportedRef.current = false
+    setSelectedRunId(runId)
+    setSelectedRun(null)
+    setRunTrace([])
+    setIsRunDialogOpen(true)
+    await loadRunDetail(runId)
+  }, [loadRunDetail])
+
+  React.useEffect(() => {
+    if (
+      !isRunDialogOpen ||
+      !selectedRunId ||
+      !selectedRun ||
+      !isActiveAutomationRun(selectedRun)
+    ) {
+      return
+    }
+    let requestInFlight = false
+    const timer = window.setInterval(() => {
+      if (requestInFlight) {
+        return
+      }
+      requestInFlight = true
+      void loadRunDetail(selectedRunId, { background: true }).finally(() => {
+        requestInFlight = false
+      })
+    }, 3_000)
+    return () => window.clearInterval(timer)
+  }, [isRunDialogOpen, loadRunDetail, selectedRun, selectedRunId])
 
   const handleRunCancelled = React.useCallback(async () => {
     if (selectedRunId) {
@@ -511,6 +593,9 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
         open={isRunDialogOpen}
         onOpenChange={setIsRunDialogOpen}
         run={selectedRun}
+        traceEvents={runTrace}
+        traceLoading={isRunTraceLoading}
+        traceError={runTraceError}
         loading={isRunLoading}
         error={runError}
         auditWarning={auditWarning}
@@ -566,6 +651,16 @@ function resolvePageError(error: unknown): string {
     return "OA 登录状态已失效，请重新登录后再试。"
   }
   return error instanceof Error ? error.message : "自动任务服务暂时不可用"
+}
+
+function resolveRunTraceError(error: unknown): string {
+  if (error instanceof AutomationApiError && error.status === 404) {
+    return "OA 后端尚未启用运行 Trace 接口，当前仍可查看运行终态和已有审计。"
+  }
+  if (error instanceof AutomationApiError && error.status === 403) {
+    return "当前 OA 账号没有运行 Trace 查看权限。"
+  }
+  return error instanceof Error ? error.message : "运行 Trace 暂时无法读取"
 }
 
 function describeNextRun(job: AutomationJob): string {

@@ -33,6 +33,7 @@ OA 保存任务、标签、cron、模型标识、运行快照和审计，负责 
 | POST | `/automation-jobs/{job_id}/runs` | trigger | 手动触发，返回 202 |
 | GET | `/automation-job-runs` | read | 分页、状态、模型、标签和时间过滤 |
 | GET | `/automation-job-runs/{run_id}` | read/audit | `include=projects,ai_interactions,attempts` |
+| GET | `/automation-job-runs/{run_id}/trace-events` | read | 查询脱敏运行阶段与实时进度 |
 | POST | `/automation-job-runs/{run_id}/cancel` | write | pending 直接取消；claimed/running 发出取消请求 |
 
 错误保持统一 envelope：
@@ -60,6 +61,7 @@ OA 保存任务、标签、cron、模型标识、运行快照和审计，负责 
 | PATCH | `/internal/automation-job-runs/{run_id}` | running 或终态回传；时间和计数由 OA 生成 |
 | PUT | `/internal/automation-job-runs/{run_id}/projects/{project_id}` | 按 `(run_id, project_id)` 幂等写项目结果 |
 | POST | `/internal/automation-job-runs/{run_id}/ai-interactions` | 按 `(run_id, interaction_key)` 幂等写脱敏 AI 审计 |
+| POST | `/internal/automation-job-runs/{run_id}/trace-events` | 按 `(run_id, event_key)` 幂等更新脱敏运行阶段 |
 
 推荐 `lease_seconds=300`，Worker 每约 60 秒 heartbeat。数据库只保存租约摘要；raw lease token 只在 claim 响应返回一次。所有后续写入同时校验 worker、摘要、租约过期时间、deadline 和运行状态。
 
