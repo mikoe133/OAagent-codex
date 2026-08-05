@@ -20,6 +20,7 @@
 | --- | --- | --- |
 | 服务器运行目录 | `/opt/rwkv/apps/oa-agent-test` | `/opt/rwkv/apps/oa-agent-prod` |
 | Compose 项目名 | `oa-agent-test` | `oa-agent-prod` |
+| Agent 监听地址 | `192.168.251.1:3003` | `127.0.0.1:3011`（默认） |
 | Web 监听地址 | `127.0.0.1:3001` | `127.0.0.1:3010` |
 | 公网地址 | `https://test.oa-agent.rwkvos.com` | `https://oa-agent.rwkvos.com` |
 
@@ -78,13 +79,13 @@ PROJECT_PROGRESS_GITHUB_CONCURRENCY=6
 PROJECT_PROGRESS_AGENT_CONCURRENCY=2
 PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=1
 PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces
-AGENT_BIND_ADDRESS=127.0.0.1
+AGENT_BIND_ADDRESS=192.168.251.1
 AGENT_PORT=3003
 WEB_BIND_ADDRESS=127.0.0.1
 WEB_PORT=3001
 ```
 
-测试服务器的 `3002` 端口由 Alphachain/OA Node 服务使用，因此测试 Agent 固定使用 `3003`。生产环境将 `COMPOSE_PROJECT_NAME` 改为 `oa-agent-prod`，将 `AGENT_PORT` 改为 `3011`，将 `WEB_PORT` 改为 `3010`，并使用生产环境自己的 SSO 与自动化密钥。不要把 `.env` 上传到 Git 或源码压缩包。
+`192.168.251.1` 是当前服务器的 `docker0` 地址,用于让同机但位于其他 Docker 网络的 OA 后端访问测试 Agent。换服务器后用 `ip -4 addr show docker0` 重新确认。测试服务器的 `3002` 端口由 Alphachain/OA Node 服务使用，因此测试 Agent 固定使用 `3003`。生产环境将 `COMPOSE_PROJECT_NAME` 改为 `oa-agent-prod`，将 `AGENT_BIND_ADDRESS` 改为 `127.0.0.1`（生产 OA 后端需要跨容器访问时改为其可达的宿主机地址），将 `AGENT_PORT` 改为 `3011`，将 `WEB_PORT` 改为 `3010`，并使用生产环境自己的 SSO 与自动化密钥。不要把 `.env` 上传到 Git 或源码压缩包。
 
 ### 3. 创建受限 BuildKit
 
@@ -238,6 +239,7 @@ for name in \
   OA_AGENT_AUTOMATION_TOKEN \
   OA_PROJECT_SYNC_TOKEN \
   PROJECT_PROGRESS_GITHUB_TOKEN \
+  AGENT_BIND_ADDRESS \
   AGENT_PORT \
   WEB_PORT; do
   grep -q "^${name}=." "$DEPLOY_DIR/.env" || {

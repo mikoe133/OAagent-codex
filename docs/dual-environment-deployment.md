@@ -136,6 +136,8 @@ GitHub 仓库 -> Settings -> Environments
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),例如 `300` |
 | `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),例如 `300` |
+| `test` | `AGENT_BIND_ADDRESS` | `192.168.251.1` |
+| `production` | `AGENT_BIND_ADDRESS` | 可选；默认 `127.0.0.1` |
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_HEADER` | 通常为 `Authorization`；session 测试可填 `Cookie` |
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_PREFIX` | 通常为 `Bearer`；session 测试可填 `sessionid=` |
 
@@ -147,6 +149,8 @@ GitHub 仓库 -> Settings -> Environments
 | `test` / `production` | `OA_AGENT_AUTOMATION_TOKEN` | OA 后端读取模型目录和校验任务模型；两端一致 |
 
 两个环境必须使用不同的高强度随机值。`OA_AGENT_AUTOMATION_TOKEN` 不得复用 SSO 密钥、用户 session、GitHub token 或模型 Key。
+
+`192.168.251.1` 是当前服务器的 `docker0` 地址。测试 OA 后端容器无需加入 OAagent 的 Compose 网络,即可通过 `http://192.168.251.1:3003` 访问 Agent。换服务器后先执行 `ip -4 addr show docker0` 确认地址；生产环境仅在 OA 后端也需要跨容器访问 Agent 时配置对应地址。
 
 如果 OA 和本项目在同一台服务器,并发布宿主机 `8010` 端口,填写:
 

@@ -39,6 +39,7 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.equal(workflow.match(/PROJECT_PROGRESS_GITHUB_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_GITHUB_CONCURRENCY \|\| '6' \}\}/g)?.length, 2)
   assert.equal(workflow.match(/PROJECT_PROGRESS_AGENT_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_AGENT_CONCURRENCY \|\| '2' \}\}/g)?.length, 2)
   assert.equal(workflow.match(/PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \|\| '1' \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/AGENT_BIND_ADDRESS: \$\{\{ vars\.AGENT_BIND_ADDRESS \|\| '127\.0\.0\.1' \}\}/g)?.length, 2)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
   assert.equal(workflow.match(/OA_AGENT_SSO_SHARED_SECRET: \$\{\{ secrets\.OA_AGENT_SSO_SHARED_SECRET \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_AUTOMATION_TOKEN: \$\{\{ secrets\.OA_AGENT_AUTOMATION_TOKEN \}\}/g)?.length, 2)
