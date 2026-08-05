@@ -65,6 +65,8 @@ Environment Variables:
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),必须是正整数 |
 | `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),必须是正整数 |
+| `test` | `AGENT_BIND_ADDRESS` | 填服务器 `docker0` 地址 `192.168.251.1`,供同机 OA 后端容器访问 Agent |
+| `production` 可选 | `AGENT_BIND_ADDRESS` | 默认 `127.0.0.1`;仅在生产 OA 后端也需跨容器访问时填写其可达的宿主机地址 |
 | 两者可选 | `OA_AUTH_ALIAS` | OA 数据源 alias,默认 `default` |
 | 两者可选 | `NEXTTOKEN_API_BASE_URL` | Nexttoken API 地址,默认 `https://next-token.cc` |
 | 两者可选 | `OPENROUTER_API_BASE_URL` | OpenRouter API 地址,默认 `https://openrouter.ai/api/v1` |
@@ -81,10 +83,12 @@ Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份
 
 | 环境 | 部署目录 | Compose 项目 | Agent 监听 | Web 监听 | 公网域名 |
 | --- | --- | --- | --- | --- | --- |
-| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `127.0.0.1:3003` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
+| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `192.168.251.1:3003` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
 | 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3011` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
 
 测试服务器的 `3002` 端口由 Alphachain/OA Node 服务使用，不得分配给 OA Agent 容器。
+
+`AGENT_BIND_ADDRESS` 只控制 Docker 发布到宿主机的监听地址。测试环境使用 `192.168.251.1` 后,OA 后端容器可通过 `http://192.168.251.1:3003` 访问 Agent；不要把该服务器专属地址硬编码到 `compose.yml`。
 
 Workflow 会把运行配置安全写入服务器 `.env.next`;部署脚本在发布时将其提升为 `.env`。失败时会同时恢复 `.env.previous` 和 `.deploy.env.previous`。
 

@@ -178,7 +178,7 @@ jobs:
       DEPLOY_PATH: /opt/rwkv/apps/oa-agent-test
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
       COMPOSE_PROJECT_NAME: oa-agent-test
-      AGENT_BIND_ADDRESS: 127.0.0.1
+      AGENT_BIND_ADDRESS: ${{ vars.AGENT_BIND_ADDRESS || '127.0.0.1' }}
       AGENT_PORT: '3003'
       WEB_BIND_ADDRESS: 127.0.0.1
       WEB_PORT: '3001'
@@ -303,7 +303,7 @@ jobs:
       DEPLOY_PATH: /opt/rwkv/apps/oa-agent-prod
       DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
       COMPOSE_PROJECT_NAME: oa-agent-prod
-      AGENT_BIND_ADDRESS: 127.0.0.1
+      AGENT_BIND_ADDRESS: ${{ vars.AGENT_BIND_ADDRESS || '127.0.0.1' }}
       AGENT_PORT: '3011'
       WEB_BIND_ADDRESS: 127.0.0.1
       WEB_PORT: '3010'

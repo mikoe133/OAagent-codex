@@ -103,6 +103,27 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.equal(metadata.mode & 0o777, 0o600)
 })
 
+test("preserves an explicit Docker host bind address", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
+  context.after(() => rm(directory, { recursive: true, force: true }))
+  const outputPath = path.join(directory, ".env")
+
+  const result = runRender(outputPath, {
+    COMPOSE_PROJECT_NAME: "oa-agent-test",
+    NEXTTOKEN_API_KEY: "test-nexttoken-secret",
+    OPENROUTER_API_KEY: "test-openrouter-secret",
+    OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
+    OA_AGENT_SSO_SHARED_SECRET: "test-sso-secret",
+    OA_AGENT_SSO_TTL_SECONDS: "300",
+    AGENT_BIND_ADDRESS: "192.168.251.1",
+    WEB_PORT: "3001",
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const content = await readFile(outputPath, "utf8")
+  assert.match(content, /^AGENT_BIND_ADDRESS=192\.168\.251\.1$/m)
+})
+
 test("rejects deployment values that could inject another env entry", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
   context.after(() => rm(directory, { recursive: true, force: true }))
