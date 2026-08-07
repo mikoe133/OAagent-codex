@@ -1,6 +1,6 @@
 # 项目进度 Worker 确定性取数与接口并发实施蓝图
 
-- 状态：实施中，Step 0 Worker 契约已实现但 OA 服务端黑盒证据待验证；Step 1 Worker 基线与指标已实现
+- 状态：实施中。Step 0 Worker 契约已实现但 OA 服务端黑盒证据待验证；Step 1 已实现；Step 2 已交付 OA 调度器、GET 重试和 Trace 队列但信号/终态预算仍待完成；Step 3 已交付固定并发执行器、重试、暂停闸门和硬预算但 reset-aware pacing 仍待完成；Step 5 Evidence 边界已实现；Step 4、6、7 未完成
 - 更新日期：2026-08-07
 - 适用任务：`github_project_progress_sync`
 - 目标时区：`Asia/Shanghai`
@@ -44,17 +44,20 @@ Worker claim
 - GitHub HTTP、Codex Thread、OA 项目业务 mutation 的默认并发分别是 `6/2/1`；
 - Heartbeat 自身不会重叠发送，租约丢失会触发取消；
 - 项目状态判断、项目级 fan-in、写回和确定性兜底均由代码负责。
+- OA 非 Heartbeat 请求已统一通过原子优先级调度器，OA GET 已按分类有限重试；Trace 已改为非阻塞有界队列与 SQLite spool；
+- GitHub 仓库扫描和 Agent Commit 详情已共享同一个 token 级 executor，统一执行全局/单仓库限流、有限重试、`Retry-After` 暂停以及 run/仓库硬预算；
+- Agent 输入已固化为 `repository-evidence-v1`，代码负责字段白名单、稳定排序、SHA 去重、最早/最晚候选裁剪和 canonical digest；同一证据被不同项目引用时 prompt 与 digest 相同。
 
 ### 2.2 待补强
 
-- OA 项目详情当前按项目串行读取，没有独立 OA read limiter；
-- OA 项目同步客户端和 GitHub 客户端没有请求级重试；
-- GitHub 遇到 primary/secondary rate limit 时只报告错误，没有自适应降载；
-- OA Trace 由并发仓库任务直接发送，不受有界队列或 telemetry limiter 约束；
-- `PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=1` 只覆盖项目状态和总结 mutation，不覆盖 Trace、run project、AI interaction 等自动化写入；
+- Step 2 尚未完整拆分 `workAbortSignal`、`leaseFatalSignal`、`finalizationSignal`，也未按租约和 deadline 实现 60 秒终态保留预算；
+- Trace spool 当前仍通过同步 SQLite 接口写入主事件循环，尚未交付独立 worker/异步驱动、20 MiB/TTL 上限和完整 delivery summary；
+- GitHub executor 已有固定并发、rate-limit 暂停和硬预算，但尚未按 primary limit 的 remaining/reset 做 reserve 与 token-bucket pacing；`6/3/1` 动态容量属于 Step 4；
+- NextToken/OpenRouter 还没有 provider + credential 级 RPM/TPM/成本预算和熔断；
 - 仓库任务和 Agent 任务用 `Promise.all + Semaphore` 创建全部等待项，队列长度未设上限；
 - 当前并发配置是进程级限制。增加 Worker 副本会按副本数线性放大 GitHub、模型和 OA 压力；
-- 指标只有峰值和任务计数，缺少接口延迟、排队时长、重试次数、429/5xx、GitHub rate remaining 等调参依据。
+- 完整仓库总结 cache identity、原子 mutation group、outbox replay/crash recovery 和 5 分钟写入预算仍待 Step 6；
+- OA 服务端 HMAC fencing、事务 CAS/single-flight 以及测试环境黑盒证据仍是外部依赖。
 
 ### 2.3 实施前置：OA 服务端 fencing 与条件写
 
@@ -506,6 +509,8 @@ npm run typecheck -w agent
 
 上下文：OA 项目详情串行读取，Trace 可被两个 Agent Thread 并发触发，而 Heartbeat 必须拥有独立的租约安全路径。
 
+实施进展（2026-08-07）：已实现 `OaRequestScheduler`、Heartbeat 独立 limiter、默认列表发现、兼容详情有界并发、OA GET 分类重试以及按 `event_key` 合并的非阻塞 Trace 队列与 SQLite spool。尚未完成三类 AbortSignal、租约感知的 finalization deadline/60 秒终态保留预算、异步 SQLite 单写者及 spool 字节/TTL 上限，因此本步骤仍为 `in_progress`。
+
 任务：
 
 - 实现单个原子 `OaRequestScheduler`，支持总容量、lane cap、`mutationGroup(P0,P1)=1`、P0 保留 mailbox、优先级和最大等待时间；
@@ -535,6 +540,8 @@ npm exec -w agent -- tsx --test test/syncProjectProgress.test.ts
 ### Step 3：GitHub 固定并发、请求预算与暂停闸门
 
 上下文：仓库扫描和 Agent Commit 详情已共享 limiter，但当前只报告 rate limit，没有安全重试、暂停闸门和恢复规则。
+
+实施进展（2026-08-07）：仓库扫描和 Agent MCP 已共享同一个 `GitHubRequestExecutor`。执行器实现全局固定并发、单仓库串行、429/受限 403/5xx/网络瞬态分类、`Retry-After`、full-jitter backoff、共享暂停闸门、run/仓库请求预算与 rate-limit header 指标；分支数、单分支 Commit 页数和请求预算均可配置，耗尽时返回 incomplete；排队、backoff、暂停和 fetch 均接收 `AbortSignal`。剩余缺口是按 `remaining/reset` 实现 reserve 与 reset-aware pacing，以及把 executor 指标接入 run 级结构化输出；动态 `6/3/1` 容量仍属于 Step 4。因此本步骤仍为 `in_progress`。
 
 任务：
 
@@ -588,6 +595,8 @@ npm exec -w agent -- tsx --test test/projectProgressConfig.test.ts
 ### Step 5：Evidence DTO 与 Agent 边界固化
 
 上下文：当前边界已经接近目标，但需要显式 schema/version，避免 OA/GitHub 上游字段变化直接进入提示词。
+
+实施进展（2026-08-07）：已实现 `repository-evidence-v1`、canonical digest 和 `repository-candidates-earliest-latest-v1`。Evidence 只保留仓库 ID/规范化名称、业务日期及 Commit 的 SHA/时间/标题；代码在 Agent 前完成校验、稳定排序、去重、500 字符裁剪和最早/最晚候选选择。Agent prompt 不再包含项目 ID、项目名、run ID 或抓取时刻，MCP allowlist 直接从 Evidence 派生，审计只记录 schema、digest、策略版本和预算。同一仓库证据被不同 OA 项目引用时 prompt 与 digest 已有回归测试。该边界实现已验证，但完整 cache identity 仍由 Step 6 交付。
 
 任务：
 
