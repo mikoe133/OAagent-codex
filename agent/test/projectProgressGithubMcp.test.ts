@@ -8,6 +8,7 @@ import {
   type ProjectProgressAgentLimits,
 } from "../src/infrastructure/github/projectProgressMcpServer.js";
 import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 const limits: ProjectProgressAgentLimits = {
   maxDetailCalls: 3,
@@ -159,6 +160,38 @@ describe("GitHubCommitDetailTool", () => {
     assert.equal(result.status, "error");
     assert.match(result.summary, /HTTP 429/);
     assert.doesNotMatch(JSON.stringify(result), /github-secret|abcdef123456|example\/api/);
+  });
+
+  it("records bounded detail requests under github.commit.get", async () => {
+    const operationMetrics = new OperationMetricsRecorder();
+    const tool = new GitHubCommitDetailTool(
+      {
+        githubToken: "github-secret",
+        githubApiBaseUrl: "https://api.github.test",
+        candidates,
+        limits,
+        operationMetrics,
+      },
+      async () => Response.json({
+        stats: { additions: 1, deletions: 0, total: 1 },
+        files: [],
+      }),
+    );
+
+    await tool.readCommitDetails({
+      repository: "example/api",
+      sha: "abcdef123456",
+    });
+
+    assert.deepEqual(operationMetrics.snapshot().map((metric) => ({
+      endpoint: metric.endpoint,
+      requests: metric.requests,
+      successes: metric.successes,
+    })), [{
+      endpoint: "github.commit.get",
+      requests: 1,
+      successes: 1,
+    }]);
   });
 
   it("shares the GitHub HTTP limiter across independent repository tools", async () => {
