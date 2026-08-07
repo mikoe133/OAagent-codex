@@ -6,6 +6,10 @@ import {
   ProjectProgressLeaseLostError,
   ProjectProgressOaClient,
 } from "../src/infrastructure/oa/projectProgressOaClient.js";
+import type {
+  OaRequestExecutor,
+  OaRequestLane,
+} from "../src/infrastructure/oa/oaRequestScheduler.js";
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("ProjectProgressOaClient", () => {
@@ -103,6 +107,61 @@ describe("ProjectProgressOaClient", () => {
     );
 
     await assert.rejects(client.listProjects(), OaContractError);
+  });
+
+  it("routes reads to P2, mutations to P1, and propagates AbortSignal", async () => {
+    const calls: Array<{ lane: OaRequestLane; signal?: AbortSignal }> = [];
+    const scheduler: OaRequestExecutor = {
+      run: async (lane, operation, options = {}) => {
+        calls.push({ lane, ...(options.signal ? { signal: options.signal } : {}) });
+        return await operation();
+      },
+    };
+    const controller = new AbortController();
+    const client = new ProjectProgressOaClient(
+      {
+        baseUrl: "https://oa.example.test",
+        alias: "default",
+        token: "secret",
+        tokenHeader: "Authorization",
+        tokenPrefix: "Bearer",
+      },
+      async (_input, init) => {
+        assert.ok(init?.signal);
+        if (init?.method === "PATCH") {
+          return Response.json({ data: { id: 7 } });
+        }
+        return Response.json({ data: { total: 0, items: [] } });
+      },
+      undefined,
+      { scheduler },
+    );
+
+    await client.listProjects(controller.signal);
+    await client.updateProjectStatus(7, "maintenance", undefined, controller.signal);
+
+    assert.deepEqual(calls.map((call) => call.lane), ["p2", "p1"]);
+    assert.equal(calls[0]?.signal, controller.signal);
+    assert.equal(calls[1]?.signal, controller.signal);
+  });
+
+  it("aborts an in-flight OA read with the caller signal", async () => {
+    const controller = new AbortController();
+    let started = false;
+    const client = createClient(async (_input, init) => {
+      started = true;
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+          once: true,
+        });
+      });
+    });
+    const pending = client.listProjects(controller.signal);
+    await waitUntil(() => started);
+
+    controller.abort(new Error("work cancelled"));
+
+    await assert.rejects(pending, /work cancelled/);
   });
 
   it("sends only a status field when updating a test project", async () => {
@@ -390,4 +449,14 @@ function createFencedClient(fetchImpl: typeof fetch): ProjectProgressOaClient {
     },
     fetchImpl,
   );
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error("timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }

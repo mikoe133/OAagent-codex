@@ -6,6 +6,11 @@ import {
   AutomationOaContractError,
   type AutomationJobClaim,
 } from "../src/infrastructure/oa/automationOaClient.js";
+import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
+import type {
+  OaRequestExecutor,
+  OaRequestLane,
+} from "../src/infrastructure/oa/oaRequestScheduler.js";
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("AutomationOaClient", () => {
@@ -114,6 +119,112 @@ describe("AutomationOaClient", () => {
       client.claim("worker-01", 300),
       AutomationOaContractError,
     );
+  });
+
+  it("routes control, business, and trace calls while heartbeat bypasses the OA scheduler", async () => {
+    const lanes: OaRequestLane[] = [];
+    const scheduler: OaRequestExecutor = {
+      run: async (_lane, operation) => {
+        lanes.push(_lane);
+        return await operation();
+      },
+    };
+    const client = new AutomationOaClient(
+      { baseUrl: "https://oa.example.test", token: "secret" },
+      async (input) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname.endsWith("/claim") || pathname.endsWith("/trace-events")) {
+          return new Response(null, { status: 204 });
+        }
+        if (pathname.endsWith("/heartbeat")) {
+          return Response.json({ data: {
+            status: "running",
+            heartbeat_at: "2026-07-30T12:01:00Z",
+            lease_expires_at: "2026-07-30T12:06:00Z",
+            cancel_requested: false,
+          } });
+        }
+        if (pathname.endsWith("/projects/51")) {
+          return Response.json({ data: { run_project_id: 123 } });
+        }
+        return Response.json({ data: { run: { id: "run-01" } } });
+      },
+      undefined,
+      { scheduler, heartbeatLimiter: new AsyncSemaphore(1) },
+    );
+    const claim = decodeClaimForTest();
+
+    await client.claim("worker-01", 300);
+    await client.upsertProjectResult({
+      claim,
+      workerInstance: "worker-01",
+      projectId: 51,
+      result: runProjectResultForTest(),
+    });
+    await client.upsertTraceEvent({
+      claim,
+      workerInstance: "worker-01",
+      event: traceEventForTest(),
+    });
+    await client.updateRun({
+      claim,
+      workerInstance: "worker-01",
+      status: "succeeded",
+    });
+    await client.heartbeat({
+      claim,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+    });
+
+    assert.deepEqual(lanes, ["p0", "p1", "p3", "p0"]);
+  });
+
+  it("keeps heartbeat at one in-flight request and propagates cancellation", async () => {
+    const firstGate = deferred<void>();
+    let heartbeatCalls = 0;
+    let active = 0;
+    let peak = 0;
+    const client = new AutomationOaClient(
+      { baseUrl: "https://oa.example.test", token: "secret" },
+      async (_input, init) => {
+        heartbeatCalls += 1;
+        active += 1;
+        peak = Math.max(peak, active);
+        if (heartbeatCalls === 1) {
+          await firstGate.promise;
+        }
+        init?.signal?.throwIfAborted();
+        active -= 1;
+        return Response.json({ data: {
+          status: "running",
+          heartbeat_at: "2026-07-30T12:01:00Z",
+          lease_expires_at: "2026-07-30T12:06:00Z",
+          cancel_requested: false,
+        } });
+      },
+    );
+    const claim = decodeClaimForTest();
+    const first = client.heartbeat({
+      claim,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+    });
+    const controller = new AbortController();
+    const second = client.heartbeat({
+      claim,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      signal: controller.signal,
+    });
+    await waitUntil(() => heartbeatCalls === 1);
+
+    controller.abort(new Error("lease lost"));
+    await assert.rejects(second, /lease lost/);
+    firstGate.resolve();
+    await first;
+    assert.equal(heartbeatCalls, 1);
+    assert.equal(peak, 1);
   });
 
   it("sends heartbeats, project results, AI audits, and terminal status", async () => {
@@ -370,4 +481,62 @@ function decodeClaimForTest() {
     leaseExpiresAt: "2099-07-30T12:05:00.000Z",
     cancelRequested: false,
   };
+}
+
+function runProjectResultForTest() {
+  return {
+    projectNameSnapshot: "OA 服务端",
+    statusBefore: "updating",
+    statusAfter: "maintenance",
+    outcome: "evaluated" as const,
+    repositoryCount: 1,
+    commitCount: 2,
+    summaryDate: "2026-07-30",
+    sourceDigest: "sha256:digest",
+    generatedSummary: "完成联调。",
+    aiConfidence: 90,
+    aiNote: "提交完整。",
+    warnings: [],
+    mutationsApplied: true,
+    startedAt: "2026-07-30T12:00:00Z",
+    finishedAt: "2026-07-30T12:01:00Z",
+    durationMs: 60_000,
+  };
+}
+
+function traceEventForTest() {
+  return {
+    eventKey: "read_github",
+    sequence: 300,
+    phase: "read_github",
+    status: "running" as const,
+    title: "读取 GitHub 分支与 Commit",
+    message: "已读取 2/6 个仓库",
+    progressCurrent: 2,
+    progressTotal: 6,
+    projectId: null,
+    repositoryFullName: null,
+    metadataSanitized: { github_concurrency: 6 },
+    occurredAt: "2026-07-30T12:00:30.000Z",
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error("timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }
