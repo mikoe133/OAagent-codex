@@ -70,6 +70,7 @@ async function main(): Promise<void> {
       concurrency: config.concurrency,
       githubRequestLimiter,
       operationMetrics,
+      projectDetailCompatibilityMode: config.oa.projectDetailCompatibilityMode,
       ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
     });
     console.log(JSON.stringify({

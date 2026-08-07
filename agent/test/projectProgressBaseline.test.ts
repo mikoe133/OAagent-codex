@@ -22,7 +22,6 @@ describe("project progress concurrency baseline", () => {
       "github.commits.list": 50,
       "github.repository.get": 50,
       "model.project-progress.summarize": 20,
-      "oa.project.get": 100,
       "oa.project.list": 1,
     });
     assert.equal(baseline.agentQueueWait.count, 20);

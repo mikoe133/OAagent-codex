@@ -231,6 +231,7 @@ export type ProjectProgressSyncInput = {
   concurrency?: ProjectProgressConcurrency;
   githubRequestLimiter?: AsyncSemaphore;
   operationMetrics?: OperationMetricsRecorder;
+  projectDetailCompatibilityMode?: boolean;
   shouldCancel?: () => boolean;
   trace?: ProjectProgressTraceSink;
 };
@@ -275,7 +276,7 @@ async function executeProjectProgressSync(
     status: "running",
     title: "读取 OA 项目列表",
   });
-  const listedProjects = await input.oaClient.listProjects();
+  const listedProjects = await input.oaClient.listProjects(input.cancellationSignal);
   const projects = input.projectId === undefined
     ? listedProjects
     : listedProjects.filter((project) => project.id === input.projectId);
@@ -307,7 +308,14 @@ async function executeProjectProgressSync(
     progressCurrent: 0,
     progressTotal: projects.length,
   });
-  for (const listedProject of projects) {
+  const discoveryProjects = await resolveDiscoveryProjects(
+    projects,
+    input.oaClient,
+    input.projectDetailCompatibilityMode ?? false,
+    input.cancellationSignal,
+  );
+  for (const discovery of discoveryProjects) {
+    const listedProject = discovery.listedProject;
     if (input.shouldCancel?.()) {
       cancelled = true;
       break;
@@ -317,16 +325,17 @@ async function executeProjectProgressSync(
       continue;
     }
 
-    let project: OaProject;
-    try {
-      project = await input.oaClient.getProject(listedProject.id);
-    } catch (error) {
+    if (discovery.error !== undefined) {
       entries.push({
         kind: "report",
-        report: incompleteReport(listedProject, `project_detail_failed:${errorMessage(error)}`),
+        report: incompleteReport(
+          listedProject,
+          `project_detail_failed:${errorMessage(discovery.error)}`,
+        ),
       });
       continue;
     }
+    const project = discovery.project;
     if (project.status === "archived") {
       entries.push({ kind: "report", report: archivedReport(project) });
       continue;
@@ -935,6 +944,42 @@ async function executeProjectProgressSync(
     operationMetrics: input.operationMetrics.snapshot(),
     projects: reports,
   };
+}
+
+type ProjectDiscovery = {
+  listedProject: OaProject;
+  project: OaProject;
+  error?: undefined;
+} | {
+  listedProject: OaProject;
+  project: OaProject;
+  error: unknown;
+};
+
+async function resolveDiscoveryProjects(
+  projects: OaProject[],
+  reader: ProjectProgressOaReader,
+  compatibilityMode: boolean,
+  signal?: AbortSignal,
+): Promise<ProjectDiscovery[]> {
+  if (!compatibilityMode) {
+    return projects.map((project) => ({ listedProject: project, project }));
+  }
+  const detailLimiter = new AsyncSemaphore(4);
+  return await Promise.all(projects.map(async (listedProject): Promise<ProjectDiscovery> => {
+    if (listedProject.status === "archived") {
+      return { listedProject, project: listedProject };
+    }
+    try {
+      const project = await detailLimiter.run(
+        () => reader.getProject(listedProject.id, signal),
+        signal,
+      );
+      return { listedProject, project };
+    } catch (error) {
+      return { listedProject, project: listedProject, error };
+    }
+  }));
 }
 
 function createCancellationMonitor(

@@ -24,6 +24,7 @@ export type ProjectProgressConfig = {
     token: string;
     tokenHeader: string;
     tokenPrefix: string;
+    projectDetailCompatibilityMode: boolean;
   };
   githubToken: string;
   githubApiBaseUrl: string;
@@ -151,6 +152,10 @@ export function loadProjectProgressConfig(
       tokenPrefix: environment.OA_PROJECT_SYNC_TOKEN_PREFIX === undefined
         ? "Bearer"
         : environment.OA_PROJECT_SYNC_TOKEN_PREFIX.trim(),
+      projectDetailCompatibilityMode: parseBoolean(
+        environment.PROJECT_PROGRESS_OA_PROJECT_DETAIL_COMPATIBILITY_MODE,
+        false,
+      ),
     },
     githubToken: requireValue(environment, "PROJECT_PROGRESS_GITHUB_TOKEN"),
     githubApiBaseUrl: environment.GITHUB_API_BASE_URL?.trim() || "https://api.github.com",
