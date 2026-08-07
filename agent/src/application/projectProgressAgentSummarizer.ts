@@ -494,6 +494,8 @@ function buildAgentInteraction(input: {
     requestPayloadSanitized: {
       evidence_schema_version: input.evidenceEnvelope.evidence.schemaVersion,
       evidence_digest: input.evidenceEnvelope.digest,
+      candidate_selection_policy_version:
+        input.evidenceEnvelope.candidateSelectionPolicyVersion,
       business_date: input.evidenceEnvelope.evidence.businessDate,
       repository_count: 1,
       commit_count: input.evidenceEnvelope.evidence.commits.length +

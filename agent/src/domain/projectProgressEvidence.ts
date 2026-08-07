@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { NormalizedProjectProgressCommit } from "./projectProgress.js";
 
 export const REPOSITORY_EVIDENCE_SCHEMA_VERSION = "repository-evidence-v1" as const;
+export const REPOSITORY_CANDIDATE_SELECTION_POLICY_VERSION =
+  "repository-candidates-earliest-latest-v1" as const;
 
 export type RepositoryEvidence = {
   schemaVersion: typeof REPOSITORY_EVIDENCE_SCHEMA_VERSION;
@@ -20,6 +22,8 @@ export type RepositoryEvidence = {
 export type RepositoryEvidenceEnvelope = {
   evidence: RepositoryEvidence;
   digest: string;
+  candidateSelectionPolicyVersion:
+    typeof REPOSITORY_CANDIDATE_SELECTION_POLICY_VERSION;
   omittedCommitCount: number;
 };
 
@@ -79,7 +83,7 @@ export function buildRepositoryEvidence(input: {
   const uniqueCommits = [...commitsBySha.values()].sort((left, right) =>
     left.committedAt.localeCompare(right.committedAt) || left.sha.localeCompare(right.sha)
   );
-  const selectedCommits = uniqueCommits.slice(0, input.maxCommits);
+  const selectedCommits = selectCandidates(uniqueCommits, input.maxCommits);
   const evidence: RepositoryEvidence = {
     schemaVersion: REPOSITORY_EVIDENCE_SCHEMA_VERSION,
     repository: {
@@ -104,8 +108,22 @@ export function buildRepositoryEvidence(input: {
     digest: createHash("sha256")
       .update(JSON.stringify(canonicalDigestInput))
       .digest("hex"),
+    candidateSelectionPolicyVersion:
+      REPOSITORY_CANDIDATE_SELECTION_POLICY_VERSION,
     omittedCommitCount: Math.max(0, uniqueCommits.length - selectedCommits.length),
   };
+}
+
+function selectCandidates<T>(commits: T[], maxCommits: number): T[] {
+  if (commits.length <= maxCommits) {
+    return commits;
+  }
+  const earliestCount = Math.ceil(maxCommits / 2);
+  const latestCount = maxCommits - earliestCount;
+  return [
+    ...commits.slice(0, earliestCount),
+    ...(latestCount > 0 ? commits.slice(-latestCount) : []),
+  ];
 }
 
 function normalizeRepositoryFullName(value: string): string {
