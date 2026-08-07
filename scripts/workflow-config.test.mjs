@@ -17,9 +17,10 @@ test("maps test and main branches to their deployment environments", async () =>
   assert.match(workflow, /^    if: github\.ref == 'refs\/heads\/main' && github\.event_name != 'pull_request'$/m)
   assert.match(workflow, /^      name: production$/m)
   assert.equal(
-    workflow.match(/^    needs: \[images, oa-fencing-contract\]$/gm)?.length,
+    workflow.match(/^    needs: images$/gm)?.length,
     2,
   )
+  assert.doesNotMatch(workflow, /^  oa-fencing-contract:$/m)
   assert.doesNotMatch(workflow, /^    needs: deploy-test$/m)
   assert.match(workflow, /oa-agent-test[\s\S]*oa-agent-prod/)
   assert.match(workflow, /COMPOSE_PROJECT_NAME: oa-agent-test[\s\S]*AGENT_PORT: '3003'[\s\S]*WEB_PORT: '3001'/)
