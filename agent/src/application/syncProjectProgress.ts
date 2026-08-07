@@ -413,6 +413,7 @@ async function executeProjectProgressSync(
     progressCurrent: 0,
     progressTotal: repositoriesByKey.size,
   });
+  let completedRepositoryReads = 0;
   await Promise.all([...repositoriesByKey.entries()].map(async ([key, repository]) => {
     try {
       const snapshot = await githubLimiter.run(
@@ -426,6 +427,19 @@ async function executeProjectProgressSync(
       repositorySnapshots.set(key, { snapshot });
     } catch (error) {
       repositorySnapshots.set(key, { error });
+    } finally {
+      completedRepositoryReads += 1;
+      await emitTrace(input.trace, {
+        eventKey: "read_github",
+        sequence: 300,
+        phase: "read_github",
+        status: "running",
+        title: "读取 GitHub 分支与 Commit",
+        message: `已完成 ${completedRepositoryReads}/${repositoriesByKey.size} 个仓库读取`,
+        progressCurrent: completedRepositoryReads,
+        progressTotal: repositoriesByKey.size,
+        repositoryFullName: repository.fullName,
+      });
     }
   }));
   cancelled ||= input.cancellationSignal?.aborted ?? false;
