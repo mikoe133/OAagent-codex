@@ -6,6 +6,7 @@ const DEFAULT_BASE_BACKOFF_MS = 250;
 const DEFAULT_MAX_BACKOFF_MS = 5_000;
 const DEFAULT_MAX_REQUESTS_PER_RUN = 20_000;
 const DEFAULT_MAX_REQUESTS_PER_REPOSITORY = 2_000;
+const SECONDARY_RATE_LIMIT_BACKOFF_MS = 30_000;
 
 export class GitHubRequestError extends Error {
   override name = "GitHubRequestError";
@@ -22,10 +23,15 @@ export class GitHubRequestError extends Error {
 export class GitHubRequestBudgetExceededError extends Error {
   override name = "GitHubRequestBudgetExceededError";
 
-  constructor(readonly scope: "run" | "repository") {
+  constructor(
+    readonly scope: "run" | "repository" | "rate_limit",
+    readonly retryAt: string | null = null,
+  ) {
     super(scope === "run"
       ? "本次运行的 GitHub HTTP 请求预算已耗尽。"
-      : "该仓库的 GitHub HTTP 请求预算已耗尽。");
+      : scope === "repository"
+        ? "该仓库的 GitHub HTTP 请求预算已耗尽。"
+        : "GitHub primary rate-limit 保留额度已触达。");
   }
 }
 
@@ -35,8 +41,12 @@ export type GitHubRequestExecutorMetrics = {
   rateLimited: number;
   serverErrors: number;
   rejectedByBudget: number;
+  rateLimitLimit: number | null;
   rateLimitRemaining: number | null;
   rateLimitResetAt: string | null;
+  rateLimitReserve: number | null;
+  pacingWaitMs: number;
+  sharedPauseWaitMs: number;
 };
 
 export type GitHubRequestExecutorConfig = {
@@ -72,14 +82,22 @@ type ResolvedConfig = {
 export class GitHubRequestExecutor {
   private readonly config: ResolvedConfig;
   private readonly repositoryLimiters = new Map<string, AsyncSemaphore>();
+  private readonly admissionLimiter = new AsyncSemaphore(1);
   private readonly repositoryRequests = new Map<string, number>();
   private attempts = 0;
   private retries = 0;
   private rateLimited = 0;
   private serverErrors = 0;
   private rejectedByBudget = 0;
+  private rateLimitLimit: number | null = null;
   private rateLimitRemaining: number | null = null;
   private rateLimitResetAt: string | null = null;
+  private rateLimitResetAtMs: number | null = null;
+  private rateLimitReserve: number | null = null;
+  private pacingIntervalMs = 0;
+  private nextPacedRequestAt = 0;
+  private pacingWaitMs = 0;
+  private sharedPauseWaitMs = 0;
   private pauseUntil = 0;
 
   constructor(config: GitHubRequestExecutorConfig = {}) {
@@ -93,8 +111,12 @@ export class GitHubRequestExecutor {
       rateLimited: this.rateLimited,
       serverErrors: this.serverErrors,
       rejectedByBudget: this.rejectedByBudget,
+      rateLimitLimit: this.rateLimitLimit,
       rateLimitRemaining: this.rateLimitRemaining,
       rateLimitResetAt: this.rateLimitResetAt,
+      rateLimitReserve: this.rateLimitReserve,
+      pacingWaitMs: this.pacingWaitMs,
+      sharedPauseWaitMs: this.sharedPauseWaitMs,
     };
   }
 
@@ -108,7 +130,7 @@ export class GitHubRequestExecutor {
 
     for (let attempt = 1; attempt <= this.config.maxAttempts; attempt += 1) {
       options.signal?.throwIfAborted();
-      await this.waitForSharedPause(options.signal);
+      await this.admit(options.signal);
       this.consumeBudget(repository);
       this.attempts += 1;
 
@@ -135,8 +157,11 @@ export class GitHubRequestExecutor {
         if (isRateLimitedResponse(response)) {
           this.rateLimited += 1;
           const waitMs = retryDelayMilliseconds(response, this.config.now()) ??
-            this.jitteredBackoff(attempt);
+            (response.status === 403
+              ? SECONDARY_RATE_LIMIT_BACKOFF_MS
+              : this.jitteredBackoff(attempt));
           this.pauseUntil = Math.max(this.pauseUntil, this.config.now() + waitMs);
+          this.sharedPauseWaitMs += waitMs;
           await this.sleep(waitMs, options.signal);
         } else {
           this.serverErrors += 1;
@@ -187,21 +212,86 @@ export class GitHubRequestExecutor {
   }
 
   private observeRateLimit(response: Response): void {
+    const limit = response.headers.get("x-ratelimit-limit");
     const remaining = response.headers.get("x-ratelimit-remaining");
+    const reset = response.headers.get("x-ratelimit-reset");
+    if (limit && /^\d+$/.test(limit)) {
+      this.rateLimitLimit = Number(limit);
+      this.rateLimitReserve = Math.max(100, Math.ceil(this.rateLimitLimit * 0.1));
+    }
     if (remaining && /^\d+$/.test(remaining)) {
       this.rateLimitRemaining = Number(remaining);
     }
-    const reset = response.headers.get("x-ratelimit-reset");
     if (reset && /^\d+$/.test(reset)) {
-      this.rateLimitResetAt = new Date(Number(reset) * 1_000).toISOString();
+      this.rateLimitResetAtMs = Number(reset) * 1_000;
+      this.rateLimitResetAt = new Date(this.rateLimitResetAtMs).toISOString();
+    }
+    if (
+      this.rateLimitRemaining !== null &&
+      this.rateLimitReserve !== null &&
+      this.rateLimitResetAtMs !== null
+    ) {
+      const allocatable = this.rateLimitRemaining - this.rateLimitReserve;
+      const windowMs = Math.max(0, this.rateLimitResetAtMs - this.config.now());
+      this.pacingIntervalMs = allocatable > 0
+        ? Math.ceil(windowMs / allocatable)
+        : 0;
+      this.nextPacedRequestAt = this.pacingIntervalMs > 0
+        ? Math.max(
+            this.nextPacedRequestAt,
+            this.config.now() + this.pacingIntervalMs,
+          )
+        : 0;
     }
   }
 
-  private async waitForSharedPause(signal?: AbortSignal): Promise<void> {
-    const waitMs = Math.max(0, this.pauseUntil - this.config.now());
-    if (waitMs > 0) {
-      await this.sleep(waitMs, signal);
+  private admit(signal?: AbortSignal): Promise<void> {
+    return this.admissionLimiter.run(async () => {
+      this.clearExpiredRateLimitWindow();
+      const sharedWaitMs = Math.max(0, this.pauseUntil - this.config.now());
+      if (sharedWaitMs > 0) {
+        this.sharedPauseWaitMs += sharedWaitMs;
+        await this.sleep(sharedWaitMs, signal);
+        this.clearExpiredRateLimitWindow();
+      }
+      if (
+        this.rateLimitRemaining !== null &&
+        this.rateLimitReserve !== null &&
+        this.rateLimitRemaining <= this.rateLimitReserve &&
+        this.rateLimitResetAtMs !== null &&
+        this.config.now() < this.rateLimitResetAtMs
+      ) {
+        this.rejectedByBudget += 1;
+        throw new GitHubRequestBudgetExceededError(
+          "rate_limit",
+          new Date(this.rateLimitResetAtMs).toISOString(),
+        );
+      }
+      const pacingWaitMs = Math.max(0, this.nextPacedRequestAt - this.config.now());
+      if (pacingWaitMs > 0) {
+        this.pacingWaitMs += pacingWaitMs;
+        await this.sleep(pacingWaitMs, signal);
+      }
+      if (this.pacingIntervalMs > 0) {
+        this.nextPacedRequestAt = this.config.now() + this.pacingIntervalMs;
+      }
+    }, signal);
+  }
+
+  private clearExpiredRateLimitWindow(): void {
+    if (
+      this.rateLimitResetAtMs === null ||
+      this.config.now() < this.rateLimitResetAtMs
+    ) {
+      return;
     }
+    this.rateLimitLimit = null;
+    this.rateLimitRemaining = null;
+    this.rateLimitResetAt = null;
+    this.rateLimitResetAtMs = null;
+    this.rateLimitReserve = null;
+    this.pacingIntervalMs = 0;
+    this.nextPacedRequestAt = 0;
   }
 
   private jitteredBackoff(attempt: number): number {
@@ -246,7 +336,11 @@ function resolveConfig(config: GitHubRequestExecutorConfig): ResolvedConfig {
 }
 
 async function isRetryableResponse(response: Response): Promise<boolean> {
-  if (response.status === 429 || response.status >= 500) {
+  if (
+    response.status === 408 ||
+    response.status === 429 ||
+    [500, 502, 503, 504].includes(response.status)
+  ) {
     return true;
   }
   if (response.status !== 403) {
