@@ -10,6 +10,7 @@ import type {
   OaRequestExecutor,
   OaRequestLane,
 } from "../src/infrastructure/oa/oaRequestScheduler.js";
+import { OaRequestScheduler } from "../src/infrastructure/oa/oaRequestScheduler.js";
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("ProjectProgressOaClient", () => {
@@ -162,6 +163,119 @@ describe("ProjectProgressOaClient", () => {
     controller.abort(new Error("work cancelled"));
 
     await assert.rejects(pending, /work cancelled/);
+  });
+
+  it("retries classified GET failures outside the scheduler permit", async () => {
+    const scheduler = new OaRequestScheduler({ totalConcurrency: 1 });
+    let attempts = 0;
+    let backoffs = 0;
+    const client = new ProjectProgressOaClient(
+      {
+        baseUrl: "https://oa.example.test",
+        alias: "default",
+        token: "secret",
+        tokenHeader: "Authorization",
+        tokenPrefix: "Bearer",
+      },
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return Response.json({ data: { error_code: "unavailable" } }, { status: 503 });
+        }
+        if (attempts === 2) {
+          throw new TypeError("socket reset");
+        }
+        return Response.json({ data: { total: 0, items: [] } });
+      },
+      undefined,
+      {
+        scheduler,
+        getRetry: {
+          random: () => 0,
+          sleep: async (_delayMs, signal) => {
+            backoffs += 1;
+            assert.equal(scheduler.metrics.activeTotal, 0);
+            signal?.throwIfAborted();
+          },
+        },
+      },
+    );
+
+    assert.deepEqual(await client.listProjects(), []);
+    assert.equal(attempts, 3);
+    assert.equal(backoffs, 2);
+  });
+
+  it("does not retry non-transient GET failures or mutations", async () => {
+    let getAttempts = 0;
+    const getClient = createClient(async () => {
+      getAttempts += 1;
+      return Response.json({ data: { error_code: "not_found" } }, { status: 404 });
+    });
+    await assert.rejects(getClient.listProjects(), (error: unknown) =>
+      error instanceof OaRequestError && error.status === 404
+    );
+
+    let mutationAttempts = 0;
+    const mutationClient = createClient(async () => {
+      mutationAttempts += 1;
+      return Response.json({ data: { error_code: "unavailable" } }, { status: 503 });
+    });
+    await assert.rejects(
+      mutationClient.updateProjectStatus(7, "maintenance"),
+      (error: unknown) => error instanceof OaRequestError && error.status === 503,
+    );
+
+    assert.equal(getAttempts, 1);
+    assert.equal(mutationAttempts, 1);
+  });
+
+  it("cancels OA GET retry backoff immediately", async () => {
+    const controller = new AbortController();
+    const backoffStarted = deferred<void>();
+    let attempts = 0;
+    const client = new ProjectProgressOaClient(
+      {
+        baseUrl: "https://oa.example.test",
+        alias: "default",
+        token: "secret",
+        tokenHeader: "Authorization",
+        tokenPrefix: "Bearer",
+      },
+      async () => {
+        attempts += 1;
+        return Response.json({ data: { error_code: "too_many_requests" } }, {
+          status: 429,
+        });
+      },
+      undefined,
+      {
+        getRetry: {
+          sleep: async (_delayMs, signal) => {
+            backoffStarted.resolve();
+            await new Promise<void>((_resolve, reject) => {
+              signal?.addEventListener("abort", () => reject(signal.reason), {
+                once: true,
+              });
+            });
+          },
+        },
+      },
+    );
+    const pending = client.listProjects(controller.signal);
+    const observed = pending.catch((error: unknown) => error);
+    await Promise.race([
+      backoffStarted.promise,
+      new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("retry backoff did not start")), 100);
+        timer.unref();
+      }),
+    ]);
+
+    controller.abort(new Error("run cancelled"));
+
+    assert.match(String(await observed), /run cancelled/);
+    assert.equal(attempts, 1);
   });
 
   it("sends only a status field when updating a test project", async () => {
@@ -459,4 +573,14 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
