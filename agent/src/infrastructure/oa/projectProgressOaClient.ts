@@ -8,6 +8,10 @@ import {
   OperationMetricsRecorder,
   PROJECT_PROGRESS_ENDPOINTS,
 } from "../observability/operationMetrics.js";
+import {
+  OaRequestScheduler,
+  type OaRequestExecutor,
+} from "./oaRequestScheduler.js";
 
 const PROJECT_PAGE_SIZE = 100;
 const OA_REQUEST_TIMEOUT_MS = 15_000;
@@ -21,8 +25,8 @@ export type OaProject = {
 };
 
 export interface ProjectProgressOaReader {
-  listProjects(): Promise<OaProject[]>;
-  getProject(projectId: number): Promise<OaProject>;
+  listProjects(signal?: AbortSignal): Promise<OaProject[]>;
+  getProject(projectId: number, signal?: AbortSignal): Promise<OaProject>;
 }
 
 export type OaCommitSummary = {
@@ -55,16 +59,22 @@ export interface ProjectProgressOaWriter extends ProjectProgressOaReader {
     projectId: number,
     status: Exclude<ProjectStatus, "archived">,
     expectedVersion?: number,
+    signal?: AbortSignal,
   ): Promise<void>;
   listCommitSummaries(
     projectId: number,
     summaryDate: string,
+    signal?: AbortSignal,
   ): Promise<OaCommitSummary[]>;
-  getCommitSummary(summaryId: number): Promise<OaCommitSummary>;
-  createCommitSummary(input: CommitSummaryCreateInput): Promise<OaCommitSummary>;
+  getCommitSummary(summaryId: number, signal?: AbortSignal): Promise<OaCommitSummary>;
+  createCommitSummary(
+    input: CommitSummaryCreateInput,
+    signal?: AbortSignal,
+  ): Promise<OaCommitSummary>;
   updateCommitSummary(
     summaryId: number,
     input: CommitSummaryUpdateInput,
+    signal?: AbortSignal,
   ): Promise<OaCommitSummary>;
 }
 
@@ -75,6 +85,10 @@ export type ProjectProgressOaClientConfig = {
   tokenHeader: string;
   tokenPrefix: string;
   mutationContext?: FencedMutationContext;
+};
+
+export type ProjectProgressOaClientExecution = {
+  scheduler?: OaRequestExecutor;
 };
 
 type OaFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -100,19 +114,24 @@ export class ProjectProgressLeaseLostError extends OaRequestError {
 }
 
 export class ProjectProgressOaClient implements ProjectProgressOaWriter {
+  private readonly scheduler: OaRequestExecutor;
+
   constructor(
     private readonly config: ProjectProgressOaClientConfig,
     private readonly fetchImpl: OaFetch = fetch,
     private readonly operationMetrics?: OperationMetricsRecorder,
-  ) {}
+    execution: ProjectProgressOaClientExecution = {},
+  ) {
+    this.scheduler = execution.scheduler ?? new OaRequestScheduler();
+  }
 
-  async listProjects(): Promise<OaProject[]> {
+  async listProjects(signal?: AbortSignal): Promise<OaProject[]> {
     const projects: OaProject[] = [];
     for (let page = 1; ; page += 1) {
       const payload = await this.request(PROJECT_PROGRESS_ENDPOINTS.oaProjectList, "/internal/project-sync/projects", {
         page,
         size: PROJECT_PAGE_SIZE,
-      });
+      }, { signal });
       const pagination = decodePagination(payload, decodeProject);
       projects.push(...pagination.items);
       if (pagination.items.length === 0 || projects.length >= pagination.total) {
@@ -121,11 +140,12 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     }
   }
 
-  async getProject(projectId: number): Promise<OaProject> {
+  async getProject(projectId: number, signal?: AbortSignal): Promise<OaProject> {
     const payload = await this.request(
       PROJECT_PROGRESS_ENDPOINTS.oaProjectGet,
       `/internal/project-sync/projects/${encodeURIComponent(String(projectId))}`,
       {},
+      { signal },
     );
     return decodeProject(decodeEnvelope(payload).data);
   }
@@ -134,6 +154,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     projectId: number,
     status: Exclude<ProjectStatus, "archived">,
     expectedVersion?: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     const body = this.buildMutationBody(
       `project.status.update:${projectId}`,
@@ -144,34 +165,37 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       PROJECT_PROGRESS_ENDPOINTS.oaProjectStatusUpdate,
       `/internal/project-sync/projects/${encodeURIComponent(String(projectId))}/status`,
       {},
-      { method: "PATCH", body },
+      { method: "PATCH", body, signal },
     );
   }
 
   async listCommitSummaries(
     projectId: number,
     summaryDate: string,
+    signal?: AbortSignal,
   ): Promise<OaCommitSummary[]> {
     const payload = await this.request(PROJECT_PROGRESS_ENDPOINTS.oaSummaryList, "/internal/project-sync/github-commit-summaries", {
       project_id: projectId,
       summary_date: summaryDate,
       page: 1,
       size: 2,
-    });
+    }, { signal });
     return decodePagination(payload, decodeCommitSummary).items;
   }
 
-  async getCommitSummary(summaryId: number): Promise<OaCommitSummary> {
+  async getCommitSummary(summaryId: number, signal?: AbortSignal): Promise<OaCommitSummary> {
     const payload = await this.request(
       PROJECT_PROGRESS_ENDPOINTS.oaSummaryGet,
       `/internal/project-sync/github-commit-summaries/${encodeURIComponent(String(summaryId))}`,
       {},
+      { signal },
     );
     return decodeCommitSummary(decodeEnvelope(payload).data);
   }
 
   async createCommitSummary(
     input: CommitSummaryCreateInput,
+    signal?: AbortSignal,
   ): Promise<OaCommitSummary> {
     const body = this.buildMutationBody(
       `commit-summary.create:${input.projectId}:${input.summaryDate}`,
@@ -190,14 +214,16 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       {
         method: "POST",
         body,
+        signal,
       },
     );
-    return this.decodeOrReadCommitSummary(payload);
+    return this.decodeOrReadCommitSummary(payload, signal);
   }
 
   async updateCommitSummary(
     summaryId: number,
     input: CommitSummaryUpdateInput,
+    signal?: AbortSignal,
   ): Promise<OaCommitSummary> {
     const body = this.buildMutationBody(
       `commit-summary.update:${summaryId}`,
@@ -215,12 +241,16 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       {
         method: "PATCH",
         body,
+        signal,
       },
     );
-    return this.decodeOrReadCommitSummary(payload);
+    return this.decodeOrReadCommitSummary(payload, signal);
   }
 
-  private async decodeOrReadCommitSummary(payload: unknown): Promise<OaCommitSummary> {
+  private async decodeOrReadCommitSummary(
+    payload: unknown,
+    signal?: AbortSignal,
+  ): Promise<OaCommitSummary> {
     const data = decodeEnvelope(payload).data;
     try {
       return decodeCommitSummary(data);
@@ -231,7 +261,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
         Number.isInteger(data.id) &&
         (data.id as number) > 0
       ) {
-        return this.getCommitSummary(data.id as number);
+        return this.getCommitSummary(data.id as number, signal);
       }
       throw error;
     }
@@ -275,9 +305,10 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     options: {
       method?: "GET" | "POST" | "PATCH";
       body?: Record<string, unknown>;
+      signal?: AbortSignal;
     } = {},
   ): Promise<unknown> {
-    const execute = async () => {
+    const executeHttp = async () => {
       const url = new URL(path, ensureTrailingSlash(this.config.baseUrl));
       for (const [name, value] of Object.entries(query)) {
         url.searchParams.set(name, String(value));
@@ -290,7 +321,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
           [this.config.tokenHeader]: formatToken(this.config.tokenPrefix, this.config.token),
         },
         ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-        signal: AbortSignal.timeout(OA_REQUEST_TIMEOUT_MS),
+        signal: combineWithTimeout(options.signal, OA_REQUEST_TIMEOUT_MS),
       });
       let payload: unknown;
       try {
@@ -311,10 +342,30 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       }
       return payload;
     };
+    const execute = async () => {
+      const finishQueueWait = this.operationMetrics?.startQueueWait(endpoint);
+      try {
+        return await this.scheduler.run(
+          options.method && options.method !== "GET" ? "p1" : "p2",
+          async () => {
+            finishQueueWait?.();
+            return await executeHttp();
+          },
+          options.signal ? { signal: options.signal } : {},
+        );
+      } finally {
+        finishQueueWait?.();
+      }
+    };
     return this.operationMetrics
       ? this.operationMetrics.measure(endpoint, execute)
       : execute();
   }
+}
+
+function combineWithTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 }
 
 function decodeErrorCode(payload: unknown): string | null {

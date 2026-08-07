@@ -7,6 +7,12 @@ import {
   OperationMetricsRecorder,
   PROJECT_PROGRESS_ENDPOINTS,
 } from "../observability/operationMetrics.js";
+import { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
+import {
+  OaRequestScheduler,
+  type OaRequestExecutor,
+  type OaRequestLane,
+} from "./oaRequestScheduler.js";
 
 const OA_AUTOMATION_REQUEST_TIMEOUT_MS = 15_000;
 const OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS = 3_000;
@@ -133,10 +139,16 @@ export type AutomationOaClientConfig = {
   token: string;
 };
 
+export type AutomationOaClientExecution = {
+  scheduler?: OaRequestExecutor;
+  heartbeatLimiter?: AsyncSemaphore;
+};
+
 export type AutomationClaimInput = {
   workerInstance: string;
   leaseSeconds: number;
   claimRequestId: string;
+  signal?: AbortSignal;
 };
 
 export class AutomationOaContractError extends Error {
@@ -160,11 +172,18 @@ export class AutomationLeaseLostError extends AutomationOaRequestError {
 }
 
 export class AutomationOaClient {
+  private readonly scheduler: OaRequestExecutor;
+  private readonly heartbeatLimiter: AsyncSemaphore;
+
   constructor(
     private readonly config: AutomationOaClientConfig,
     private readonly fetchImpl: OaFetch = fetch,
     private readonly operationMetrics?: OperationMetricsRecorder,
-  ) {}
+    execution: AutomationOaClientExecution = {},
+  ) {
+    this.scheduler = execution.scheduler ?? new OaRequestScheduler();
+    this.heartbeatLimiter = execution.heartbeatLimiter ?? new AsyncSemaphore(1);
+  }
 
   async claim(workerInstance: string, leaseSeconds: number): Promise<AutomationJobClaim | null>;
   async claim(input: AutomationClaimInput): Promise<AutomationJobClaim | null>;
@@ -192,7 +211,11 @@ export class AutomationOaClient {
           ? {}
           : { claim_request_id: input.claimRequestId }),
       },
-      true,
+      {
+        lane: "p0",
+        allowNoContent: true,
+        ...(typeof input === "string" || !input.signal ? {} : { signal: input.signal }),
+      },
     );
     return payload === null ? null : decodeClaim(decodeEnvelope(payload).data);
   }
@@ -205,6 +228,7 @@ export class AutomationOaClient {
     retryRecommended?: boolean;
     errorCode?: string | null;
     errorSummary?: string | null;
+    signal?: AbortSignal;
   }): Promise<void> {
     await this.request(
       PROJECT_PROGRESS_ENDPOINTS.oaAutomationRunUpdate,
@@ -221,6 +245,7 @@ export class AutomationOaClient {
         ...(input.errorCode === undefined ? {} : { error_code: input.errorCode }),
         ...(input.errorSummary === undefined ? {} : { error_summary: input.errorSummary }),
       }),
+      { lane: "p0", ...(input.signal ? { signal: input.signal } : {}) },
     );
   }
 
@@ -228,6 +253,7 @@ export class AutomationOaClient {
     claim: AutomationJobClaim;
     workerInstance: string;
     leaseSeconds: number;
+    signal?: AbortSignal;
   }): Promise<AutomationHeartbeat> {
     const payload = await this.request(
       PROJECT_PROGRESS_ENDPOINTS.oaAutomationHeartbeat,
@@ -238,6 +264,10 @@ export class AutomationOaClient {
         lease_token: input.claim.leaseToken,
         lease_seconds: input.leaseSeconds,
       },
+      {
+        heartbeat: true,
+        ...(input.signal ? { signal: input.signal } : {}),
+      },
     );
     return decodeHeartbeat(decodeEnvelope(payload).data);
   }
@@ -247,6 +277,7 @@ export class AutomationOaClient {
     workerInstance: string;
     projectId: number;
     result: AutomationRunProjectInput;
+    signal?: AbortSignal;
   }): Promise<number> {
     const payload = await this.request(
       PROJECT_PROGRESS_ENDPOINTS.oaAutomationRunProjectUpsert,
@@ -276,6 +307,7 @@ export class AutomationOaClient {
           duration_ms: input.result.durationMs,
         },
       ),
+      { lane: "p1", ...(input.signal ? { signal: input.signal } : {}) },
     );
     const data = decodeEnvelope(payload).data;
     if (!isRecord(data) || !isPositiveInteger(data.run_project_id)) {
@@ -288,6 +320,7 @@ export class AutomationOaClient {
     claim: AutomationJobClaim;
     workerInstance: string;
     interaction: AutomationAiInteractionInput;
+    signal?: AbortSignal;
   }): Promise<number> {
     const interaction = input.interaction;
     const payload = await this.request(
@@ -321,6 +354,7 @@ export class AutomationOaClient {
           error_summary: interaction.errorSummary,
         },
       ),
+      { lane: "p1", ...(input.signal ? { signal: input.signal } : {}) },
     );
     const data = decodeEnvelope(payload).data;
     if (!isRecord(data) || !isPositiveInteger(data.interaction_id)) {
@@ -333,6 +367,7 @@ export class AutomationOaClient {
     claim: AutomationJobClaim;
     workerInstance: string;
     event: AutomationTraceEventInput;
+    signal?: AbortSignal;
   }): Promise<void> {
     const event = input.event;
     await this.request(
@@ -359,8 +394,12 @@ export class AutomationOaClient {
           occurred_at: event.occurredAt,
         },
       ),
-      true,
-      OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS,
+      {
+        lane: "p3",
+        allowNoContent: true,
+        timeoutMs: OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS,
+        ...(input.signal ? { signal: input.signal } : {}),
+      },
     );
   }
 
@@ -369,10 +408,16 @@ export class AutomationOaClient {
     path: string,
     method: "POST" | "PUT" | "PATCH",
     body: Record<string, unknown>,
-    allowNoContent = false,
-    timeoutMs = OA_AUTOMATION_REQUEST_TIMEOUT_MS,
+    options: {
+      lane?: OaRequestLane;
+      heartbeat?: boolean;
+      signal?: AbortSignal;
+      allowNoContent?: boolean;
+      timeoutMs?: number;
+    },
   ): Promise<unknown | null> {
-    const execute = async () => {
+    const executeHttp = async () => {
+      const timeoutMs = options.timeoutMs ?? OA_AUTOMATION_REQUEST_TIMEOUT_MS;
       const response = await this.fetchImpl(
         new URL(path, ensureTrailingSlash(this.config.baseUrl)),
         {
@@ -383,10 +428,10 @@ export class AutomationOaClient {
             "content-type": "application/json",
           },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: combineWithTimeout(options.signal, timeoutMs),
         },
       );
-      if (allowNoContent && response.status === 204) {
+      if (options.allowNoContent && response.status === 204) {
         return null;
       }
       let payload: unknown;
@@ -408,10 +453,35 @@ export class AutomationOaClient {
       }
       return payload;
     };
+    const execute = async () => {
+      const finishQueueWait = this.operationMetrics?.startQueueWait(endpoint);
+      try {
+        if (options.heartbeat) {
+          return await this.heartbeatLimiter.run(async () => {
+            finishQueueWait?.();
+            return await executeHttp();
+          }, options.signal);
+        }
+        if (!options.lane) {
+          throw new Error(`OA 自动化 endpoint 缺少调度 lane:${endpoint}`);
+        }
+        return await this.scheduler.run(options.lane, async () => {
+          finishQueueWait?.();
+          return await executeHttp();
+        }, options.signal ? { signal: options.signal } : {});
+      } finally {
+        finishQueueWait?.();
+      }
+    };
     return this.operationMetrics
       ? this.operationMetrics.measure(endpoint, execute)
       : execute();
   }
+}
+
+function combineWithTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 }
 
 function decodeClaim(value: unknown): AutomationJobClaim {

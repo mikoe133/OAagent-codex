@@ -8,6 +8,7 @@ import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
 import { AutomationOaClient } from "../infrastructure/oa/automationOaClient.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
+import { OaRequestScheduler } from "../infrastructure/oa/oaRequestScheduler.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 import {
@@ -44,11 +45,16 @@ async function main(): Promise<void> {
   try {
     const runOnce = async () => {
       const operationMetrics = new OperationMetricsRecorder();
+      const oaRequestScheduler = new OaRequestScheduler();
+      const heartbeatLimiter = new AsyncSemaphore(1);
       const result = await runProjectProgressAutomation({
         automationClient: new AutomationOaClient({
           baseUrl: baseConfig.oa.baseUrl,
           token: automationToken,
-        }, fetch, operationMetrics),
+        }, fetch, operationMetrics, {
+          scheduler: oaRequestScheduler,
+          heartbeatLimiter,
+        }),
         workerInstance: baseConfig.automation.workerInstance,
         leaseSeconds: baseConfig.automation.leaseSeconds,
         heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
@@ -81,6 +87,7 @@ async function main(): Promise<void> {
                 },
                 fetch,
                 operationMetrics,
+                { scheduler: oaRequestScheduler },
               ),
               githubReader: new GitHubRestProjectReader(
                 config.githubToken,

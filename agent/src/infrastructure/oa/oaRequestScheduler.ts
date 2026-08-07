@@ -2,6 +2,19 @@ import { performance } from "node:perf_hooks";
 
 export type OaRequestLane = "p0" | "p1" | "p2" | "p3";
 
+export type OaRequestExecutionOptions = {
+  signal?: AbortSignal;
+  maxWaitMs?: number;
+};
+
+export interface OaRequestExecutor {
+  run<T>(
+    lane: OaRequestLane,
+    operation: () => Promise<T>,
+    options?: OaRequestExecutionOptions,
+  ): Promise<T>;
+}
+
 export type OaRequestSchedulerMetrics = {
   activeTotal: number;
   peakActiveTotal: number;
@@ -48,7 +61,7 @@ const LANE_PRIORITY: Record<OaRequestLane, number> = {
   p3: 3,
 };
 
-export class OaRequestScheduler {
+export class OaRequestScheduler implements OaRequestExecutor {
   private readonly totalConcurrency: number;
   private readonly laneConcurrency: Record<OaRequestLane, number>;
   private readonly dataQueueCapacity: number;
@@ -111,7 +124,7 @@ export class OaRequestScheduler {
   async run<T>(
     lane: OaRequestLane,
     operation: () => Promise<T>,
-    options: { signal?: AbortSignal; maxWaitMs?: number } = {},
+    options: OaRequestExecutionOptions = {},
   ): Promise<T> {
     const release = await this.acquire(lane, options);
     try {
@@ -124,7 +137,7 @@ export class OaRequestScheduler {
 
   private acquire(
     lane: OaRequestLane,
-    options: { signal?: AbortSignal; maxWaitMs?: number },
+    options: OaRequestExecutionOptions,
   ): Promise<() => void> {
     if (!LANES.includes(lane)) {
       return Promise.reject(new Error(`未知 OA request lane:${lane}`));
