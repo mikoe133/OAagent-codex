@@ -10,6 +10,10 @@ import { AutomationOaClient } from "../infrastructure/oa/automationOaClient.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
+import {
+  OperationMetricsRecorder,
+  type OperationMetricSnapshot,
+} from "../infrastructure/observability/operationMetrics.js";
 
 const WORKER_POLL_INTERVAL_MS = 5_000;
 
@@ -38,68 +42,79 @@ async function main(): Promise<void> {
 
   const store = new ProjectProgressStore(baseConfig.stateDatabasePath);
   try {
-    const runOnce = () => runProjectProgressAutomation({
-      automationClient: new AutomationOaClient({
-        baseUrl: baseConfig.oa.baseUrl,
-        token: automationToken,
-      }),
-      workerInstance: baseConfig.automation.workerInstance,
-      leaseSeconds: baseConfig.automation.leaseSeconds,
-      heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
-      claimIdentityStore: store,
-      resolveExecution: async (claim) => {
-        const config = loadProjectProgressConfig(process.env, repoRoot, {
-          modelProvider: claim.modelProvider,
-          modelId: claim.modelId,
-          modelParameters: claim.modelParameters,
-        });
-        if (config.stateDatabasePath !== baseConfig.stateDatabasePath) {
-          throw new Error("运行期间 PROJECT_PROGRESS_STATE_DB 不允许变化。");
-        }
-        const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
-        return async (shouldCancel, trace) => {
-          return await syncProjectProgress({
-            observedAt: new Date(claim.scheduledAt),
-            oaClient: new ProjectProgressOaClient({
-              ...config.oa,
-              ...(claim.runMutationToken && claim.fencingToken
-                ? {
-                    mutationContext: {
-                      runId: claim.runId,
-                      runMutationToken: claim.runMutationToken,
-                      fencingToken: claim.fencingToken,
-                    },
-                  }
-                : {}),
-            }),
-            githubReader: new GitHubRestProjectReader(
-              config.githubToken,
-              fetch,
-              config.githubApiBaseUrl,
-              undefined,
-              githubRequestLimiter,
-            ),
-            summarizer: new CodexProjectProgressSummarizer({
-              model: config.model,
-              githubToken: config.githubToken,
-              githubApiBaseUrl: config.githubApiBaseUrl,
-              agent: config.agent,
-              workingDirectory: repoRoot,
-              workspaceRoot: config.workspaceRoot,
-              runId: claim.runId,
-              githubRequestLimiter,
-              promptProfile: claim.promptProfile,
-            }),
-            store,
-            writeMode: "production",
-            concurrency: config.concurrency,
-            githubRequestLimiter,
-            shouldCancel,
-            trace,
+    const runOnce = async () => {
+      const operationMetrics = new OperationMetricsRecorder();
+      const result = await runProjectProgressAutomation({
+        automationClient: new AutomationOaClient({
+          baseUrl: baseConfig.oa.baseUrl,
+          token: automationToken,
+        }, fetch, operationMetrics),
+        workerInstance: baseConfig.automation.workerInstance,
+        leaseSeconds: baseConfig.automation.leaseSeconds,
+        heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
+        claimIdentityStore: store,
+        resolveExecution: async (claim) => {
+          const config = loadProjectProgressConfig(process.env, repoRoot, {
+            modelProvider: claim.modelProvider,
+            modelId: claim.modelId,
+            modelParameters: claim.modelParameters,
           });
-        };
-      },
-    });
+          if (config.stateDatabasePath !== baseConfig.stateDatabasePath) {
+            throw new Error("运行期间 PROJECT_PROGRESS_STATE_DB 不允许变化。");
+          }
+          const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
+          return async (shouldCancel, trace) => {
+            return await syncProjectProgress({
+              observedAt: new Date(claim.scheduledAt),
+              oaClient: new ProjectProgressOaClient(
+                {
+                  ...config.oa,
+                  ...(claim.runMutationToken && claim.fencingToken
+                    ? {
+                        mutationContext: {
+                          runId: claim.runId,
+                          runMutationToken: claim.runMutationToken,
+                          fencingToken: claim.fencingToken,
+                        },
+                      }
+                    : {}),
+                },
+                fetch,
+                operationMetrics,
+              ),
+              githubReader: new GitHubRestProjectReader(
+                config.githubToken,
+                fetch,
+                config.githubApiBaseUrl,
+                undefined,
+                githubRequestLimiter,
+                operationMetrics,
+              ),
+              summarizer: new CodexProjectProgressSummarizer({
+                model: config.model,
+                githubToken: config.githubToken,
+                githubApiBaseUrl: config.githubApiBaseUrl,
+                agent: config.agent,
+                workingDirectory: repoRoot,
+                workspaceRoot: config.workspaceRoot,
+                runId: claim.runId,
+                githubRequestLimiter,
+                operationMetrics,
+                promptProfile: claim.promptProfile,
+              }),
+              store,
+              writeMode: "production",
+              concurrency: config.concurrency,
+              githubRequestLimiter,
+              operationMetrics,
+              shouldCancel,
+              trace,
+            });
+          };
+        },
+      });
+      return { result, operationMetrics: operationMetrics.snapshot() };
+    };
 
     const runOnceOnly = process.argv.slice(2).includes("--once");
     let stopRequested = false;
@@ -111,9 +126,10 @@ async function main(): Promise<void> {
 
     do {
       try {
-        const result = await runOnce();
+        const execution = await runOnce();
+        const { result } = execution;
         if (result.claimed || runOnceOnly) {
-          logResult(result);
+          logResult(result, execution.operationMetrics);
         }
         if (!result.claimed && !runOnceOnly && !stopRequested) {
           await delay(WORKER_POLL_INTERVAL_MS);
@@ -135,7 +151,10 @@ async function main(): Promise<void> {
   }
 }
 
-function logResult(result: Awaited<ReturnType<typeof runProjectProgressAutomation>>): void {
+function logResult(
+  result: Awaited<ReturnType<typeof runProjectProgressAutomation>>,
+  operationMetrics: OperationMetricSnapshot[],
+): void {
   console.log(JSON.stringify({
     claimed: result.claimed,
     run_id: result.runId,
@@ -152,6 +171,7 @@ function logResult(result: Awaited<ReturnType<typeof runProjectProgressAutomatio
     agent_peak_concurrency: result.report?.metrics.agentPeakConcurrency ?? 0,
     github_peak_concurrency: result.report?.metrics.githubPeakConcurrency ?? 0,
     oa_write_peak_concurrency: result.report?.metrics.oaWritePeakConcurrency ?? 0,
+    operation_metrics: operationMetrics,
   }));
 }
 

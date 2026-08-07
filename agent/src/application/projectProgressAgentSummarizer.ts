@@ -79,6 +79,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       workspaceRoot?: string;
       runId?: string;
       githubRequestLimiter?: AsyncSemaphore;
+      operationMetrics?: Parameters<typeof startProjectProgressGitHubMcpServer>[0]["operationMetrics"];
       promptProfile?: ProjectProgressPromptProfile | null;
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
@@ -109,6 +110,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         candidates,
         limits: this.config.agent,
         requestLimiter: this.config.githubRequestLimiter,
+        operationMetrics: this.config.operationMetrics,
         ...(input.signal ? { signal: input.signal } : {}),
       });
       agentRun = await this.runner({

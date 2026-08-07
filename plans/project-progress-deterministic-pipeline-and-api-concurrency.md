@@ -1,6 +1,6 @@
 # 项目进度 Worker 确定性取数与接口并发实施蓝图
 
-- 状态：实施中，Step 0 Worker 契约已实现，OA 服务端黑盒证据待验证
+- 状态：实施中，Step 0 Worker 契约已实现但 OA 服务端黑盒证据待验证；Step 1 Worker 基线与指标已实现
 - 更新日期：2026-08-07
 - 适用任务：`github_project_progress_sync`
 - 目标时区：`Asia/Shanghai`
@@ -478,6 +478,8 @@ OA_FENCING_TEST_BASE_URL="$OA_FENCING_TEST_BASE_URL" npm exec -w agent -- tsx --
 ### Step 1：基线与契约冻结
 
 上下文：当前代码已经实现主要业务链路，但缺少逐接口延迟、重试和排队指标。先固定可比较的 baseline，避免并发调整只有主观判断。
+
+实施进展（2026-08-07）：已增加稳定逻辑 endpoint、请求成功/失败与延迟分位数、Agent 排队时间，以及可重复的本地 fake-server 基线。`P=100、R=50、A=20` 固定产生 OA 101 次、GitHub 150 次和模型 20 次逻辑请求，并验证 GitHub/Agent 峰值 `6/2`。样本环境与结果归档在 `plans/baselines/project-progress-step1-baseline-2026-08-07.md`。归档跳过、共享仓库去重、不完整快照不生成总结或水位、租约取消、稳定幂等写入均已有回归测试。Step 0 OA 服务端门禁仍未通过，因此这不授权扩大 Worker 副本数或启用并发写接管。
 
 任务：
 

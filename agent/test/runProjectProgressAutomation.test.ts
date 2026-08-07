@@ -511,6 +511,7 @@ function report(options: {
       agentPeakConcurrency: options.withProject ? 1 : 0,
       oaWritePeakConcurrency: options.withProject ? 1 : 0,
     },
+    operationMetrics: [],
     projects: options.withProject ? [{
       projectId: 51,
       projectName: "OA 服务端",

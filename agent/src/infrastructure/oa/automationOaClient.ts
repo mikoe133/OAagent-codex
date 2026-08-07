@@ -3,6 +3,10 @@ import {
   isDefinitiveLeaseLossErrorCode,
   type FencedMutationContext,
 } from "./fencedMutation.js";
+import {
+  OperationMetricsRecorder,
+  PROJECT_PROGRESS_ENDPOINTS,
+} from "../observability/operationMetrics.js";
 
 const OA_AUTOMATION_REQUEST_TIMEOUT_MS = 15_000;
 const OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS = 3_000;
@@ -159,6 +163,7 @@ export class AutomationOaClient {
   constructor(
     private readonly config: AutomationOaClientConfig,
     private readonly fetchImpl: OaFetch = fetch,
+    private readonly operationMetrics?: OperationMetricsRecorder,
   ) {}
 
   async claim(workerInstance: string, leaseSeconds: number): Promise<AutomationJobClaim | null>;
@@ -176,6 +181,7 @@ export class AutomationOaClient {
       throw new AutomationOaContractError("claimRequestId 必须是合法 UUID。");
     }
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationClaim,
       "/internal/automation-job-runs/claim",
       "POST",
       {
@@ -201,6 +207,7 @@ export class AutomationOaClient {
     errorSummary?: string | null;
   }): Promise<void> {
     await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationRunUpdate,
       `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}`,
       "PATCH",
       scopedMutationBody(input.claim, "automation.run.update", {
@@ -223,6 +230,7 @@ export class AutomationOaClient {
     leaseSeconds: number;
   }): Promise<AutomationHeartbeat> {
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationHeartbeat,
       `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/heartbeat`,
       "POST",
       {
@@ -241,6 +249,7 @@ export class AutomationOaClient {
     result: AutomationRunProjectInput;
   }): Promise<number> {
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationRunProjectUpsert,
       `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/projects/${encodeURIComponent(String(input.projectId))}`,
       "PUT",
       scopedMutationBody(
@@ -282,6 +291,7 @@ export class AutomationOaClient {
   }): Promise<number> {
     const interaction = input.interaction;
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationAiInteractionUpsert,
       `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/ai-interactions`,
       "POST",
       scopedMutationBody(
@@ -326,6 +336,7 @@ export class AutomationOaClient {
   }): Promise<void> {
     const event = input.event;
     await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationTraceUpsert,
       `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/trace-events`,
       "POST",
       scopedMutationBody(
@@ -354,46 +365,52 @@ export class AutomationOaClient {
   }
 
   private async request(
+    endpoint: string,
     path: string,
     method: "POST" | "PUT" | "PATCH",
     body: Record<string, unknown>,
     allowNoContent = false,
     timeoutMs = OA_AUTOMATION_REQUEST_TIMEOUT_MS,
   ): Promise<unknown | null> {
-    const response = await this.fetchImpl(
-      new URL(path, ensureTrailingSlash(this.config.baseUrl)),
-      {
-        method,
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${this.config.token}`,
-          "content-type": "application/json",
+    const execute = async () => {
+      const response = await this.fetchImpl(
+        new URL(path, ensureTrailingSlash(this.config.baseUrl)),
+        {
+          method,
+          headers: {
+            accept: "application/json",
+            authorization: `Bearer ${this.config.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(timeoutMs),
         },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
-      },
-    );
-    if (allowNoContent && response.status === 204) {
-      return null;
-    }
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new AutomationOaContractError("OA 自动化响应不是合法 JSON。");
-    }
-    if (!response.ok) {
-      const errorCode = decodeErrorCode(payload);
-      const ErrorType = response.status === 409 && isDefinitiveLeaseLossErrorCode(errorCode)
-        ? AutomationLeaseLostError
-        : AutomationOaRequestError;
-      throw new ErrorType(
-        `OA 自动化请求失败:HTTP ${response.status}${errorCode ? `:${errorCode}` : ""}`,
-        response.status,
-        errorCode,
       );
-    }
-    return payload;
+      if (allowNoContent && response.status === 204) {
+        return null;
+      }
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new AutomationOaContractError("OA 自动化响应不是合法 JSON。");
+      }
+      if (!response.ok) {
+        const errorCode = decodeErrorCode(payload);
+        const ErrorType = response.status === 409 && isDefinitiveLeaseLossErrorCode(errorCode)
+          ? AutomationLeaseLostError
+          : AutomationOaRequestError;
+        throw new ErrorType(
+          `OA 自动化请求失败:HTTP ${response.status}${errorCode ? `:${errorCode}` : ""}`,
+          response.status,
+          errorCode,
+        );
+      }
+      return payload;
+    };
+    return this.operationMetrics
+      ? this.operationMetrics.measure(endpoint, execute)
+      : execute();
   }
 }
 

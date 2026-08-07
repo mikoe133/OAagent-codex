@@ -8,6 +8,7 @@ import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.j
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
+import { OperationMetricsRecorder } from "../infrastructure/observability/operationMetrics.js";
 import { parseProjectProgressOptions } from "./projectProgressOptions.js";
 
 async function main(): Promise<void> {
@@ -38,18 +39,20 @@ async function main(): Promise<void> {
     );
   }
   const store = new ProjectProgressStore(config.stateDatabasePath);
+  const operationMetrics = new OperationMetricsRecorder();
   const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
 
   try {
     const report = await syncProjectProgress({
       observedAt: options.observedAt ?? new Date(),
-      oaClient: new ProjectProgressOaClient(config.oa),
+      oaClient: new ProjectProgressOaClient(config.oa, fetch, operationMetrics),
       githubReader: new GitHubRestProjectReader(
         config.githubToken,
         fetch,
         config.githubApiBaseUrl,
         undefined,
         githubRequestLimiter,
+        operationMetrics,
       ),
       summarizer: new CodexProjectProgressSummarizer({
         model: config.model,
@@ -60,11 +63,13 @@ async function main(): Promise<void> {
         workspaceRoot: config.workspaceRoot,
         runId: `manual-${Date.now()}`,
         githubRequestLimiter,
+        operationMetrics,
       }),
       store,
       writeMode: options.writeMode,
       concurrency: config.concurrency,
       githubRequestLimiter,
+      operationMetrics,
       ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
     });
     console.log(JSON.stringify({

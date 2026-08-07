@@ -23,6 +23,11 @@ import type {
   ProjectProgressOaWriter,
 } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
+import {
+  OperationMetricsRecorder,
+  PROJECT_PROGRESS_ENDPOINTS,
+  type OperationMetricSnapshot,
+} from "../infrastructure/observability/operationMetrics.js";
 import type { ManagedProjectSummary } from "../infrastructure/persistence/projectProgressStore.js";
 import type {
   ProjectProgressAiInteraction,
@@ -100,6 +105,7 @@ export type ProjectProgressSyncReport = {
     agentPeakConcurrency: number;
     oaWritePeakConcurrency: number;
   };
+  operationMetrics: OperationMetricSnapshot[];
   projects: ProjectProgressProjectReport[];
 };
 
@@ -224,6 +230,7 @@ export type ProjectProgressSyncInput = {
   writeMode?: "dry-run" | "unsafe-test" | "production";
   concurrency?: ProjectProgressConcurrency;
   githubRequestLimiter?: AsyncSemaphore;
+  operationMetrics?: OperationMetricsRecorder;
   shouldCancel?: () => boolean;
   trace?: ProjectProgressTraceSink;
 };
@@ -232,9 +239,11 @@ export async function syncProjectProgress(
   input: ProjectProgressSyncInput,
 ): Promise<ProjectProgressSyncReport> {
   const cancellation = createCancellationMonitor(input.shouldCancel);
+  const operationMetrics = input.operationMetrics ?? new OperationMetricsRecorder();
   try {
     return await executeProjectProgressSync({
       ...input,
+      operationMetrics,
       ...(cancellation.signal ? { cancellationSignal: cancellation.signal } : {}),
     });
   } finally {
@@ -243,7 +252,10 @@ export async function syncProjectProgress(
 }
 
 async function executeProjectProgressSync(
-  input: ProjectProgressSyncInput & { cancellationSignal?: AbortSignal },
+  input: ProjectProgressSyncInput & {
+    operationMetrics: OperationMetricsRecorder;
+    cancellationSignal?: AbortSignal;
+  },
 ): Promise<ProjectProgressSyncReport> {
   const writeMode = input.writeMode ?? "dry-run";
   const concurrency = resolveConcurrency(input.concurrency);
@@ -551,8 +563,12 @@ async function executeProjectProgressSync(
   });
   if (!cancelled) {
     await Promise.all([...repositoryTasks.values()].map(async (task) => {
+      const finishQueueWait = input.operationMetrics.startQueueWait(
+        PROJECT_PROGRESS_ENDPOINTS.modelProjectProgressSummarize,
+      );
       try {
         const result = await agentLimiter.run(async () => {
+          finishQueueWait();
           await emitTrace(input.trace, {
             eventKey: `repository_summary:${task.repositoryKey}:${task.summaryDate}`,
             sequence: 510,
@@ -564,14 +580,17 @@ async function executeProjectProgressSync(
             metadataSanitized: { commit_count: task.commits.length },
           });
           try {
-            const generated = await input.summarizer.summarize({
-              projectId: task.projectId,
-              projectName: task.projectName,
-              repositoryFullName: task.repositoryKey,
-              summaryDate: task.summaryDate,
-              commits: task.commits,
-              ...(input.cancellationSignal ? { signal: input.cancellationSignal } : {}),
-            });
+            const generated = await input.operationMetrics.measure(
+              PROJECT_PROGRESS_ENDPOINTS.modelProjectProgressSummarize,
+              () => input.summarizer.summarize({
+                projectId: task.projectId,
+                projectName: task.projectName,
+                repositoryFullName: task.repositoryKey,
+                summaryDate: task.summaryDate,
+                commits: task.commits,
+                ...(input.cancellationSignal ? { signal: input.cancellationSignal } : {}),
+              }),
+            );
             return {
               key: task.key,
               repositoryKey: task.repositoryKey,
@@ -633,6 +652,7 @@ async function executeProjectProgressSync(
           progressTotal: repositoryTasks.size,
         });
       } catch (error) {
+        finishQueueWait();
         if (input.cancellationSignal?.aborted) {
           cancelled = true;
           await emitTrace(input.trace, {
@@ -912,6 +932,7 @@ async function executeProjectProgressSync(
       agentPeakConcurrency: agentLimiter.metrics.peakActive,
       oaWritePeakConcurrency: oaWriteLimiter.metrics.peakActive,
     },
+    operationMetrics: input.operationMetrics.snapshot(),
     projects: reports,
   };
 }

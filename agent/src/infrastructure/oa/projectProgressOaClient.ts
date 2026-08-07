@@ -4,6 +4,10 @@ import {
   isDefinitiveLeaseLossErrorCode,
   type FencedMutationContext,
 } from "./fencedMutation.js";
+import {
+  OperationMetricsRecorder,
+  PROJECT_PROGRESS_ENDPOINTS,
+} from "../observability/operationMetrics.js";
 
 const PROJECT_PAGE_SIZE = 100;
 const OA_REQUEST_TIMEOUT_MS = 15_000;
@@ -99,12 +103,13 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   constructor(
     private readonly config: ProjectProgressOaClientConfig,
     private readonly fetchImpl: OaFetch = fetch,
+    private readonly operationMetrics?: OperationMetricsRecorder,
   ) {}
 
   async listProjects(): Promise<OaProject[]> {
     const projects: OaProject[] = [];
     for (let page = 1; ; page += 1) {
-      const payload = await this.request("/internal/project-sync/projects", {
+      const payload = await this.request(PROJECT_PROGRESS_ENDPOINTS.oaProjectList, "/internal/project-sync/projects", {
         page,
         size: PROJECT_PAGE_SIZE,
       });
@@ -118,6 +123,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
 
   async getProject(projectId: number): Promise<OaProject> {
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaProjectGet,
       `/internal/project-sync/projects/${encodeURIComponent(String(projectId))}`,
       {},
     );
@@ -135,6 +141,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       expectedVersion,
     );
     await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaProjectStatusUpdate,
       `/internal/project-sync/projects/${encodeURIComponent(String(projectId))}/status`,
       {},
       { method: "PATCH", body },
@@ -145,7 +152,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     projectId: number,
     summaryDate: string,
   ): Promise<OaCommitSummary[]> {
-    const payload = await this.request("/internal/project-sync/github-commit-summaries", {
+    const payload = await this.request(PROJECT_PROGRESS_ENDPOINTS.oaSummaryList, "/internal/project-sync/github-commit-summaries", {
       project_id: projectId,
       summary_date: summaryDate,
       page: 1,
@@ -156,6 +163,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
 
   async getCommitSummary(summaryId: number): Promise<OaCommitSummary> {
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaSummaryGet,
       `/internal/project-sync/github-commit-summaries/${encodeURIComponent(String(summaryId))}`,
       {},
     );
@@ -176,6 +184,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       },
     );
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaSummaryCreate,
       "/internal/project-sync/github-commit-summaries",
       {},
       {
@@ -200,6 +209,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       input.expectedVersion,
     );
     const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaSummaryUpdate,
       `/internal/project-sync/github-commit-summaries/${encodeURIComponent(String(summaryId))}`,
       {},
       {
@@ -259,6 +269,7 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   }
 
   private async request(
+    endpoint: string,
     path: string,
     query: Record<string, string | number>,
     options: {
@@ -266,38 +277,43 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       body?: Record<string, unknown>;
     } = {},
   ): Promise<unknown> {
-    const url = new URL(path, ensureTrailingSlash(this.config.baseUrl));
-    for (const [name, value] of Object.entries(query)) {
-      url.searchParams.set(name, String(value));
-    }
-    const response = await this.fetchImpl(url, {
-      method: options.method ?? "GET",
-      headers: {
-        accept: "application/json",
-        ...(options.body ? { "content-type": "application/json" } : {}),
-        [this.config.tokenHeader]: formatToken(this.config.tokenPrefix, this.config.token),
-      },
-      ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-      signal: AbortSignal.timeout(OA_REQUEST_TIMEOUT_MS),
-    });
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new OaContractError("OA 响应不是合法 JSON。");
-    }
-    if (!response.ok) {
-      const errorCode = decodeErrorCode(payload);
-      const ErrorType = response.status === 409 && isDefinitiveLeaseLossErrorCode(errorCode)
-        ? ProjectProgressLeaseLostError
-        : OaRequestError;
-      throw new ErrorType(
-        `OA 请求失败:HTTP ${response.status}${errorCode ? `:${errorCode}` : ""}`,
-        response.status,
-        errorCode,
-      );
-    }
-    return payload;
+    const execute = async () => {
+      const url = new URL(path, ensureTrailingSlash(this.config.baseUrl));
+      for (const [name, value] of Object.entries(query)) {
+        url.searchParams.set(name, String(value));
+      }
+      const response = await this.fetchImpl(url, {
+        method: options.method ?? "GET",
+        headers: {
+          accept: "application/json",
+          ...(options.body ? { "content-type": "application/json" } : {}),
+          [this.config.tokenHeader]: formatToken(this.config.tokenPrefix, this.config.token),
+        },
+        ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+        signal: AbortSignal.timeout(OA_REQUEST_TIMEOUT_MS),
+      });
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new OaContractError("OA 响应不是合法 JSON。");
+      }
+      if (!response.ok) {
+        const errorCode = decodeErrorCode(payload);
+        const ErrorType = response.status === 409 && isDefinitiveLeaseLossErrorCode(errorCode)
+          ? ProjectProgressLeaseLostError
+          : OaRequestError;
+        throw new ErrorType(
+          `OA 请求失败:HTTP ${response.status}${errorCode ? `:${errorCode}` : ""}`,
+          response.status,
+          errorCode,
+        );
+      }
+      return payload;
+    };
+    return this.operationMetrics
+      ? this.operationMetrics.measure(endpoint, execute)
+      : execute();
   }
 }
 

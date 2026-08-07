@@ -5,6 +5,10 @@ import type {
   ProjectProgressGitHubReader,
 } from "./githubTypes.js";
 import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
+import {
+  OperationMetricsRecorder,
+  PROJECT_PROGRESS_ENDPOINTS,
+} from "../observability/operationMetrics.js";
 
 const DEFAULT_LOOKBACK_HOURS = 24 * 30;
 const PAGE_SIZE = 100;
@@ -33,6 +37,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     private readonly apiBaseUrl = "https://api.github.com",
     private readonly lookbackHours = DEFAULT_LOOKBACK_HOURS,
     private readonly requestLimiter?: AsyncSemaphore,
+    private readonly operationMetrics?: OperationMetricsRecorder,
   ) {}
 
   readRepository(
@@ -57,6 +62,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   ): Promise<GitHubRepositorySnapshot> {
     const metadata = decodeRepository(
       await this.request(
+        PROJECT_PROGRESS_ENDPOINTS.githubRepositoryGet,
         `/repos/${encode(repository.owner)}/${encode(repository.repository)}`,
         {},
         [],
@@ -72,6 +78,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     for (const branch of branches) {
       for (let page = 1; ; page += 1) {
         const payload = await this.request(
+          PROJECT_PROGRESS_ENDPOINTS.githubCommitsList,
           `/repos/${encode(repository.owner)}/${encode(repository.repository)}/commits`,
           { sha: branch, since, per_page: PAGE_SIZE, page },
           [409],
@@ -114,6 +121,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     const branches: string[] = [];
     for (let page = 1; ; page += 1) {
       const payload = await this.request(
+        PROJECT_PROGRESS_ENDPOINTS.githubBranchesList,
         `/repos/${encode(repository.owner)}/${encode(repository.repository)}/branches`,
         { per_page: PAGE_SIZE, page },
         [],
@@ -128,6 +136,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   }
 
   private async request(
+    endpoint: string,
     path: string,
     query: Record<string, string | number> = {},
     nullableStatuses: number[] = [],
@@ -137,39 +146,44 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     for (const [name, value] of Object.entries(query)) {
       url.searchParams.set(name, String(value));
     }
-    const execute = () => this.fetchImpl(url, {
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${this.token}`,
-        "x-github-api-version": "2022-11-28",
-        "user-agent": "oa-project-progress-worker",
-      },
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
-        : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
-    });
-    const response = this.requestLimiter
-      ? await this.requestLimiter.run(execute, signal)
-      : await execute();
-    if (nullableStatuses.includes(response.status)) {
-      return null;
-    }
-    if (!response.ok) {
-      const reset = response.headers.get("x-ratelimit-reset");
-      const retryAt = reset && /^\d+$/.test(reset)
-        ? new Date(Number(reset) * 1_000).toISOString()
-        : null;
-      throw new GitHubRequestError(
-        `GitHub 请求失败:HTTP ${response.status}`,
-        response.status,
-        retryAt,
-      );
-    }
-    try {
-      return await response.json();
-    } catch {
-      throw new GitHubRequestError("GitHub 响应不是合法 JSON。", response.status, null);
-    }
+    const request = async () => {
+      const execute = () => this.fetchImpl(url, {
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${this.token}`,
+          "x-github-api-version": "2022-11-28",
+          "user-agent": "oa-project-progress-worker",
+        },
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
+          : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
+      });
+      const response = this.requestLimiter
+        ? await this.requestLimiter.run(execute, signal)
+        : await execute();
+      if (nullableStatuses.includes(response.status)) {
+        return null;
+      }
+      if (!response.ok) {
+        const reset = response.headers.get("x-ratelimit-reset");
+        const retryAt = reset && /^\d+$/.test(reset)
+          ? new Date(Number(reset) * 1_000).toISOString()
+          : null;
+        throw new GitHubRequestError(
+          `GitHub 请求失败:HTTP ${response.status}`,
+          response.status,
+          retryAt,
+        );
+      }
+      try {
+        return await response.json();
+      } catch {
+        throw new GitHubRequestError("GitHub 响应不是合法 JSON。", response.status, null);
+      }
+    };
+    return this.operationMetrics
+      ? this.operationMetrics.measure(endpoint, request)
+      : request();
   }
 }
 
