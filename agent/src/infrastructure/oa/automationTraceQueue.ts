@@ -175,7 +175,6 @@ export class BoundedAutomationTraceQueue {
           `automation trace drain 超过 ${timeoutMs}ms。`,
         ),
       )), timeoutMs);
-      timer.unref();
       options.signal?.addEventListener("abort", onAbort, { once: true });
       check();
     });
