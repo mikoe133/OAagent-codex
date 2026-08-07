@@ -32,6 +32,10 @@ PROJECT_PROGRESS_WORKER_INSTANCE=oaagent-local-01
 PROJECT_PROGRESS_LEASE_SECONDS=300
 PROJECT_PROGRESS_HEARTBEAT_SECONDS=60
 PROJECT_PROGRESS_GITHUB_CONCURRENCY=6
+PROJECT_PROGRESS_GITHUB_MAX_BRANCHES=500
+PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH=100
+PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY=2000
+PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN=20000
 PROJECT_PROGRESS_AGENT_CONCURRENCY=2
 PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=1
 PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces
@@ -45,7 +49,7 @@ GitHub PAT 只需目标仓库的 `Metadata: Read` 和 `Contents: Read`。两个 
 
 GitHub PAT 只保留在 Worker 内存。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables，不需要新增 Secret。
 
-一个 Worker 内可以有任意数量的仓库任务排队，但只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个并发 6 请求池；OA 总结、状态和审计写入按顺序执行。容器建议至少分配 `2 CPU / 3GB`。
+一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 token 级执行器：全局并发 6、单仓库并发 1，并统一执行 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。OA 总结、状态和审计写入按顺序执行。容器建议至少分配 `2 CPU / 3GB`。
 
 项目总结 Agent 使用隔离的 Codex `exec`：忽略用户级配置和规则、不持久化 thread、禁用 shell、网页、插件能力及多 Agent，并固定 65536 token 上下文窗口和 6000 token 工具输出上限。若运行记录出现任何未授权工具调用，OAagent 会拒绝该输出并使用确定性兜底，同时把越权计数写入 AI interaction 审计。
 

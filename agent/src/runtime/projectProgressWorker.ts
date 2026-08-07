@@ -73,6 +73,8 @@ async function main(): Promise<void> {
           const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
           const githubRequestExecutor = new GitHubRequestExecutor({
             requestLimiter: githubRequestLimiter,
+            maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
+            maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
           });
           return async (shouldCancel, trace) => {
             return await syncProjectProgress({
@@ -101,7 +103,12 @@ async function main(): Promise<void> {
                 undefined,
                 githubRequestLimiter,
                 operationMetrics,
-                { requestExecutor: githubRequestExecutor },
+                {
+                  requestExecutor: githubRequestExecutor,
+                  maxBranches: config.githubLimits.maxBranches,
+                  maxCommitPagesPerBranch:
+                    config.githubLimits.maxCommitPagesPerBranch,
+                },
               ),
               summarizer: new CodexProjectProgressSummarizer({
                 model: config.model,

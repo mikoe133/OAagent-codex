@@ -36,6 +36,10 @@ readonly project_progress_worker_instance="${PROJECT_PROGRESS_WORKER_INSTANCE:-o
 readonly project_progress_lease_seconds="${PROJECT_PROGRESS_LEASE_SECONDS:-300}"
 readonly project_progress_heartbeat_seconds="${PROJECT_PROGRESS_HEARTBEAT_SECONDS:-60}"
 readonly project_progress_github_concurrency="${PROJECT_PROGRESS_GITHUB_CONCURRENCY:-6}"
+readonly project_progress_github_max_branches="${PROJECT_PROGRESS_GITHUB_MAX_BRANCHES:-500}"
+readonly project_progress_github_max_commit_pages_per_branch="${PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH:-100}"
+readonly project_progress_github_max_requests_per_repository="${PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY:-2000}"
+readonly project_progress_github_max_requests_per_run="${PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN:-20000}"
 readonly project_progress_agent_concurrency="${PROJECT_PROGRESS_AGENT_CONCURRENCY:-2}"
 readonly project_progress_oa_write_concurrency="${PROJECT_PROGRESS_OA_WRITE_CONCURRENCY:-1}"
 readonly project_progress_agent_max_detail_calls="${PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS:-12}"
@@ -60,6 +64,10 @@ for name in \
   PROJECT_PROGRESS_LEASE_SECONDS \
   PROJECT_PROGRESS_HEARTBEAT_SECONDS \
   PROJECT_PROGRESS_GITHUB_CONCURRENCY \
+  PROJECT_PROGRESS_GITHUB_MAX_BRANCHES \
+  PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH \
+  PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY \
+  PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN \
   PROJECT_PROGRESS_AGENT_CONCURRENCY \
   PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \
   PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS \
@@ -103,6 +111,24 @@ done
   || fail "PROJECT_PROGRESS_GITHUB_CONCURRENCY must be a number"
 (( project_progress_github_concurrency >= 1 && project_progress_github_concurrency <= 20 )) \
   || fail "PROJECT_PROGRESS_GITHUB_CONCURRENCY must be between 1 and 20"
+[[ "$project_progress_github_max_branches" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_BRANCHES must be a number"
+(( project_progress_github_max_branches >= 1 && project_progress_github_max_branches <= 10000 )) \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_BRANCHES must be between 1 and 10000"
+[[ "$project_progress_github_max_commit_pages_per_branch" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH must be a number"
+(( project_progress_github_max_commit_pages_per_branch >= 1 && project_progress_github_max_commit_pages_per_branch <= 1000 )) \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH must be between 1 and 1000"
+[[ "$project_progress_github_max_requests_per_repository" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY must be a number"
+(( project_progress_github_max_requests_per_repository >= 1 && project_progress_github_max_requests_per_repository <= 100000 )) \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY must be between 1 and 100000"
+[[ "$project_progress_github_max_requests_per_run" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN must be a number"
+(( project_progress_github_max_requests_per_run >= 1 && project_progress_github_max_requests_per_run <= 1000000 )) \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN must be between 1 and 1000000"
+(( project_progress_github_max_requests_per_repository <= project_progress_github_max_requests_per_run )) \
+  || fail "PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY must not exceed PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN"
 [[ "$project_progress_agent_concurrency" =~ ^[0-9]+$ ]] \
   || fail "PROJECT_PROGRESS_AGENT_CONCURRENCY must be a number"
 (( project_progress_agent_concurrency >= 1 && project_progress_agent_concurrency <= 4 )) \
@@ -175,6 +201,10 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'PROJECT_PROGRESS_STATE_DB=/app/.context/project-progress.sqlite\n'
   printf 'PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces\n'
   printf 'PROJECT_PROGRESS_GITHUB_CONCURRENCY=%s\n' "$project_progress_github_concurrency"
+  printf 'PROJECT_PROGRESS_GITHUB_MAX_BRANCHES=%s\n' "$project_progress_github_max_branches"
+  printf 'PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH=%s\n' "$project_progress_github_max_commit_pages_per_branch"
+  printf 'PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY=%s\n' "$project_progress_github_max_requests_per_repository"
+  printf 'PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN=%s\n' "$project_progress_github_max_requests_per_run"
   printf 'PROJECT_PROGRESS_AGENT_CONCURRENCY=%s\n' "$project_progress_agent_concurrency"
   printf 'PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=%s\n' "$project_progress_oa_write_concurrency"
   printf 'PROJECT_PROGRESS_MODEL_PROVIDER=nexttoken\n'
