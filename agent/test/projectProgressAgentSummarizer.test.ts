@@ -52,6 +52,8 @@ describe("CodexProjectProgressSummarizer", () => {
     const runner: ProjectProgressAgentRunner = async (runInput) => {
       assert.match(runInput.developerInstructions, /read_commit_details/);
       assert.match(runInput.prompt, /abcdef123456/);
+      assert.match(runInput.prompt, /repository-evidence-v1/);
+      assert.doesNotMatch(runInput.prompt, /OA 平台|projectId|projectName/);
       assert.doesNotMatch(runInput.prompt, /model-secret|github-secret/);
       return {
         finalResponse: JSON.stringify({
@@ -78,9 +80,49 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.equal(result.interaction?.outputTokens, 30);
     assert.equal(result.interaction?.responsePayloadSanitized.execution_mode, "codex_sdk_agent");
     assert.equal(result.interaction?.responsePayloadSanitized.detail_calls, 0);
+    assert.equal(
+      result.interaction?.requestPayloadSanitized.evidence_schema_version,
+      "repository-evidence-v1",
+    );
+    assert.match(
+      String(result.interaction?.requestPayloadSanitized.evidence_digest),
+      /^[a-f0-9]{64}$/u,
+    );
+    assert.equal("project_id" in (result.interaction?.requestPayloadSanitized ?? {}), false);
     assert.doesNotMatch(
       JSON.stringify(result.interaction),
       /example\/api|abcdef123456|model-secret|github-secret/,
+    );
+  });
+
+  it("builds identical Agent prompts for the same evidence referenced by different projects", async () => {
+    const prompts: string[] = [];
+    const runner: ProjectProgressAgentRunner = async (runInput) => {
+      prompts.push(runInput.prompt);
+      return {
+        finalResponse: JSON.stringify({
+          summary: "完成项目无关的仓库语义总结。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-project-independent",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const first = await summarizer.summarize(input);
+    const second = await summarizer.summarize({
+      ...input,
+      projectId: 999,
+      projectName: "另一个 OA 项目",
+    });
+
+    assert.equal(prompts.length, 2);
+    assert.equal(prompts[0], prompts[1]);
+    assert.equal(
+      first.interaction?.requestPayloadSanitized.evidence_digest,
+      second.interaction?.requestPayloadSanitized.evidence_digest,
     );
   });
 
