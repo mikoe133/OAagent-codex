@@ -32,6 +32,12 @@ describe("loadProjectProgressConfig", () => {
       agent: 2,
       oaWrite: 1,
     });
+    assert.deepEqual(config.githubLimits, {
+      maxBranches: 500,
+      maxCommitPagesPerBranch: 100,
+      maxRequestsPerRepository: 2_000,
+      maxRequestsPerRun: 20_000,
+    });
     assert.equal(
       config.workspaceRoot,
       "/srv/oa-agent/.context/project-progress-workspaces",
@@ -208,6 +214,10 @@ describe("loadProjectProgressConfig", () => {
       PROJECT_PROGRESS_AGENT_CONCURRENCY: "3",
       PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "1",
       PROJECT_PROGRESS_OA_PROJECT_DETAIL_COMPATIBILITY_MODE: "true",
+      PROJECT_PROGRESS_GITHUB_MAX_BRANCHES: "250",
+      PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH: "25",
+      PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY: "750",
+      PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN: "5000",
       PROJECT_PROGRESS_WORKSPACE_ROOT: "/var/lib/oaagent/workspaces",
     }, "/srv/oa-agent");
 
@@ -218,5 +228,36 @@ describe("loadProjectProgressConfig", () => {
     });
     assert.equal(config.workspaceRoot, "/var/lib/oaagent/workspaces");
     assert.equal(config.oa.projectDetailCompatibilityMode, true);
+    assert.deepEqual(config.githubLimits, {
+      maxBranches: 250,
+      maxCommitPagesPerBranch: 25,
+      maxRequestsPerRepository: 750,
+      maxRequestsPerRun: 5_000,
+    });
+  });
+
+  it("validates GitHub repository and run request limits", () => {
+    const environment = {
+      OA_API_BASE_URL: "https://oa.example.test",
+      OA_PROJECT_SYNC_TOKEN: "worker-token",
+      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      NEXTTOKEN_API_KEY: "model-token",
+    };
+
+    assert.throws(
+      () => loadProjectProgressConfig({
+        ...environment,
+        PROJECT_PROGRESS_GITHUB_MAX_BRANCHES: "0",
+      }, "/tmp"),
+      /MAX_BRANCHES/,
+    );
+    assert.throws(
+      () => loadProjectProgressConfig({
+        ...environment,
+        PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY: "2001",
+        PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN: "2000",
+      }, "/tmp"),
+      /每个仓库.*不能超过.*运行/,
+    );
   });
 });
