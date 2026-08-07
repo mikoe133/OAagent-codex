@@ -47,8 +47,12 @@ describe("GitHubRequestExecutor", () => {
       rateLimited: 1,
       serverErrors: 1,
       rejectedByBudget: 0,
+      rateLimitLimit: null,
       rateLimitRemaining: null,
       rateLimitResetAt: null,
+      rateLimitReserve: null,
+      pacingWaitMs: 0,
+      sharedPauseWaitMs: 0,
     });
   });
 
@@ -186,6 +190,97 @@ describe("GitHubRequestExecutor", () => {
 
     await assert.rejects(request, /cancelled/);
     assert.equal(attempts, 1);
+  });
+
+  it("paces new requests from the allocatable primary rate-limit window", async () => {
+    let now = 1_000_000;
+    const sleeps: number[] = [];
+    const executor = new GitHubRequestExecutor({
+      now: () => now,
+      sleep: async (milliseconds) => {
+        sleeps.push(milliseconds);
+        now += milliseconds;
+      },
+    });
+    await executor.execute(
+      async () => Response.json({ ok: true }, {
+        headers: {
+          "x-ratelimit-limit": "1000",
+          "x-ratelimit-remaining": "500",
+          "x-ratelimit-reset": String((now + 100_000) / 1_000),
+        },
+      }),
+      { repository: "example/api" },
+    );
+
+    let issuedAt = 0;
+    await executor.execute(async () => {
+      issuedAt = now;
+      return Response.json({ ok: true });
+    }, { repository: "example/web" });
+
+    assert.equal(issuedAt, 1_000_250);
+    assert.deepEqual(sleeps, [250]);
+    assert.equal(executor.metrics.rateLimitReserve, 100);
+    assert.equal(executor.metrics.pacingWaitMs, 250);
+  });
+
+  it("preserves the primary rate-limit reserve until reset", async () => {
+    let now = 2_000_000;
+    const executor = new GitHubRequestExecutor({
+      now: () => now,
+      sleep: async (milliseconds) => {
+        now += milliseconds;
+      },
+    });
+    await executor.execute(
+      async () => Response.json({ ok: true }, {
+        headers: {
+          "x-ratelimit-limit": "1000",
+          "x-ratelimit-remaining": "100",
+          "x-ratelimit-reset": String((now + 60_000) / 1_000),
+        },
+      }),
+      { repository: "example/api" },
+    );
+    let calls = 0;
+
+    await assert.rejects(
+      executor.execute(async () => {
+        calls += 1;
+        return Response.json({ ok: true });
+      }, { repository: "example/web" }),
+      (error) =>
+        error instanceof GitHubRequestBudgetExceededError &&
+        error.scope === "rate_limit" &&
+        error.retryAt === new Date(2_060_000).toISOString(),
+    );
+    assert.equal(calls, 0);
+  });
+
+  it("uses a 30 second shared pause for a secondary limit without Retry-After", async () => {
+    let now = 3_000_000;
+    const sleeps: number[] = [];
+    let calls = 0;
+    const executor = new GitHubRequestExecutor({
+      now: () => now,
+      sleep: async (milliseconds) => {
+        sleeps.push(milliseconds);
+        now += milliseconds;
+      },
+    });
+
+    const response = await executor.execute(async () => {
+      calls += 1;
+      return calls === 1
+        ? new Response("You have exceeded a secondary rate limit.", { status: 403 })
+        : Response.json({ ok: true });
+    }, { repository: "example/api" });
+
+    assert.equal(response.status, 200);
+    assert.equal(calls, 2);
+    assert.deepEqual(sleeps, [30_000]);
+    assert.equal(executor.metrics.sharedPauseWaitMs, 30_000);
   });
 });
 
