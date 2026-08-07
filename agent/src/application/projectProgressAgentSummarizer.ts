@@ -16,6 +16,7 @@ import {
   type ProjectProgressGitHubMcpServer,
 } from "../infrastructure/github/projectProgressMcpServer.js";
 import type { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
+import type { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
 import { resolveCodexModelCatalogPath } from "../infrastructure/codex/modelMetadataCatalog.js";
 import {
   DeterministicProjectProgressSummarizer,
@@ -82,6 +83,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       workspaceRoot?: string;
       runId?: string;
       githubRequestLimiter?: AsyncSemaphore;
+      githubRequestExecutor?: GitHubRequestExecutor;
       operationMetrics?: Parameters<typeof startProjectProgressGitHubMcpServer>[0]["operationMetrics"];
       promptProfile?: ProjectProgressPromptProfile | null;
     },
@@ -114,6 +116,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         candidates,
         limits: this.config.agent,
         requestLimiter: this.config.githubRequestLimiter,
+        requestExecutor: this.config.githubRequestExecutor,
         operationMetrics: this.config.operationMetrics,
         ...(input.signal ? { signal: input.signal } : {}),
       });

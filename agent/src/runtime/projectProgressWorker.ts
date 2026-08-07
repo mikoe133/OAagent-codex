@@ -6,6 +6,7 @@ import { CodexProjectProgressSummarizer } from "../application/projectProgressAg
 import { syncProjectProgress } from "../application/syncProjectProgress.js";
 import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
+import { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
 import { AutomationOaClient } from "../infrastructure/oa/automationOaClient.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { OaRequestScheduler } from "../infrastructure/oa/oaRequestScheduler.js";
@@ -70,6 +71,9 @@ async function main(): Promise<void> {
             throw new Error("运行期间 PROJECT_PROGRESS_STATE_DB 不允许变化。");
           }
           const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
+          const githubRequestExecutor = new GitHubRequestExecutor({
+            requestLimiter: githubRequestLimiter,
+          });
           return async (shouldCancel, trace) => {
             return await syncProjectProgress({
               observedAt: new Date(claim.scheduledAt),
@@ -97,6 +101,7 @@ async function main(): Promise<void> {
                 undefined,
                 githubRequestLimiter,
                 operationMetrics,
+                { requestExecutor: githubRequestExecutor },
               ),
               summarizer: new CodexProjectProgressSummarizer({
                 model: config.model,
@@ -107,6 +112,7 @@ async function main(): Promise<void> {
                 workspaceRoot: config.workspaceRoot,
                 runId: claim.runId,
                 githubRequestLimiter,
+                githubRequestExecutor,
                 operationMetrics,
                 promptProfile: claim.promptProfile,
               }),

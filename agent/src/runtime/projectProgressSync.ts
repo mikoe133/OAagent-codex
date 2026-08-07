@@ -5,6 +5,7 @@ import { CodexProjectProgressSummarizer } from "../application/projectProgressAg
 import { syncProjectProgress } from "../application/syncProjectProgress.js";
 import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
+import { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
@@ -41,6 +42,9 @@ async function main(): Promise<void> {
   const store = new ProjectProgressStore(config.stateDatabasePath);
   const operationMetrics = new OperationMetricsRecorder();
   const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
+  const githubRequestExecutor = new GitHubRequestExecutor({
+    requestLimiter: githubRequestLimiter,
+  });
 
   try {
     const report = await syncProjectProgress({
@@ -53,6 +57,7 @@ async function main(): Promise<void> {
         undefined,
         githubRequestLimiter,
         operationMetrics,
+        { requestExecutor: githubRequestExecutor },
       ),
       summarizer: new CodexProjectProgressSummarizer({
         model: config.model,
@@ -63,6 +68,7 @@ async function main(): Promise<void> {
         workspaceRoot: config.workspaceRoot,
         runId: `manual-${Date.now()}`,
         githubRequestLimiter,
+        githubRequestExecutor,
         operationMetrics,
       }),
       store,

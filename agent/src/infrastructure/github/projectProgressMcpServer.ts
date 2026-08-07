@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod/v4";
 import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
+import { GitHubRequestExecutor } from "./githubRequestExecutor.js";
 import {
   OperationMetricsRecorder,
   PROJECT_PROGRESS_ENDPOINTS,
@@ -71,6 +72,7 @@ export type ProjectProgressCommitDetailResult = {
 
 export class GitHubCommitDetailTool {
   private readonly allowedCommits: Map<string, Set<string>>;
+  private readonly requestExecutor: GitHubRequestExecutor;
   private readonly seenCommits = new Set<string>();
   private readonly metrics: ProjectProgressCommitDetailMetrics = {
     detailCalls: 0,
@@ -87,12 +89,16 @@ export class GitHubCommitDetailTool {
       candidates: ProjectProgressCommitCandidate[];
       limits: ProjectProgressAgentLimits;
       requestLimiter?: AsyncSemaphore;
+      requestExecutor?: GitHubRequestExecutor;
       operationMetrics?: OperationMetricsRecorder;
       signal?: AbortSignal;
     },
     private readonly fetchImpl: GitHubFetch = fetch,
   ) {
     this.allowedCommits = buildAllowedCommits(config.candidates);
+    this.requestExecutor = config.requestExecutor ?? new GitHubRequestExecutor({
+      ...(config.requestLimiter ? { requestLimiter: config.requestLimiter } : {}),
+    });
   }
 
   getMetrics(): ProjectProgressCommitDetailMetrics {
@@ -234,12 +240,10 @@ export class GitHubCommitDetailTool {
           ])
           : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
       });
-      const response = this.config.requestLimiter
-        ? await this.config.requestLimiter.run(execute, this.config.signal)
-        : await execute();
-      if (!response.ok) {
-        throw new Error(`GitHub Commit 详情请求失败:HTTP ${response.status}`);
-      }
+      const response = await this.requestExecutor.execute(execute, {
+        repository,
+        ...(this.config.signal ? { signal: this.config.signal } : {}),
+      });
       return readLimitedJson(response, MAX_GITHUB_RESPONSE_BYTES);
     };
     return this.config.operationMetrics
@@ -265,6 +269,7 @@ export async function startProjectProgressGitHubMcpServer(input: {
   limits: ProjectProgressAgentLimits;
   fetchImpl?: GitHubFetch;
   requestLimiter?: AsyncSemaphore;
+  requestExecutor?: GitHubRequestExecutor;
   operationMetrics?: OperationMetricsRecorder;
   signal?: AbortSignal;
 }): Promise<ProjectProgressGitHubMcpServer> {
