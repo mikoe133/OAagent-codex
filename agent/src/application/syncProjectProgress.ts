@@ -15,12 +15,14 @@ import type {
   GitHubRepositorySnapshot,
   ProjectProgressGitHubReader,
 } from "../infrastructure/github/githubTypes.js";
+import { isDefinitiveLeaseLossError } from "../infrastructure/oa/fencedMutation.js";
 import type {
   OaCommitSummary,
   OaProject,
   ProjectProgressOaReader,
   ProjectProgressOaWriter,
 } from "../infrastructure/oa/projectProgressOaClient.js";
+import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
 import type { ManagedProjectSummary } from "../infrastructure/persistence/projectProgressStore.js";
 import type {
   ProjectProgressAiInteraction,
@@ -815,6 +817,9 @@ async function executeProjectProgressSync(
         mutationsApplied += applied;
         projectMutationsApplied += applied;
       } catch (error) {
+        if (error instanceof ProjectProgressLeaseLostError) {
+          throw error;
+        }
         evaluation.warnings.push(`write_failed:${errorMessage(error)}`);
       }
       if (input.shouldCancel?.()) {
@@ -963,7 +968,10 @@ async function emitTrace(
   }
   try {
     await sink(event);
-  } catch {
+  } catch (error) {
+    if (isDefinitiveLeaseLossError(error)) {
+      throw error;
+    }
     return;
   }
 }
@@ -1073,12 +1081,19 @@ async function applyMutations(input: {
     });
     try {
       await input.writeLimiter.run(
-        () => input.writer.updateProjectStatus(latest.id, input.targetStatus),
+        () => input.writer.updateProjectStatus(
+          latest.id,
+          input.targetStatus,
+          latest.version,
+        ),
         input.cancellationSignal,
       );
       input.store.markOutboxApplied(intentKey);
       applied += 1;
     } catch (error) {
+      if (error instanceof ProjectProgressLeaseLostError) {
+        throw error;
+      }
       input.warnings.push(`status_write_failed:${errorMessage(error)}`);
     }
   }
@@ -1101,6 +1116,9 @@ async function applyMutations(input: {
         warnings: input.warnings,
       });
     } catch (error) {
+      if (error instanceof ProjectProgressLeaseLostError) {
+        throw error;
+      }
       input.warnings.push(
         `summary_write_failed:${proposal.summaryDate}:${errorMessage(error)}`,
       );
@@ -1147,6 +1165,9 @@ async function reconcileSummary(input: {
         input.cancellationSignal,
       );
     } catch (createError) {
+      if (createError instanceof ProjectProgressLeaseLostError) {
+        throw createError;
+      }
       const raced = await input.writer.listCommitSummaries(
         input.projectId,
         input.proposal.summaryDate,
@@ -1199,7 +1220,10 @@ async function reconcileSummary(input: {
     payload: { summaryId: current.id, ...desired },
   });
   await input.writeLimiter.run(
-    () => input.writer.updateCommitSummary(current.id, desired),
+    () => input.writer.updateCommitSummary(current.id, {
+      ...desired,
+      expectedVersion: current.version,
+    }),
     input.cancellationSignal,
   );
   markSummaryApplied(input, current.id);

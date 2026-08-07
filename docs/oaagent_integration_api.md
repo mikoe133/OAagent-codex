@@ -209,7 +209,8 @@ Content-Type: application/json
 {
   "worker_instance": "oaagent-worker-01",
   "supported_job_types": ["github_project_progress_sync"],
-  "lease_seconds": 300
+  "lease_seconds": 300,
+  "claim_request_id": "019fd15d-32c6-7fb2-9afb-68be0996b80f"
 }
 ```
 
@@ -220,6 +221,12 @@ Content-Type: application/json
 | `worker_instance` | 1～255 字符；同一 Worker 生命周期内保持稳定 |
 | `supported_job_types` | 1～20 项；当前只能包含 `github_project_progress_sync` |
 | `lease_seconds` | 60～600 秒，推荐 300 |
+| `claim_request_id` | UUID；首次请求前持久化，同一次未知结果重试必须复用 |
+
+OA 必须在覆盖最大 run 时长和恢复宽限期的幂等窗口内绑定
+`claim_request_id + worker_instance + 规范化请求摘要`。同一 ID 和同一请求返回同一
+claim；同一 ID 携带不同 worker、任务类型或租约时长时返回
+`409 claim_request_conflict`。`204` 或已确认终态后，Worker 才能清除该 ID。
 
 有任务时返回 `200`：
 
@@ -230,6 +237,9 @@ Content-Type: application/json
   "data": {
     "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
     "lease_token": "raw-lease-token-returned-once",
+    "run_mutation_token": "scoped-hmac-token",
+    "fencing_token": 7,
+    "concurrency_key": "tenant-1:github_project_progress_sync:all_projects",
     "job_id": 1,
     "job_key": "github-project-progress-sync",
     "job_type": "github_project_progress_sync",
@@ -265,7 +275,10 @@ Content-Type: application/json
 HTTP/1.1 204 No Content
 ```
 
-`204` 没有 JSON body，不应按错误处理。`lease_token` 只返回一次，OA 数据库仅保存摘要；OAagent 应仅保存在当前运行上下文，不得写日志。
+`204` 没有 JSON body，不应按错误处理。`lease_token` 和
+`run_mutation_token` 只能驻留当前运行内存，不得写 SQLite 或日志。OA 使用服务端
+HMAC 按 `run_id + worker_instance + concurrency_key + fencing_token + token_version`
+确定性派生 scoped token，因此相同 claim request 可以安全返回相同凭证。
 
 cURL：
 
@@ -276,11 +289,30 @@ curl --request POST "$OA_BASE_URL/internal/automation-job-runs/claim" \
   --data '{
     "worker_instance": "oaagent-worker-01",
     "supported_job_types": ["github_project_progress_sync"],
-    "lease_seconds": 300
+    "lease_seconds": 300,
+    "claim_request_id": "019fd15d-32c6-7fb2-9afb-68be0996b80f"
   }'
 ```
 
-### 5.2 标记运行中或回传终态
+### 5.2 Run-scoped mutation 公共字段
+
+除 heartbeat 外，运行状态、项目执行结果、AI 审计和 Trace 写入都必须携带：
+
+```json
+{
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters"
+}
+```
+
+`idempotency_key` 由 `run_id + 稳定 operation + canonical JSON payload` 生成，不含
+lease token 或 scoped token。OA 必须在同一个数据库事务内依次验证 token scope、当前
+lease/fence、幂等键与 payload hash，再对首次 mutation 执行条件写。相同 key 和相同
+payload 返回原结果；相同 key 和不同 payload 返回 `409 idempotency_conflict`。
+
+### 5.3 标记运行中或回传终态
 
 ```http
 PATCH /internal/automation-job-runs/{run_id}
@@ -294,6 +326,10 @@ claim 成功后，OAagent 应先标记 `running`：
 {
   "worker_instance": "oaagent-worker-01",
   "lease_token": "raw-lease-token-returned-once",
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters",
   "status": "running"
 }
 ```
@@ -304,6 +340,10 @@ claim 成功后，OAagent 应先标记 `running`：
 {
   "worker_instance": "oaagent-worker-01",
   "lease_token": "raw-lease-token-returned-once",
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters",
   "status": "partial_failed",
   "mutations_applied": true,
   "retry_recommended": true,
@@ -348,9 +388,10 @@ claim 成功后，OAagent 应先标记 `running`：
 - `projects_total`、`projects_succeeded`、`projects_failed` 和 `duration_ms` 由 OA 根据项目执行记录计算
 - `failed` 或 `partial_failed` 且 `retry_recommended=true` 时，OA 会按快照策略创建重试运行
 - 相同终态和相同内容可安全重放；终态内容不一致返回 `409`
+- 终态事务必须锁定 run，并作为 barrier 使旧 token/fence 失效
 - `error_summary` 最长 1000 字符，不要包含 token、请求头、Cookie 或完整上游响应
 
-### 5.3 心跳续租
+### 5.4 心跳续租
 
 ```http
 POST /internal/automation-job-runs/{run_id}/heartbeat
@@ -385,7 +426,7 @@ Content-Type: application/json
 
 OAagent 必须处理 `cancel_requested=true`：停止领取新的项目，在安全检查点终止当前工作，并回传 `status=cancelled`。续租时间不会超过 `deadline_at`。
 
-### 5.4 幂等写入项目执行结果
+### 5.5 幂等写入项目执行结果
 
 ```http
 PUT /internal/automation-job-runs/{run_id}/projects/{project_id}
@@ -397,6 +438,10 @@ Content-Type: application/json
 {
   "worker_instance": "oaagent-worker-01",
   "lease_token": "raw-lease-token-returned-once",
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters",
   "project_name_snapshot": "OA 服务端",
   "status_before": "updating",
   "status_after": "maintenance",
@@ -445,7 +490,7 @@ Content-Type: application/json
 
 同一 `(run_id, project_id)` 再次 PUT 会覆盖同一记录。OAagent 必须保存返回的 `run_project_id`，创建 AI 审计时需要使用。
 
-### 5.5 幂等写入 AI 调用审计
+### 5.6 幂等写入 AI 调用审计
 
 ```http
 POST /internal/automation-job-runs/{run_id}/ai-interactions
@@ -457,6 +502,10 @@ Content-Type: application/json
 {
   "worker_instance": "oaagent-worker-01",
   "lease_token": "raw-lease-token-returned-once",
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters",
   "run_project_id": 123,
   "interaction_key": "project-51-summary-v1",
   "provider": "nexttoken",
@@ -536,7 +585,8 @@ GET /internal/project-sync/projects?page=1&size=100
         "status": "updating",
         "describe": "OA 服务端项目",
         "softforge_id": 3,
-        "github_urls": ["https://github.com/example/rwoachat"]
+        "github_urls": ["https://github.com/example/rwoachat"],
+        "version": 12
       }
     ]
   },
@@ -572,7 +622,8 @@ GET /internal/project-sync/projects/{project_id}
   "markdown": "",
   "github_urls": ["https://github.com/example/rwoachat"],
   "deleted": false,
-  "people": [8, 12]
+  "people": [8, 12],
+  "version": 12
 }
 ```
 
@@ -587,7 +638,12 @@ Content-Type: application/json
 
 ```json
 {
-  "status": "maintenance"
+  "status": "maintenance",
+  "expected_version": 12,
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters"
 }
 ```
 
@@ -597,7 +653,9 @@ Content-Type: application/json
 - `maintenance`
 - `archived`
 
-成功时 `data` 返回更新后的项目详情。项目不存在或已删除返回 `404 project_not_found`。
+成功时 `data` 返回更新后的项目详情和递增后的 `version`。`expected_version` 不匹配返回
+`409/412 version_conflict`，旧 token/fence 返回 `409`，项目不存在或已删除返回
+`404 project_not_found`。
 
 ### 6.4 查询 GitHub commit 总结
 
@@ -626,6 +684,7 @@ GET /internal/project-sync/github-commit-summaries?project_id=51&page=1&size=100
         "summary": "今日完成自动化任务服务端联调。",
         "ai_confidence": 92,
         "ai_note": "提交记录完整",
+        "version": 3,
         "updated_at": 1785402000,
         "created_at": 1785401900
       }
@@ -648,13 +707,19 @@ Content-Type: application/json
   "summary_date": "2026-07-30",
   "summary": "今日完成自动化任务服务端联调。",
   "ai_confidence": 92,
-  "ai_note": "提交记录完整"
+  "ai_note": "提交记录完整",
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters"
 }
 ```
 
 必填字段：`project_id`、`summary_date`、`ai_confidence`。`summary` 和 `ai_note` 默认空字符串。
 
-成功返回 HTTP `201`，`data` 为完整总结对象。同一 `project_id + summary_date` 只能存在一条，重复创建返回 `409 commit_summary_conflict`。
+成功返回 HTTP `201`，`data` 为包含 `version` 的完整总结对象。同一
+`project_id + summary_date` 只能存在一条；相同 idempotency key 可重放，不同写入冲突
+返回 `409 commit_summary_conflict`。
 
 推荐冲突处理：
 
@@ -683,25 +748,33 @@ Content-Type: application/json
 {
   "summary": "更新后的项目进度总结。",
   "ai_confidence": 95,
-  "ai_note": "已补充遗漏提交"
+  "ai_note": "已补充遗漏提交",
+  "expected_version": 3,
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters"
 }
 ```
 
-可修改字段：`summary_date`、`summary`、`ai_confidence`、`ai_note`。空对象或全部为 null 返回 `422 no_changes`；修改日期后与现有记录冲突返回 `409 commit_summary_conflict`。
+可修改字段：`summary_date`、`summary`、`ai_confidence`、`ai_note`。fenced Worker
+必须发送读取所得的 `expected_version`。空对象或全部为 null 返回 `422 no_changes`；版本
+不匹配返回 `409/412 version_conflict`，修改日期后与现有记录冲突返回
+`409 commit_summary_conflict`。
 
 ## 7. 推荐 Worker 执行顺序
 
-1. 每分钟或按约定间隔调用 claim。
-2. 收到 `204` 时正常等待下一轮。
-3. 收到任务后保存 `run_id` 和 raw `lease_token`，立即上报 `running`。
+1. 首次 claim 前持久化稳定 worker、规范化请求摘要和 `claim_request_id`，再调用 claim。
+2. 收到 `204` 时清除该 claim identity，正常等待下一轮；响应未知时保留并复用同一 ID。
+3. 收到任务后只在内存保存 `run_id`、raw lease token、scoped token 和 fence，立即上报 `running`。
 4. 启动约 60 秒一次的 heartbeat，并持续检查 `cancel_requested`。
 5. 使用 `OA_PROJECT_SYNC_TOKEN` 分页获取项目。
 6. 对每个项目读取 GitHub commit、调用模型并生成结果。
-7. 先 PUT 项目执行结果，取得 `run_project_id`。
-8. 再 POST AI interaction 审计。
-9. 使用项目同步接口写 commit 总结，并在需要时修改项目状态。
+7. 写前重读项目和总结取得 `version`，先用 fenced 条件写完成项目状态和 commit 总结。
+8. 业务 mutation 获得确定结果后，PUT 项目执行结果并取得 `run_project_id`。
+9. 再 POST AI interaction 审计，使审计反映实际 mutation 结果。
 10. 所有项目处理完成后，上报 `succeeded`、`partial_failed` 或 `failed`。
-11. 停止 heartbeat，清除内存中的 raw `lease_token`。
+11. 终态确认后清除 claim identity，并销毁内存中的 raw lease/scoped token。
 
 终态建议：
 
@@ -716,9 +789,10 @@ Content-Type: application/json
 ## 8. 租约、幂等和重试规则
 
 - claim、heartbeat、运行状态、项目结果和 AI 审计使用同一个 `worker_instance`
-- 后续 Worker 写入必须携带 claim 返回的 raw `lease_token`
-- `409 invalid_lease_token` 或 `409 lease_expired` 后，旧 Worker 必须立即停止该 run 的业务写入
-- 租约过期后，其他 Worker 可以接管同一 run
+- 除 heartbeat 外的 run-scoped mutation 必须携带 raw lease token、scoped token、fence 和稳定幂等键
+- 项目/总结更新必须额外携带写前读取所得的 `expected_version`
+- 任一 lease/token/fence 失效错误后，旧 Worker 必须立即停止该 run 的业务写入
+- OA 按 `tenant + job_type + writer_scope` 的 `concurrency_key` single-flight，不按 `job_key` 互斥
 - deadline 到达后，OA 会把运行标记为超时失败，并按策略决定是否创建 retry
 - 项目结果以 `(run_id, project_id)` 幂等
 - AI 审计以 `(run_id, interaction_key)` 幂等
@@ -737,6 +811,11 @@ Content-Type: application/json
 | 404 | `commit_summary_not_found` | 重新查询项目日期对应记录 |
 | 409 | `invalid_lease_token` | 当前 Worker 失去租约，立即停止写入 |
 | 409 | `lease_expired` | 当前 Worker 失去租约，立即停止写入 |
+| 409 | `invalid_run_mutation_token` | scoped token 无效，立即停止写入 |
+| 409 | `stale_fencing_token` / `lease_fenced` | 已被新 lease epoch 取代，立即停止写入 |
+| 409 | `claim_request_conflict` | 同一 claim ID 被不同请求复用；停止并检查本地 identity |
+| 409 | `idempotency_conflict` | 同一 key 的 payload 不一致；禁止换 key 覆盖 |
+| 409/412 | `version_conflict` | 重新读取资源并进入冲突协调，不得盲重试 PATCH |
 | 409 | `invalid_run_transition` | 检查是否漏报 `running` 或重复发送了不同终态 |
 | 409 | `commit_summary_conflict` | 查询现有总结并改用 PATCH |
 | 422 | `run_project_not_found` | 先 PUT 项目执行结果并使用返回 ID |
@@ -754,12 +833,44 @@ Content-Type: application/json
 - [ ] OA 的 `OA_AGENT_INTERNAL_BASE_URL` 可访问 OAagent
 - [ ] OAagent 已实现模型目录和模型实时校验接口
 - [ ] 模型校验通过后，OA 管理端任务已设置为 `enabled=true`
-- [ ] OAagent 能正确处理 claim 的 `200` 和 `204`
+- [ ] OAagent 能正确处理 claim 的 `200`、`204`、未知响应重取和 request conflict
 - [ ] OAagent 能先上报 `running`，再上报终态
 - [ ] heartbeat 周期明显小于租约时长
 - [ ] OAagent 能处理 `cancel_requested=true`
-- [ ] 项目结果、AI 审计和 commit 总结均使用稳定幂等键
-- [ ] 日志中没有服务 token、raw lease token、GitHub token、Cookie 或模型 API Key
+- [ ] 项目、总结、运行状态、项目结果、AI 审计和 Trace 均通过旧 fence/版本冲突黑盒测试
+- [ ] OA CI 已提供后端 commit SHA、migration/事务锁测试和证据 URL
+- [ ] 日志/SQLite 中没有服务 token、raw lease/scoped token、GitHub token、Cookie 或模型 API Key
+
+### 10.1 OA fencing 部署门禁 fixture
+
+`.github/workflows/ci-cd.yml` 的 `oa-fencing-contract` job 会在测试环境执行
+`agent/test/oaFencingIntegration.test.ts`。OA 测试环境需提供一个仅 CI 可访问的 fixture
+控制端点，生产环境不得启用：
+
+```http
+POST <OA_FENCING_TEST_FIXTURE_URL>
+Authorization: Bearer <OA_FENCING_TEST_FIXTURE_TOKEN>
+Content-Type: application/json
+```
+
+`{"scenario":"reset"}` 必须重置一个隔离项目和一条已有总结，项目状态为
+`updating`，两者均带正整数 `version`；同时创建至少两个不同 `job_key`、相同
+`tenant + github_project_progress_sync + all_projects` concurrency key 的到期任务。响应为：
+
+```json
+{
+  "data": {
+    "project_id": 900001,
+    "summary_id": 900001
+  }
+}
+```
+
+`{"scenario":"expire_current_lease","run_id":"..."}` 只允许测试身份使当前 run 不再可写，
+并保证下一次 claim 取得另一个 `job_key` 的待运行任务，同时返回同一 fixture ID。黑盒测试随后用标准 claim 和 project-sync API 验证：claim
+重放/冲突、跨 job key single-flight、旧 fence 拒绝、version CAS、相同幂等键重放以及
+同 key 不同 payload 冲突。门禁还要求 `OA_BACKEND_COMMIT_SHA` 和
+`OA_BACKEND_CI_EVIDENCE_URL`，缺少任一项不得部署。
 
 ## 11. OpenAPI 与服务状态
 

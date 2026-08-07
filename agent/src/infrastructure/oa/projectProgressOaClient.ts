@@ -1,4 +1,9 @@
 import type { ProjectStatus } from "../../domain/projectProgress.js";
+import {
+  buildFencedMutationBody,
+  isDefinitiveLeaseLossErrorCode,
+  type FencedMutationContext,
+} from "./fencedMutation.js";
 
 const PROJECT_PAGE_SIZE = 100;
 const OA_REQUEST_TIMEOUT_MS = 15_000;
@@ -37,12 +42,15 @@ export type CommitSummaryCreateInput = {
 export type CommitSummaryUpdateInput = Omit<
   CommitSummaryCreateInput,
   "projectId" | "summaryDate"
->;
+> & {
+  expectedVersion?: number;
+};
 
 export interface ProjectProgressOaWriter extends ProjectProgressOaReader {
   updateProjectStatus(
     projectId: number,
     status: Exclude<ProjectStatus, "archived">,
+    expectedVersion?: number,
   ): Promise<void>;
   listCommitSummaries(
     projectId: number,
@@ -62,6 +70,7 @@ export type ProjectProgressOaClientConfig = {
   token: string;
   tokenHeader: string;
   tokenPrefix: string;
+  mutationContext?: FencedMutationContext;
 };
 
 type OaFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -80,6 +89,10 @@ export class OaRequestError extends Error {
   ) {
     super(message);
   }
+}
+
+export class ProjectProgressLeaseLostError extends OaRequestError {
+  override name = "ProjectProgressLeaseLostError";
 }
 
 export class ProjectProgressOaClient implements ProjectProgressOaWriter {
@@ -114,11 +127,17 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   async updateProjectStatus(
     projectId: number,
     status: Exclude<ProjectStatus, "archived">,
+    expectedVersion?: number,
   ): Promise<void> {
+    const body = this.buildMutationBody(
+      `project.status.update:${projectId}`,
+      { status },
+      expectedVersion,
+    );
     await this.request(
       `/internal/project-sync/projects/${encodeURIComponent(String(projectId))}/status`,
       {},
-      { method: "PATCH", body: { status } },
+      { method: "PATCH", body },
     );
   }
 
@@ -146,18 +165,22 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   async createCommitSummary(
     input: CommitSummaryCreateInput,
   ): Promise<OaCommitSummary> {
+    const body = this.buildMutationBody(
+      `commit-summary.create:${input.projectId}:${input.summaryDate}`,
+      {
+        project_id: input.projectId,
+        summary_date: input.summaryDate,
+        summary: input.summary,
+        ai_confidence: input.aiConfidence,
+        ai_note: input.aiNote,
+      },
+    );
     const payload = await this.request(
       "/internal/project-sync/github-commit-summaries",
       {},
       {
         method: "POST",
-        body: {
-          project_id: input.projectId,
-          summary_date: input.summaryDate,
-          summary: input.summary,
-          ai_confidence: input.aiConfidence,
-          ai_note: input.aiNote,
-        },
+        body,
       },
     );
     return this.decodeOrReadCommitSummary(payload);
@@ -167,16 +190,21 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     summaryId: number,
     input: CommitSummaryUpdateInput,
   ): Promise<OaCommitSummary> {
+    const body = this.buildMutationBody(
+      `commit-summary.update:${summaryId}`,
+      {
+        summary: input.summary,
+        ai_confidence: input.aiConfidence,
+        ai_note: input.aiNote,
+      },
+      input.expectedVersion,
+    );
     const payload = await this.request(
       `/internal/project-sync/github-commit-summaries/${encodeURIComponent(String(summaryId))}`,
       {},
       {
         method: "PATCH",
-        body: {
-          summary: input.summary,
-          ai_confidence: input.aiConfidence,
-          ai_note: input.aiNote,
-        },
+        body,
       },
     );
     return this.decodeOrReadCommitSummary(payload);
@@ -197,6 +225,37 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       }
       throw error;
     }
+  }
+
+  private buildMutationBody(
+    operation: string,
+    body: Record<string, unknown>,
+    expectedVersion?: number,
+  ): Record<string, unknown> {
+    const context = this.config.mutationContext;
+    if (!context) {
+      return body;
+    }
+    const requiresExpectedVersion = operation.startsWith("project.status.update:") ||
+      operation.startsWith("commit-summary.update:");
+    if (
+      requiresExpectedVersion &&
+      (!Number.isInteger(expectedVersion) || (expectedVersion as number) < 1)
+    ) {
+      throw new OaContractError(
+        `Fenced mutation ${operation} 缺少有效 expectedVersion。`,
+      );
+    }
+    return buildFencedMutationBody(
+      context,
+      operation,
+      {
+        ...body,
+        ...(requiresExpectedVersion
+          ? { expected_version: expectedVersion as number }
+          : {}),
+      },
+    );
   }
 
   private async request(
@@ -229,7 +288,10 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     }
     if (!response.ok) {
       const errorCode = decodeErrorCode(payload);
-      throw new OaRequestError(
+      const ErrorType = response.status === 409 && isDefinitiveLeaseLossErrorCode(errorCode)
+        ? ProjectProgressLeaseLostError
+        : OaRequestError;
+      throw new ErrorType(
         `OA 请求失败:HTTP ${response.status}${errorCode ? `:${errorCode}` : ""}`,
         response.status,
         errorCode,

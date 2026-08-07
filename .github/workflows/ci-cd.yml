@@ -52,6 +52,62 @@ jobs:
           cp .env.example .env
           docker compose -f compose.yml config --quiet
 
+  oa-fencing-contract:
+    name: OA fencing contract
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test')
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: test
+    permissions:
+      contents: read
+    env:
+      OA_FENCING_TEST_BASE_URL: ${{ vars.OA_FENCING_TEST_BASE_URL }}
+      OA_FENCING_TEST_AUTOMATION_TOKEN: ${{ secrets.OA_AGENT_AUTOMATION_TOKEN }}
+      OA_FENCING_TEST_PROJECT_TOKEN: ${{ secrets.OA_PROJECT_SYNC_TOKEN }}
+      OA_FENCING_TEST_FIXTURE_URL: ${{ vars.OA_FENCING_TEST_FIXTURE_URL }}
+      OA_FENCING_TEST_FIXTURE_TOKEN: ${{ secrets.OA_FENCING_TEST_FIXTURE_TOKEN }}
+      OA_BACKEND_COMMIT_SHA: ${{ vars.OA_BACKEND_COMMIT_SHA }}
+      OA_BACKEND_CI_EVIDENCE_URL: ${{ vars.OA_BACKEND_CI_EVIDENCE_URL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate OA contract evidence
+        shell: bash
+        run: |
+          for name in OA_FENCING_TEST_BASE_URL OA_FENCING_TEST_AUTOMATION_TOKEN OA_FENCING_TEST_PROJECT_TOKEN OA_FENCING_TEST_FIXTURE_URL OA_FENCING_TEST_FIXTURE_TOKEN OA_BACKEND_COMMIT_SHA OA_BACKEND_CI_EVIDENCE_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing OA fencing contract configuration: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Worker contracts
+        run: |
+          npm exec -w agent -- tsx --test test/openApiContract.test.ts
+          npm exec -w agent -- tsx --test test/automationOaClient.test.ts
+          npm exec -w agent -- tsx --test test/projectProgressOaClient.test.ts
+
+      - name: Verify OA fencing black-box contract
+        run: npm exec -w agent -- tsx --test test/oaFencingIntegration.test.ts
+
+      - name: Record OA backend evidence
+        run: |
+          echo "### OA fencing contract" >> "$GITHUB_STEP_SUMMARY"
+          echo "- OA backend commit: \`${OA_BACKEND_COMMIT_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- OA backend CI evidence: ${OA_BACKEND_CI_EVIDENCE_URL}" >> "$GITHUB_STEP_SUMMARY"
+
   images:
     name: Build ${{ matrix.service }} image
     needs: quality
@@ -136,7 +192,7 @@ jobs:
   deploy-test:
     name: Deploy test
     if: github.ref == 'refs/heads/test' && github.event_name != 'pull_request'
-    needs: images
+    needs: [images, oa-fencing-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -261,7 +317,7 @@ jobs:
   deploy-production:
     name: Deploy production
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: images
+    needs: [images, oa-fencing-contract]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:

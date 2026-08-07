@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -22,6 +23,17 @@ export type ManagedProjectSummary = {
   };
 };
 
+export type AutomationClaimIdentityInput = {
+  workerInstance: string;
+  supportedJobTypes: string[];
+  leaseSeconds: number;
+};
+
+export type AutomationClaimIdentity = {
+  claimRequestId: string;
+  requestDigest: string;
+};
+
 export class ProjectProgressStore {
   private readonly database: DatabaseSync;
   private closed = false;
@@ -33,6 +45,72 @@ export class ProjectProgressStore {
     this.database = new DatabaseSync(databasePath);
     this.database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.migrate();
+  }
+
+  getOrCreateAutomationClaimIdentity(
+    input: AutomationClaimIdentityInput,
+  ): AutomationClaimIdentity {
+    const normalized = normalizeClaimIdentityInput(input);
+    const requestDigest = createHash("sha256")
+      .update(JSON.stringify(normalized))
+      .digest("hex");
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.database.prepare(`
+        SELECT claim_request_id, worker_instance, request_digest
+        FROM automation_claim_identity
+        WHERE identity_slot = 1
+      `).get() as {
+        claim_request_id: string;
+        worker_instance: string;
+        request_digest: string;
+      } | undefined;
+      if (row) {
+        if (
+          row.worker_instance !== normalized.worker_instance ||
+          row.request_digest !== requestDigest
+        ) {
+          throw new Error(
+            "active claim identity 与当前 worker 或请求摘要不匹配。",
+          );
+        }
+        this.database.exec("COMMIT;");
+        return {
+          claimRequestId: row.claim_request_id,
+          requestDigest: row.request_digest,
+        };
+      }
+
+      const claimRequestId = randomUUID();
+      this.database.prepare(`
+        INSERT INTO automation_claim_identity (
+          identity_slot, claim_request_id, worker_instance,
+          request_digest, supported_job_types_json, lease_seconds, created_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?)
+      `).run(
+        claimRequestId,
+        normalized.worker_instance,
+        requestDigest,
+        JSON.stringify(normalized.supported_job_types),
+        normalized.lease_seconds,
+        new Date().toISOString(),
+      );
+      this.database.exec("COMMIT;");
+      return { claimRequestId, requestDigest };
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  clearAutomationClaimIdentity(claimRequestId: string): void {
+    if (!claimRequestId.trim()) {
+      throw new Error("claimRequestId 不能为空。");
+    }
+    this.database.prepare(`
+      DELETE FROM automation_claim_identity
+      WHERE identity_slot = 1 AND claim_request_id = ?
+    `).run(claimRequestId);
   }
 
   saveProjectRepositoryWatermark(
@@ -264,6 +342,16 @@ export class ProjectProgressStore {
         caught_up_by TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS automation_claim_identity (
+        identity_slot INTEGER PRIMARY KEY CHECK(identity_slot = 1),
+        claim_request_id TEXT NOT NULL UNIQUE,
+        worker_instance TEXT NOT NULL,
+        request_digest TEXT NOT NULL,
+        supported_job_types_json TEXT NOT NULL,
+        lease_seconds INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS project_state (
         project_id INTEGER PRIMARY KEY,
         last_applied_business_slot TEXT,
@@ -353,9 +441,35 @@ export class ProjectProgressStore {
         created_at TEXT NOT NULL
       );
 
-      PRAGMA user_version = 1;
+      PRAGMA user_version = 2;
     `);
   }
+}
+
+function normalizeClaimIdentityInput(input: AutomationClaimIdentityInput): {
+  worker_instance: string;
+  supported_job_types: string[];
+  lease_seconds: number;
+} {
+  const workerInstance = input.workerInstance.trim();
+  if (!workerInstance) {
+    throw new Error("workerInstance 不能为空。");
+  }
+  assertPositiveInteger(input.leaseSeconds, "leaseSeconds");
+  const supportedJobTypes = [...new Set(
+    input.supportedJobTypes.map((jobType) => jobType.trim()),
+  )].sort();
+  if (
+    supportedJobTypes.length === 0 ||
+    supportedJobTypes.some((jobType) => jobType.length === 0)
+  ) {
+    throw new Error("supportedJobTypes 必须包含非空任务类型。");
+  }
+  return {
+    worker_instance: workerInstance,
+    supported_job_types: supportedJobTypes,
+    lease_seconds: input.leaseSeconds,
+  };
 }
 
 function decodePayload(value: string): Record<string, unknown> {

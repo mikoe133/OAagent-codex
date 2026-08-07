@@ -6,6 +6,8 @@ import {
 } from "../src/application/syncProjectProgress.js";
 import { GitHubRequestError } from "../src/infrastructure/github/githubClient.js";
 import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/githubTypes.js";
+import { AutomationLeaseLostError } from "../src/infrastructure/oa/automationOaClient.js";
+import { ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
 
 describe("syncProjectProgress", () => {
   it("fans out one Agent summary per active repository with 6/2/1 concurrency", async () => {
@@ -1013,6 +1015,105 @@ describe("syncProjectProgress", () => {
     });
 
     assert.equal(result.retryRecommended, true);
+  });
+
+  it("stops all later mutations after definitive project fencing loss", async () => {
+    const projects = [31, 32].map((id) => ({
+      id,
+      projectName: `fenced-${id}`,
+      status: "maintenance" as const,
+      githubUrls: [`https://github.com/alpha/fenced-${id}`],
+      version: 1,
+    }));
+    let statusWrites = 0;
+    let summaryReads = 0;
+    let summaryWrites = 0;
+
+    await assert.rejects(
+      syncProjectProgress({
+        observedAt: new Date("2026-07-24T12:00:00.000Z"),
+        writeMode: "production",
+        oaClient: {
+          listProjects: async () => projects,
+          getProject: async (projectId) => projects.find((project) => project.id === projectId)!,
+          updateProjectStatus: async () => {
+            statusWrites += 1;
+            throw new ProjectProgressLeaseLostError(
+              "stale worker",
+              409,
+              "stale_fencing_token",
+            );
+          },
+          listCommitSummaries: async () => {
+            summaryReads += 1;
+            return [];
+          },
+          createCommitSummary: async (input) => {
+            summaryWrites += 1;
+            return { id: 800 + input.projectId, ...input };
+          },
+          updateCommitSummary: async (summaryId, input) => ({
+            id: summaryId,
+            projectId: 31,
+            summaryDate: "2026-07-24",
+            ...input,
+          }),
+        },
+        githubReader: {
+          readRepository: async (repository) => ({
+            repositoryId: Number(repository.repository.split("-").at(-1)),
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: "2026-07-24T01:00:00.000Z",
+            commits: [commit(
+              1,
+              repository.fullName,
+              `sha-${repository.repository}`,
+              "2026-07-24T01:00:00.000Z",
+            )],
+          }),
+        },
+        summarizer: { summarize: async () => ({ summary: "当天总结", limitations: [] }) },
+        store: createWritableStore(),
+      }),
+      ProjectProgressLeaseLostError,
+    );
+
+    assert.equal(statusWrites, 1);
+    assert.equal(summaryReads, 0);
+    assert.equal(summaryWrites, 0);
+  });
+
+  it("does not downgrade definitive lease loss from the trace channel", async () => {
+    let projectReads = 0;
+
+    await assert.rejects(
+      syncProjectProgress({
+        observedAt: new Date("2026-07-24T12:00:00.000Z"),
+        trace: async () => {
+          throw new AutomationLeaseLostError("expired", 409, "lease_expired");
+        },
+        oaClient: {
+          listProjects: async () => {
+            projectReads += 1;
+            return [];
+          },
+          getProject: async () => {
+            throw new Error("must not read");
+          },
+        },
+        githubReader: {
+          readRepository: async () => {
+            throw new Error("must not read");
+          },
+        },
+        summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+      }),
+      AutomationLeaseLostError,
+    );
+
+    assert.equal(projectReads, 0);
   });
 });
 

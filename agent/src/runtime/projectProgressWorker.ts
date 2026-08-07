@@ -36,27 +36,42 @@ async function main(): Promise<void> {
     throw new Error("PROJECT_PROGRESS_HEARTBEAT_SECONDS 必须小于租约秒数。");
   }
 
-  const runOnce = () => runProjectProgressAutomation({
-    automationClient: new AutomationOaClient({
-      baseUrl: baseConfig.oa.baseUrl,
-      token: automationToken,
-    }),
-    workerInstance: baseConfig.automation.workerInstance,
-    leaseSeconds: baseConfig.automation.leaseSeconds,
-    heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
-    resolveExecution: async (claim) => {
-      const config = loadProjectProgressConfig(process.env, repoRoot, {
-        modelProvider: claim.modelProvider,
-        modelId: claim.modelId,
-        modelParameters: claim.modelParameters,
-      });
-      const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
-      return async (shouldCancel, trace) => {
-        const store = new ProjectProgressStore(config.stateDatabasePath);
-        try {
+  const store = new ProjectProgressStore(baseConfig.stateDatabasePath);
+  try {
+    const runOnce = () => runProjectProgressAutomation({
+      automationClient: new AutomationOaClient({
+        baseUrl: baseConfig.oa.baseUrl,
+        token: automationToken,
+      }),
+      workerInstance: baseConfig.automation.workerInstance,
+      leaseSeconds: baseConfig.automation.leaseSeconds,
+      heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
+      claimIdentityStore: store,
+      resolveExecution: async (claim) => {
+        const config = loadProjectProgressConfig(process.env, repoRoot, {
+          modelProvider: claim.modelProvider,
+          modelId: claim.modelId,
+          modelParameters: claim.modelParameters,
+        });
+        if (config.stateDatabasePath !== baseConfig.stateDatabasePath) {
+          throw new Error("运行期间 PROJECT_PROGRESS_STATE_DB 不允许变化。");
+        }
+        const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
+        return async (shouldCancel, trace) => {
           return await syncProjectProgress({
             observedAt: new Date(claim.scheduledAt),
-            oaClient: new ProjectProgressOaClient(config.oa),
+            oaClient: new ProjectProgressOaClient({
+              ...config.oa,
+              ...(claim.runMutationToken && claim.fencingToken
+                ? {
+                    mutationContext: {
+                      runId: claim.runId,
+                      runMutationToken: claim.runMutationToken,
+                      fencingToken: claim.fencingToken,
+                    },
+                  }
+                : {}),
+            }),
             githubReader: new GitHubRestProjectReader(
               config.githubToken,
               fetch,
@@ -82,42 +97,42 @@ async function main(): Promise<void> {
             shouldCancel,
             trace,
           });
-        } finally {
-          store.close();
+        };
+      },
+    });
+
+    const runOnceOnly = process.argv.slice(2).includes("--once");
+    let stopRequested = false;
+    const requestStop = () => {
+      stopRequested = true;
+    };
+    process.once("SIGINT", requestStop);
+    process.once("SIGTERM", requestStop);
+
+    do {
+      try {
+        const result = await runOnce();
+        if (result.claimed || runOnceOnly) {
+          logResult(result);
         }
-      };
-    },
-  });
-
-  const runOnceOnly = process.argv.slice(2).includes("--once");
-  let stopRequested = false;
-  const requestStop = () => {
-    stopRequested = true;
-  };
-  process.once("SIGINT", requestStop);
-  process.once("SIGTERM", requestStop);
-
-  do {
-    try {
-      const result = await runOnce();
-      if (result.claimed || runOnceOnly) {
-        logResult(result);
+        if (!result.claimed && !runOnceOnly && !stopRequested) {
+          await delay(WORKER_POLL_INTERVAL_MS);
+        }
+      } catch (error) {
+        if (runOnceOnly) {
+          throw error;
+        }
+        console.error(
+          `项目进度 Worker 本轮失败:${error instanceof Error ? error.message : String(error)}`,
+        );
+        if (!stopRequested) {
+          await delay(WORKER_POLL_INTERVAL_MS);
+        }
       }
-      if (!result.claimed && !runOnceOnly && !stopRequested) {
-        await delay(WORKER_POLL_INTERVAL_MS);
-      }
-    } catch (error) {
-      if (runOnceOnly) {
-        throw error;
-      }
-      console.error(
-        `项目进度 Worker 本轮失败:${error instanceof Error ? error.message : String(error)}`,
-      );
-      if (!stopRequested) {
-        await delay(WORKER_POLL_INTERVAL_MS);
-      }
-    }
-  } while (!runOnceOnly && !stopRequested);
+    } while (!runOnceOnly && !stopRequested);
+  } finally {
+    store.close();
+  }
 }
 
 function logResult(result: Awaited<ReturnType<typeof runProjectProgressAutomation>>): void {

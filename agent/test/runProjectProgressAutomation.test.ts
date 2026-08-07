@@ -9,8 +9,134 @@ import {
   type AutomationOaClient,
   type AutomationRunStatus,
 } from "../src/infrastructure/oa/automationOaClient.js";
+import { ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
 
 describe("runProjectProgressAutomation", () => {
+  it("clears a persisted claim identity after an idle response", async () => {
+    const cleared: string[] = [];
+    const client = fakeClient({
+      claim: async (input) => {
+        assert.deepEqual(input, {
+          workerInstance: "worker-01",
+          leaseSeconds: 300,
+          claimRequestId: "claim-request-01",
+        });
+        return null;
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      claimIdentityStore: {
+        getOrCreateAutomationClaimIdentity: () => ({
+          claimRequestId: "claim-request-01",
+          requestDigest: "a".repeat(64),
+        }),
+        clearAutomationClaimIdentity: (claimRequestId) => {
+          cleared.push(claimRequestId);
+        },
+      },
+      resolveExecution: async () => async () => report(),
+    });
+
+    assert.equal(result.status, "idle");
+    assert.deepEqual(cleared, ["claim-request-01"]);
+  });
+
+  it("preserves a persisted claim identity when the claim response is unknown", async () => {
+    const cleared: string[] = [];
+    const client = fakeClient({
+      claim: async () => {
+        throw new Error("connection reset after request");
+      },
+    });
+
+    await assert.rejects(
+      runProjectProgressAutomation({
+        automationClient: client,
+        workerInstance: "worker-01",
+        leaseSeconds: 300,
+        heartbeatSeconds: 60,
+        claimIdentityStore: {
+          getOrCreateAutomationClaimIdentity: () => ({
+            claimRequestId: "claim-request-01",
+            requestDigest: "a".repeat(64),
+          }),
+          clearAutomationClaimIdentity: (claimRequestId) => {
+            cleared.push(claimRequestId);
+          },
+        },
+        resolveExecution: async () => async () => report(),
+      }),
+      /connection reset/,
+    );
+
+    assert.deepEqual(cleared, []);
+  });
+
+  it("clears a persisted claim identity only after terminal status is confirmed", async () => {
+    const cleared: string[] = [];
+
+    const result = await runProjectProgressAutomation({
+      automationClient: fakeClient(),
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      claimIdentityStore: {
+        getOrCreateAutomationClaimIdentity: () => ({
+          claimRequestId: "claim-request-01",
+          requestDigest: "a".repeat(64),
+        }),
+        clearAutomationClaimIdentity: (claimRequestId) => {
+          cleared.push(claimRequestId);
+        },
+      },
+      resolveExecution: async () => async () => report(),
+    });
+
+    assert.equal(result.status, "succeeded");
+    assert.deepEqual(cleared, ["claim-request-01"]);
+  });
+
+  it("preserves claim identity and never changes terminal payload after an unknown response", async () => {
+    const statuses: AutomationRunStatus[] = [];
+    const cleared: string[] = [];
+    const client = fakeClient({
+      updateRun: async ({ status }) => {
+        statuses.push(status);
+        if (status === "succeeded") {
+          throw new Error("connection reset after terminal request");
+        }
+      },
+    });
+
+    await assert.rejects(
+      runProjectProgressAutomation({
+        automationClient: client,
+        workerInstance: "worker-01",
+        leaseSeconds: 300,
+        heartbeatSeconds: 60,
+        claimIdentityStore: {
+          getOrCreateAutomationClaimIdentity: () => ({
+            claimRequestId: "claim-request-01",
+            requestDigest: "a".repeat(64),
+          }),
+          clearAutomationClaimIdentity: (claimRequestId) => {
+            cleared.push(claimRequestId);
+          },
+        },
+        resolveExecution: async () => async () => report(),
+      }),
+      /connection reset/,
+    );
+
+    assert.deepEqual(statuses, ["running", "succeeded"]);
+    assert.deepEqual(cleared, []);
+  });
+
   it("returns idle when OA has no runnable job", async () => {
     const client = fakeClient({ claim: async () => null });
 
@@ -237,6 +363,34 @@ describe("runProjectProgressAutomation", () => {
       }),
       AutomationLeaseLostError,
     );
+    assert.deepEqual(statuses, ["running"]);
+  });
+
+  it("never reports a terminal status after a project mutation loses fencing", async () => {
+    const statuses: AutomationRunStatus[] = [];
+    const client = fakeClient({
+      updateRun: async ({ status }) => {
+        statuses.push(status);
+      },
+    });
+
+    await assert.rejects(
+      runProjectProgressAutomation({
+        automationClient: client,
+        workerInstance: "worker-01",
+        leaseSeconds: 300,
+        heartbeatSeconds: 60,
+        resolveExecution: async () => async () => {
+          throw new ProjectProgressLeaseLostError(
+            "stale worker",
+            409,
+            "stale_fencing_token",
+          );
+        },
+      }),
+      ProjectProgressLeaseLostError,
+    );
+
     assert.deepEqual(statuses, ["running"]);
   });
 

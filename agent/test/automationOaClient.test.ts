@@ -3,10 +3,32 @@ import { describe, it } from "node:test";
 import {
   AutomationLeaseLostError,
   AutomationOaClient,
+  AutomationOaContractError,
   type AutomationJobClaim,
 } from "../src/infrastructure/oa/automationOaClient.js";
 
 describe("AutomationOaClient", () => {
+  it("rejects a non-UUID claim request id before sending", async () => {
+    let requested = false;
+    const client = new AutomationOaClient(
+      { baseUrl: "https://oa.example.test", token: "secret" },
+      async () => {
+        requested = true;
+        throw new Error("must not request");
+      },
+    );
+
+    await assert.rejects(
+      client.claim({
+        workerInstance: "worker-01",
+        leaseSeconds: 300,
+        claimRequestId: "claim-request-01",
+      }),
+      /claimRequestId.*UUID/,
+    );
+    assert.equal(requested, false);
+  });
+
   it("treats an empty claim response as an idle poll", async () => {
     const client = createClient(async () => new Response(null, { status: 204 }));
 
@@ -46,6 +68,32 @@ describe("AutomationOaClient", () => {
       lease_seconds: 300,
       claim_request_id: "019fd15d-32c6-7fb2-9afb-68be0996b80f",
     });
+  });
+
+  it("keeps decoding a legacy claim without fencing fields", async () => {
+    const payload = claimPayload();
+    delete payload.run_mutation_token;
+    delete payload.fencing_token;
+    delete payload.concurrency_key;
+    const client = createClient(async () => Response.json({ data: payload }));
+
+    const claim = await client.claim("worker-legacy", 300);
+
+    assert.equal(claim?.runId, "run-01");
+    assert.equal(claim?.runMutationToken, undefined);
+    assert.equal(claim?.fencingToken, undefined);
+    assert.equal(claim?.concurrencyKey, undefined);
+  });
+
+  it("rejects a partially upgraded claim contract", async () => {
+    const payload = claimPayload();
+    delete payload.concurrency_key;
+    const client = createClient(async () => Response.json({ data: payload }));
+
+    await assert.rejects(
+      client.claim("worker-01", 300),
+      AutomationOaContractError,
+    );
   });
 
   it("sends heartbeats, project results, AI audits, and terminal status", async () => {
@@ -170,10 +218,15 @@ describe("AutomationOaClient", () => {
       "/internal/automation-job-runs/run-01/trace-events",
       "/internal/automation-job-runs/run-01",
     ]);
-    const auditBody = await requests[2]?.json() as Record<string, unknown>;
+    const mutationBodies = await Promise.all(
+      requests.slice(1).map(async (request) =>
+        await request.json() as Record<string, unknown>
+      ),
+    );
+    const auditBody = mutationBodies[1]!;
     assert.deepEqual(auditBody.request_payload_sanitized, { commit_count: 2 });
     assert.doesNotMatch(JSON.stringify(auditBody), /commit subject/);
-    const traceBody = await requests[3]?.json() as Record<string, unknown>;
+    const traceBody = mutationBodies[2]!;
     assert.deepEqual(traceBody, {
       worker_instance: "worker-01",
       lease_token: "lease-secret",
@@ -195,6 +248,12 @@ describe("AutomationOaClient", () => {
       occurred_at: "2026-07-30T12:00:30.000Z",
     });
     assert.match(String(traceBody.idempotency_key), /^sha256:[a-f0-9]{64}$/);
+    for (const body of mutationBodies) {
+      assert.equal(body.run_id, "run-01");
+      assert.equal(body.run_mutation_token, "run-mutation-secret");
+      assert.equal(body.fencing_token, 7);
+      assert.match(String(body.idempotency_key), /^sha256:[a-f0-9]{64}$/);
+    }
   });
 
   it("classifies an expired lease as a terminal lease loss", async () => {

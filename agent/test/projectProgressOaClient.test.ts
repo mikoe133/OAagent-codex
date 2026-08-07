@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   OaContractError,
   OaRequestError,
+  ProjectProgressLeaseLostError,
   ProjectProgressOaClient,
 } from "../src/infrastructure/oa/projectProgressOaClient.js";
 
@@ -98,6 +99,14 @@ describe("ProjectProgressOaClient", () => {
     });
 
     await client.updateProjectStatus(7, "maintenance", 3);
+    await client.updateProjectStatus(7, "maintenance", 3);
+    await client.createCommitSummary({
+      projectId: 7,
+      summaryDate: "2026-07-24",
+      summary: "更新后的总结。",
+      aiConfidence: 91,
+      aiNote: "已更新。",
+    });
     await client.updateCommitSummary(101, {
       summary: "更新后的总结。",
       aiConfidence: 91,
@@ -106,7 +115,9 @@ describe("ProjectProgressOaClient", () => {
     });
 
     const statusBody = await requests[0]!.json() as Record<string, unknown>;
-    const summaryBody = await requests[1]!.json() as Record<string, unknown>;
+    const repeatedStatusBody = await requests[1]!.json() as Record<string, unknown>;
+    const createBody = await requests[2]!.json() as Record<string, unknown>;
+    const summaryBody = await requests[3]!.json() as Record<string, unknown>;
     assert.deepEqual(statusBody, {
       status: "maintenance",
       expected_version: 3,
@@ -125,8 +136,21 @@ describe("ProjectProgressOaClient", () => {
       fencing_token: 7,
       idempotency_key: summaryBody.idempotency_key,
     });
+    assert.deepEqual(createBody, {
+      project_id: 7,
+      summary_date: "2026-07-24",
+      summary: "更新后的总结。",
+      ai_confidence: 91,
+      ai_note: "已更新。",
+      run_id: "run-01",
+      run_mutation_token: "run-mutation-secret",
+      fencing_token: 7,
+      idempotency_key: createBody.idempotency_key,
+    });
     assert.match(String(statusBody.idempotency_key), /^sha256:[a-f0-9]{64}$/);
     assert.match(String(summaryBody.idempotency_key), /^sha256:[a-f0-9]{64}$/);
+    assert.match(String(createBody.idempotency_key), /^sha256:[a-f0-9]{64}$/);
+    assert.equal(statusBody.idempotency_key, repeatedStatusBody.idempotency_key);
     assert.notEqual(statusBody.idempotency_key, summaryBody.idempotency_key);
   });
 
@@ -258,6 +282,23 @@ describe("ProjectProgressOaClient", () => {
     await assert.rejects(
       createClient(async () => new Response("not-json")).listProjects(),
       OaContractError,
+    );
+  });
+
+  it("classifies a definitive fencing rejection as lease loss", async () => {
+    const client = createFencedClient(async () => Response.json({
+      code: 409,
+      message: "stale worker",
+      data: { error_code: "stale_fencing_token" },
+      success: false,
+    }, { status: 409 }));
+
+    await assert.rejects(
+      client.updateProjectStatus(7, "maintenance", 3),
+      (error: unknown) =>
+        error instanceof ProjectProgressLeaseLostError &&
+        error.status === 409 &&
+        error.errorCode === "stale_fencing_token",
     );
   });
 
