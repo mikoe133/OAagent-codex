@@ -15,6 +15,9 @@ import {
 
 const PROJECT_PAGE_SIZE = 100;
 const OA_REQUEST_TIMEOUT_MS = 15_000;
+const OA_GET_MAX_ATTEMPTS = 3;
+const OA_GET_RETRY_BASE_DELAY_MS = 200;
+const OA_GET_RETRY_MAX_DELAY_MS = 2_000;
 
 export type OaProject = {
   id: number;
@@ -89,6 +92,10 @@ export type ProjectProgressOaClientConfig = {
 
 export type ProjectProgressOaClientExecution = {
   scheduler?: OaRequestExecutor;
+  getRetry?: {
+    random?: () => number;
+    sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+  };
 };
 
 type OaFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -115,6 +122,8 @@ export class ProjectProgressLeaseLostError extends OaRequestError {
 
 export class ProjectProgressOaClient implements ProjectProgressOaWriter {
   private readonly scheduler: OaRequestExecutor;
+  private readonly retryRandom: () => number;
+  private readonly retrySleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 
   constructor(
     private readonly config: ProjectProgressOaClientConfig,
@@ -123,6 +132,8 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
     execution: ProjectProgressOaClientExecution = {},
   ) {
     this.scheduler = execution.scheduler ?? new OaRequestScheduler();
+    this.retryRandom = execution.getRetry?.random ?? Math.random;
+    this.retrySleep = execution.getRetry?.sleep ?? abortableDelay;
   }
 
   async listProjects(signal?: AbortSignal): Promise<OaProject[]> {
@@ -327,22 +338,17 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       try {
         payload = await response.json();
       } catch {
+        if (!response.ok) {
+          throw requestError(response.status, null);
+        }
         throw new OaContractError("OA 响应不是合法 JSON。");
       }
       if (!response.ok) {
-        const errorCode = decodeErrorCode(payload);
-        const ErrorType = response.status === 409 && isDefinitiveLeaseLossErrorCode(errorCode)
-          ? ProjectProgressLeaseLostError
-          : OaRequestError;
-        throw new ErrorType(
-          `OA 请求失败:HTTP ${response.status}${errorCode ? `:${errorCode}` : ""}`,
-          response.status,
-          errorCode,
-        );
+        throw requestError(response.status, decodeErrorCode(payload));
       }
       return payload;
     };
-    const execute = async () => {
+    const executeAttempt = async () => {
       const finishQueueWait = this.operationMetrics?.startQueueWait(endpoint);
       try {
         return await this.scheduler.run(
@@ -357,15 +363,93 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
         finishQueueWait?.();
       }
     };
+    const execute = options.method && options.method !== "GET"
+      ? executeAttempt
+      : () => this.executeGetWithRetry(executeAttempt, options.signal);
     return this.operationMetrics
       ? this.operationMetrics.measure(endpoint, execute)
       : execute();
+  }
+
+  private async executeGetWithRetry<T>(
+    executeAttempt: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      signal?.throwIfAborted();
+      try {
+        return await executeAttempt();
+      } catch (error) {
+        if (
+          attempt >= OA_GET_MAX_ATTEMPTS ||
+          !isRetryableGetError(error, signal)
+        ) {
+          throw error;
+        }
+        await this.retrySleep(this.retryDelayMs(attempt), signal);
+      }
+    }
+  }
+
+  private retryDelayMs(failedAttempt: number): number {
+    const ceiling = Math.min(
+      OA_GET_RETRY_MAX_DELAY_MS,
+      OA_GET_RETRY_BASE_DELAY_MS * 2 ** (failedAttempt - 1),
+    );
+    const random = Math.min(1, Math.max(0, this.retryRandom()));
+    return Math.floor(random * ceiling);
   }
 }
 
 function combineWithTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+}
+
+function isRetryableGetError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted || error instanceof ProjectProgressLeaseLostError) {
+    return false;
+  }
+  if (error instanceof OaRequestError) {
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  }
+  if (error instanceof OaContractError) {
+    return false;
+  }
+  return error instanceof TypeError || error instanceof DOMException;
+}
+
+async function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  if (delayMs <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    timer.unref();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+    }
+  });
+}
+
+function requestError(status: number, errorCode: string | null): OaRequestError {
+  const ErrorType = status === 409 && isDefinitiveLeaseLossErrorCode(errorCode)
+    ? ProjectProgressLeaseLostError
+    : OaRequestError;
+  return new ErrorType(
+    `OA 请求失败:HTTP ${status}${errorCode ? `:${errorCode}` : ""}`,
+    status,
+    errorCode,
+  );
 }
 
 function decodeErrorCode(payload: unknown): string | null {

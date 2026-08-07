@@ -52,7 +52,7 @@ describe("ProjectProgressOaClient", () => {
     assert.deepEqual(projects.map((project) => project.id), [1, 2]);
   });
 
-  it("records OA reads and contract failures under stable endpoint names", async () => {
+  it("records OA reads and request failures under stable endpoint names", async () => {
     const metrics = new OperationMetricsRecorder();
     const client = new ProjectProgressOaClient(
       {
@@ -77,10 +77,14 @@ describe("ProjectProgressOaClient", () => {
         });
       },
       metrics,
+      { getRetry: { random: () => 0 } },
     );
 
     await client.getProject(1);
-    await assert.rejects(client.getProject(2), /合法 JSON/);
+    await assert.rejects(
+      client.getProject(2),
+      (error: unknown) => error instanceof OaRequestError && error.status === 502,
+    );
 
     assert.deepEqual(metrics.snapshot().map((item) => ({
       endpoint: item.endpoint,
@@ -228,6 +232,27 @@ describe("ProjectProgressOaClient", () => {
 
     assert.equal(getAttempts, 1);
     assert.equal(mutationAttempts, 1);
+  });
+
+  it("retries a non-JSON 5xx response but not a non-JSON success", async () => {
+    let transientAttempts = 0;
+    const transientClient = createClient(async () => {
+      transientAttempts += 1;
+      return transientAttempts < 3
+        ? new Response("gateway unavailable", { status: 503 })
+        : Response.json({ data: { total: 0, items: [] } });
+    });
+
+    assert.deepEqual(await transientClient.listProjects(), []);
+    assert.equal(transientAttempts, 3);
+
+    let successAttempts = 0;
+    const malformedSuccessClient = createClient(async () => {
+      successAttempts += 1;
+      return new Response("not-json");
+    });
+    await assert.rejects(malformedSuccessClient.listProjects(), OaContractError);
+    assert.equal(successAttempts, 1);
   });
 
   it("cancels OA GET retry backoff immediately", async () => {
@@ -544,6 +569,8 @@ function createClient(fetchImpl: typeof fetch): ProjectProgressOaClient {
       tokenPrefix: "Bearer",
     },
     fetchImpl,
+    undefined,
+    { getRetry: { random: () => 0 } },
   );
 }
 
