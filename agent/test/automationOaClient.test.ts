@@ -6,8 +6,28 @@ import {
   AutomationOaContractError,
   type AutomationJobClaim,
 } from "../src/infrastructure/oa/automationOaClient.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("AutomationOaClient", () => {
+  it("records automation control calls under stable endpoint names", async () => {
+    const metrics = new OperationMetricsRecorder();
+    const client = new AutomationOaClient(
+      { baseUrl: "https://oa.example.test", token: "secret" },
+      async () => new Response(null, { status: 204 }),
+      metrics,
+    );
+
+    const result = await client.claim({
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      claimRequestId: "123e4567-e89b-42d3-a456-426614174000",
+    });
+
+    assert.equal(result, null);
+    assert.equal(metrics.snapshot()[0]?.endpoint, "oa.automation.claim");
+    assert.equal(metrics.snapshot()[0]?.successes, 1);
+  });
+
   it("rejects a non-UUID claim request id before sending", async () => {
     let requested = false;
     const client = new AutomationOaClient(

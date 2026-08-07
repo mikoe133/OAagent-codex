@@ -6,6 +6,7 @@ import {
 } from "../src/infrastructure/github/githubClient.js";
 import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
 import { normalizeGitHubRepositoryUrl } from "../src/infrastructure/github/githubUrl.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("GitHubRestProjectReader", () => {
   it("deduplicates commits across branches and caches a shared repository", async () => {
@@ -145,6 +146,45 @@ describe("GitHubRestProjectReader", () => {
 
     assert.equal(peakRequests, 2);
     assert.equal(limiter.metrics.peakActive, 2);
+  });
+
+  it("records requests under stable GitHub endpoint names", async () => {
+    const metrics = new OperationMetricsRecorder();
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/branches")) {
+          return Response.json([{ name: "main" }]);
+        }
+        if (url.pathname.endsWith("/commits")) {
+          return Response.json([]);
+        }
+        return Response.json({
+          id: 201,
+          full_name: "example/measured",
+          created_at: "2026-07-24T01:00:00Z",
+        });
+      },
+      "https://api.github.test",
+      undefined,
+      undefined,
+      metrics,
+    );
+
+    await reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/measured"),
+      new Date("2026-07-24T12:00:00Z"),
+    );
+
+    assert.deepEqual(
+      Object.fromEntries(metrics.snapshot().map((item) => [item.endpoint, item.requests])),
+      {
+        "github.branches.list": 1,
+        "github.commits.list": 1,
+        "github.repository.get": 1,
+      },
+    );
   });
 });
 

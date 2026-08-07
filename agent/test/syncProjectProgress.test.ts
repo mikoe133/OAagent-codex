@@ -8,8 +8,67 @@ import { GitHubRequestError } from "../src/infrastructure/github/githubClient.js
 import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/githubTypes.js";
 import { AutomationLeaseLostError } from "../src/infrastructure/oa/automationOaClient.js";
 import { ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("syncProjectProgress", () => {
+  it("records model request outcomes and semaphore queue wait", async () => {
+    const metrics = new OperationMetricsRecorder();
+    const projects = [1, 2, 3].map((id) => ({
+      id,
+      projectName: `project-${id}`,
+      status: "updating" as const,
+      githubUrls: [`https://github.com/example/repository-${id}`],
+    }));
+    const report = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      operationMetrics: metrics,
+      concurrency: { github: 3, agent: 1, oaWrite: 1 },
+      oaClient: {
+        listProjects: async () => projects,
+        getProject: async (projectId) => projects[projectId - 1]!,
+      },
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: Number(repository.repository.split("-").at(-1)),
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(
+            Number(repository.repository.split("-").at(-1)),
+            repository.fullName,
+            `sha-${repository.repository}`,
+            "2026-07-24T01:00:00.000Z",
+          )],
+        }),
+      },
+      summarizer: {
+        summarize: async (input) => {
+          await delay(2);
+          if (input.repositoryFullName.endsWith("-2")) {
+            throw new Error("model unavailable");
+          }
+          return { summary: "完成更新。", limitations: [] };
+        },
+      },
+    });
+
+    const model = report.operationMetrics.find(
+      (item) => item.endpoint === "model.project-progress.summarize",
+    );
+    assert.deepEqual({
+      requests: model?.requests,
+      successes: model?.successes,
+      failures: model?.failures,
+      queueSamples: model?.queueWaitMs?.count,
+    }, {
+      requests: 3,
+      successes: 2,
+      failures: 1,
+      queueSamples: 3,
+    });
+  });
+
   it("fans out one Agent summary per active repository with 6/2/1 concurrency", async () => {
     const repositoryCount = 8;
     const project = {

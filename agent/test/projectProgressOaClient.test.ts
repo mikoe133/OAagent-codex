@@ -6,6 +6,7 @@ import {
   ProjectProgressLeaseLostError,
   ProjectProgressOaClient,
 } from "../src/infrastructure/oa/projectProgressOaClient.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("ProjectProgressOaClient", () => {
   it("decodes every page from the OA project envelope", async () => {
@@ -44,6 +45,49 @@ describe("ProjectProgressOaClient", () => {
 
     assert.deepEqual(requestedPages, ["1", "2"]);
     assert.deepEqual(projects.map((project) => project.id), [1, 2]);
+  });
+
+  it("records OA reads and contract failures under stable endpoint names", async () => {
+    const metrics = new OperationMetricsRecorder();
+    const client = new ProjectProgressOaClient(
+      {
+        baseUrl: "https://oa.example.test",
+        alias: "production",
+        token: "secret",
+        tokenHeader: "Authorization",
+        tokenPrefix: "Bearer",
+      },
+      async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/projects/2")) {
+          return new Response("not-json", { status: 502 });
+        }
+        return Response.json({
+          data: {
+            id: 1,
+            project_name: "measured",
+            status: "updating",
+            github_urls: [],
+          },
+        });
+      },
+      metrics,
+    );
+
+    await client.getProject(1);
+    await assert.rejects(client.getProject(2), /合法 JSON/);
+
+    assert.deepEqual(metrics.snapshot().map((item) => ({
+      endpoint: item.endpoint,
+      requests: item.requests,
+      successes: item.successes,
+      failures: item.failures,
+    })), [{
+      endpoint: "oa.project.get",
+      requests: 2,
+      successes: 1,
+      failures: 1,
+    }]);
   });
 
   it("rejects malformed or unknown project status values", async () => {
