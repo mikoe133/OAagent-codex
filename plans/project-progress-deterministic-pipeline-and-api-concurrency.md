@@ -1,6 +1,6 @@
 # 项目进度 Worker 确定性取数与接口并发实施蓝图
 
-- 状态：实施中。Step 0 Worker 契约已实现但 OA 服务端黑盒证据待验证；Step 1 已实现；Step 2 已交付 OA 调度器、GET 重试和 Trace 队列但信号/终态预算仍待完成；Step 3 已交付固定并发执行器、重试、暂停闸门和硬预算但 reset-aware pacing 仍待完成；Step 5 Evidence 边界已实现；Step 4、6、7 未完成
+- 状态：实施中。Step 0 Worker 契约已实现但 OA 服务端黑盒证据待验证；Step 1 已实现；Step 2 已交付 OA 调度器、GET 重试和 Trace 队列但信号/终态预算仍待完成；Step 3 已交付固定并发执行器、重试、暂停闸门、reset-aware pacing 和硬预算，但详情公平分配/指标接线仍待完成；Step 5 Evidence 边界已实现；Step 6 已交付完整 identity 的仓库总结缓存，outbox replay/崩溃恢复仍待完成；Step 4、7 未完成
 - 更新日期：2026-08-07
 - 适用任务：`github_project_progress_sync`
 - 目标时区：`Asia/Shanghai`
@@ -47,16 +47,17 @@ Worker claim
 - OA 非 Heartbeat 请求已统一通过原子优先级调度器，OA GET 已按分类有限重试；Trace 已改为非阻塞有界队列与 SQLite spool；
 - GitHub 仓库扫描和 Agent Commit 详情已共享同一个 token 级 executor，统一执行全局/单仓库限流、有限重试、`Retry-After` 暂停以及 run/仓库硬预算；
 - Agent 输入已固化为 `repository-evidence-v1`，代码负责字段白名单、稳定排序、SHA 去重、最早/最晚候选裁剪和 canonical digest；同一证据被不同项目引用时 prompt 与 digest 相同。
+- 成功仓库总结已按 Evidence、prompt 内容、模型/参数/目录版本、工具/候选策略和全部预算形成完整 cache identity，并可跨项目和 Worker 重启复用。
 
 ### 2.2 待补强
 
 - Step 2 尚未完整拆分 `workAbortSignal`、`leaseFatalSignal`、`finalizationSignal`，也未按租约和 deadline 实现 60 秒终态保留预算；
 - Trace spool 当前仍通过同步 SQLite 接口写入主事件循环，尚未交付独立 worker/异步驱动、20 MiB/TTL 上限和完整 delivery summary；
-- GitHub executor 已有固定并发、rate-limit 暂停和硬预算，但尚未按 primary limit 的 remaining/reset 做 reserve 与 token-bucket pacing；`6/3/1` 动态容量属于 Step 4；
+- GitHub executor 已有固定并发、rate-limit 暂停、primary reserve/pacing 和硬预算，但扫描完成后的 Agent 详情额度公平分配及 run 级指标接线仍待完成；`6/3/1` 动态容量属于 Step 4；
 - NextToken/OpenRouter 还没有 provider + credential 级 RPM/TPM/成本预算和熔断；
 - 仓库任务和 Agent 任务用 `Promise.all + Semaphore` 创建全部等待项，队列长度未设上限；
 - 当前并发配置是进程级限制。增加 Worker 副本会按副本数线性放大 GitHub、模型和 OA 压力；
-- 完整仓库总结 cache identity、原子 mutation group、outbox replay/crash recovery 和 5 分钟写入预算仍待 Step 6；
+- 原子 mutation group、outbox replay/crash recovery 和 5 分钟写入预算仍待 Step 6；
 - OA 服务端 HMAC fencing、事务 CAS/single-flight 以及测试环境黑盒证据仍是外部依赖。
 
 ### 2.3 实施前置：OA 服务端 fencing 与条件写
@@ -541,7 +542,7 @@ npm exec -w agent -- tsx --test test/syncProjectProgress.test.ts
 
 上下文：仓库扫描和 Agent Commit 详情已共享 limiter，但当前只报告 rate limit，没有安全重试、暂停闸门和恢复规则。
 
-实施进展（2026-08-07）：仓库扫描和 Agent MCP 已共享同一个 `GitHubRequestExecutor`。执行器实现全局固定并发、单仓库串行、429/受限 403/5xx/网络瞬态分类、`Retry-After`、full-jitter backoff、共享暂停闸门、run/仓库请求预算与 rate-limit header 指标；分支数、单分支 Commit 页数和请求预算均可配置，耗尽时返回 incomplete；排队、backoff、暂停和 fetch 均接收 `AbortSignal`。剩余缺口是按 `remaining/reset` 实现 reserve 与 reset-aware pacing，以及把 executor 指标接入 run 级结构化输出；动态 `6/3/1` 容量仍属于 Step 4。因此本步骤仍为 `in_progress`。
+实施进展（2026-08-07）：仓库扫描和 Agent MCP 已共享同一个 `GitHubRequestExecutor`。执行器实现全局固定并发、单仓库串行、429/受限 403/408/指定 5xx/网络瞬态分类、`Retry-After`、full-jitter backoff、secondary 30 秒共享暂停、run/仓库请求预算与 rate-limit header 指标；primary limit 按 `max(100, 10% * limit)` 保留额度，并按 `(remaining - reserve) / seconds_to_reset` pace 新请求，触达 reserve 时在发请求前停止并返回 `retryAt`。分支数、单分支 Commit 页数和请求预算均可配置，耗尽时返回 incomplete；排队、backoff、暂停和 fetch 均接收 `AbortSignal`。剩余缺口是扫描完成后的可选详情额度公平分配，以及把 executor 指标接入 run 级结构化输出；动态 `6/3/1` 容量仍属于 Step 4。因此本步骤仍为 `in_progress`。
 
 任务：
 
@@ -624,6 +625,8 @@ npm exec -w agent -- tsx --test test/syncProjectProgress.test.ts
 ### Step 6：幂等写入、outbox 恢复和端到端取消
 
 上下文：本地 outbox 和 managed summary 已存在，但仓库级成功结果尚未形成完整缓存，outbox 还需要把预写校验、原子 ready 状态和 crash recovery 组合成端到端语义。
+
+实施进展（2026-08-07）：已新增持久化 `repository_summary_cache`，identity 覆盖 Evidence digest/schema、prompt version/content hash、provider/model/参数/目录版本、工具策略、候选策略以及全部详情预算。只缓存通过 schema 和越权校验的成功 Agent 结果；fallback 不缓存；命中时 AI interaction 明确记录 `repository_summary_cache` 和 `cache_hit=true`，不复用旧请求 ID 或 token 用量。缓存可跨项目和 SQLite 重启复用，缓存读写失败不会阻断 Agent 主链路。原子 mutation group、`draft -> ready -> in_flight -> acked`、scoped token 恢复、dispatcher/replay、crash point 和 5 分钟写入预算仍未完成，因此本步骤仍为 `in_progress`。
 
 任务：
 
