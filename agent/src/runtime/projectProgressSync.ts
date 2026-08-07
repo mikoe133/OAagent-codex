@@ -73,6 +73,8 @@ async function main(): Promise<void> {
         workingDirectory: repoRoot,
         workspaceRoot: config.workspaceRoot,
         runId: `manual-${Date.now()}`,
+        modelCatalogVersion: "manual-runtime-v1",
+        repositorySummaryCache: store,
         githubRequestLimiter,
         githubRequestExecutor,
         operationMetrics,

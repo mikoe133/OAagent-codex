@@ -118,6 +118,10 @@ async function main(): Promise<void> {
                 workingDirectory: repoRoot,
                 workspaceRoot: config.workspaceRoot,
                 runId: claim.runId,
+                ...(claim.modelCatalogVersion
+                  ? { modelCatalogVersion: claim.modelCatalogVersion }
+                  : {}),
+                repositorySummaryCache: store,
                 githubRequestLimiter,
                 githubRequestExecutor,
                 operationMetrics,

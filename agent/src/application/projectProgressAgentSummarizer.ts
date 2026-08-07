@@ -11,11 +11,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { ProjectProgressConfig } from "../config/projectProgressConfig.js";
 import {
   buildRepositoryEvidence,
+  REPOSITORY_CANDIDATE_SELECTION_POLICY_VERSION,
   type RepositoryEvidence,
   type RepositoryEvidenceEnvelope,
 } from "../domain/projectProgressEvidence.js";
+import type { RepositorySummaryCache } from "../domain/repositorySummaryCache.js";
 import {
   startProjectProgressGitHubMcpServer,
+  PROJECT_PROGRESS_COMMIT_DETAIL_TOOL_POLICY_VERSION,
   type ProjectProgressAgentLimits,
   type ProjectProgressGitHubMcpServer,
 } from "../infrastructure/github/projectProgressMcpServer.js";
@@ -37,6 +40,8 @@ const MODEL_API_KEY_ENV = "PROJECT_PROGRESS_AGENT_MODEL_API_KEY";
 const MCP_BEARER_TOKEN_ENV = "PROJECT_PROGRESS_AGENT_MCP_TOKEN";
 const MCP_SERVER_NAME = "github_project_progress";
 const MCP_TOOL_NAME = "read_commit_details";
+const REPOSITORY_SUMMARY_CACHE_IDENTITY_VERSION =
+  "repository-summary-cache-identity-v1";
 
 export const PROJECT_PROGRESS_AGENT_PROMPT_VERSION = "github-project-progress-agent-v3";
 export const PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT = [
@@ -90,6 +95,8 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       githubRequestExecutor?: GitHubRequestExecutor;
       operationMetrics?: Parameters<typeof startProjectProgressGitHubMcpServer>[0]["operationMetrics"];
       promptProfile?: ProjectProgressPromptProfile | null;
+      modelCatalogVersion?: string;
+      repositorySummaryCache?: RepositorySummaryCache;
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
     private readonly fallback: ProjectProgressSummarizer = new DeterministicProjectProgressSummarizer(),
@@ -109,6 +116,39 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       repositoryFullName: evidenceEnvelope.evidence.repository.fullName,
       sha: commit.sha,
     }));
+    const developerInstructions = buildProjectProgressAgentInstructions(
+      this.config.promptProfile ?? null,
+    );
+    const cacheIdentityDigest = buildRepositorySummaryCacheIdentity({
+      config: this.config,
+      evidenceEnvelope,
+      developerInstructions,
+    });
+    const cached = readRepositorySummaryCache(
+      this.config.repositorySummaryCache,
+      cacheIdentityDigest,
+    );
+    if (cached) {
+      const output = {
+        summary: cached.summary,
+        limitations: cached.limitations,
+      };
+      return {
+        ...output,
+        interaction: buildAgentInteraction({
+          config: this.config,
+          evidenceEnvelope,
+          cacheIdentityDigest,
+          output,
+          metrics: emptyMetrics(),
+          run: null,
+          agentAttempts: 0,
+          latencyMs: Date.now() - startedAt,
+          fallbackUsed: false,
+          cacheHit: true,
+        }),
+      };
+    }
     const workspace = await createThreadWorkspace({
       root: this.config.workspaceRoot ?? path.join(
         this.config.workingDirectory,
@@ -144,9 +184,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         workingDirectory: workspace,
         mcpUrl: mcpServer.url,
         mcpBearerToken: mcpServer.bearerToken,
-        developerInstructions: buildProjectProgressAgentInstructions(
-          this.config.promptProfile ?? null,
-        ),
+        developerInstructions,
         prompt: buildProjectProgressAgentPrompt(evidenceEnvelope.evidence),
         ...(input.signal ? { signal: input.signal } : {}),
       };
@@ -172,17 +210,25 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           : [],
       );
       const resolvedOutput = { summary: output.summary, limitations };
+      writeRepositorySummaryCache(this.config.repositorySummaryCache, {
+        identityDigest: cacheIdentityDigest,
+        evidenceDigest: evidenceEnvelope.digest,
+        summary: resolvedOutput.summary,
+        limitations: resolvedOutput.limitations,
+      });
       return {
         ...resolvedOutput,
         interaction: buildAgentInteraction({
           config: this.config,
           evidenceEnvelope,
+          cacheIdentityDigest,
           output: resolvedOutput,
           metrics,
           run: agentRun,
           agentAttempts,
           latencyMs: Date.now() - startedAt,
           fallbackUsed: false,
+          cacheHit: false,
         }),
       };
     } catch (error) {
@@ -200,12 +246,14 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         interaction: buildAgentInteraction({
           config: this.config,
           evidenceEnvelope,
+          cacheIdentityDigest,
           output,
           metrics,
           run: agentRun,
           agentAttempts,
           latencyMs: Date.now() - startedAt,
           fallbackUsed: true,
+          cacheHit: false,
           error,
         }),
       };
@@ -474,12 +522,14 @@ function isLikelyProcessSummary(summary: string): boolean {
 function buildAgentInteraction(input: {
   config: CodexProjectProgressSummarizer["config"];
   evidenceEnvelope: RepositoryEvidenceEnvelope;
+  cacheIdentityDigest: string;
   output: ProjectProgressSummaryOutput;
   metrics: ReturnType<ProjectProgressGitHubMcpServer["tool"]["getMetrics"]>;
   run: ProjectProgressAgentRunResult | null;
   agentAttempts: number;
   latencyMs: number;
   fallbackUsed: boolean;
+  cacheHit: boolean;
   error?: unknown;
 }): ProjectProgressAiInteraction {
   const promptVersion = input.config.promptProfile?.promptVersion ??
@@ -496,6 +546,7 @@ function buildAgentInteraction(input: {
       evidence_digest: input.evidenceEnvelope.digest,
       candidate_selection_policy_version:
         input.evidenceEnvelope.candidateSelectionPolicyVersion,
+      cache_identity_digest: input.cacheIdentityDigest,
       business_date: input.evidenceEnvelope.evidence.businessDate,
       repository_count: 1,
       commit_count: input.evidenceEnvelope.evidence.commits.length +
@@ -509,7 +560,10 @@ function buildAgentInteraction(input: {
         input.config.promptProfile !== undefined,
     },
     responsePayloadSanitized: {
-      execution_mode: "codex_sdk_agent",
+      execution_mode: input.cacheHit
+        ? "repository_summary_cache"
+        : "codex_sdk_agent",
+      cache_hit: input.cacheHit,
       detail_calls: input.metrics.detailCalls,
       github_detail_requests: input.metrics.githubRequests,
       files_returned: input.metrics.filesReturned,
@@ -529,6 +583,69 @@ function buildAgentInteraction(input: {
     errorCode: input.fallbackUsed ? "agent_summary_failed" : null,
     errorSummary: input.fallbackUsed ? sanitizeError(input.error) : null,
   };
+}
+
+function buildRepositorySummaryCacheIdentity(input: {
+  config: CodexProjectProgressSummarizer["config"];
+  evidenceEnvelope: RepositoryEvidenceEnvelope;
+  developerInstructions: string;
+}): string {
+  const identity = {
+    identityVersion: REPOSITORY_SUMMARY_CACHE_IDENTITY_VERSION,
+    evidenceDigest: input.evidenceEnvelope.digest,
+    evidenceSchemaVersion: input.evidenceEnvelope.evidence.schemaVersion,
+    promptVersion: input.config.promptProfile?.promptVersion ??
+      PROJECT_PROGRESS_AGENT_PROMPT_VERSION,
+    promptContentHash: createHash("sha256")
+      .update(input.developerInstructions)
+      .digest("hex"),
+    provider: input.config.model.provider,
+    model: input.config.model.model,
+    modelParameters: {
+      reasoningEffort: input.config.model.parameters.reasoning_effort ?? null,
+      maxOutputTokens: input.config.model.parameters.max_output_tokens ?? null,
+    },
+    modelCatalogVersion: input.config.modelCatalogVersion ?? "unversioned",
+    toolPolicyVersion: PROJECT_PROGRESS_COMMIT_DETAIL_TOOL_POLICY_VERSION,
+    candidateSelectionPolicyVersion:
+      REPOSITORY_CANDIDATE_SELECTION_POLICY_VERSION,
+    budgets: {
+      maxCandidateCommits: input.config.agent.maxCandidateCommits,
+      maxDetailCalls: input.config.agent.maxDetailCalls,
+      maxFilesPerCommit: input.config.agent.maxFilesPerCommit,
+      maxFilenameChars: input.config.agent.maxFilenameChars,
+      maxPatchCharsPerFile: input.config.agent.maxPatchCharsPerFile,
+      maxTotalPatchChars: input.config.agent.maxTotalPatchChars,
+    },
+  };
+  return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
+}
+
+function readRepositorySummaryCache(
+  cache: RepositorySummaryCache | undefined,
+  identityDigest: string,
+): ReturnType<RepositorySummaryCache["getRepositorySummaryCache"]> {
+  try {
+    return cache?.getRepositorySummaryCache(identityDigest) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRepositorySummaryCache(
+  cache: RepositorySummaryCache | undefined,
+  input: {
+    identityDigest: string;
+    evidenceDigest: string;
+    summary: string;
+    limitations: string[];
+  },
+): void {
+  try {
+    cache?.putRepositorySummaryCache(input);
+  } catch {
+    return;
+  }
 }
 
 function mergeLimitations(...groups: string[][]): string[] {

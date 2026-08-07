@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type {
+  CachedRepositorySummary,
+  RepositorySummaryCache,
+} from "../../domain/repositorySummaryCache.js";
 
 export type ProjectProgressOutboxIntent = {
   intentKey: string;
@@ -43,7 +47,7 @@ export type AutomationTraceSpoolEntry = {
 
 const AUTOMATION_TRACE_SPOOL_CAPACITY = 100;
 
-export class ProjectProgressStore {
+export class ProjectProgressStore implements RepositorySummaryCache {
   private readonly database: DatabaseSync;
   private closed = false;
 
@@ -215,6 +219,57 @@ export class ProjectProgressStore {
           aiNote: row.draft_ai_note,
         }
       : null;
+  }
+
+  getRepositorySummaryCache(identityDigest: string): CachedRepositorySummary | null {
+    assertSha256Digest(identityDigest, "identityDigest");
+    const row = this.database.prepare(`
+      SELECT summary, limitations_json
+      FROM repository_summary_cache
+      WHERE identity_digest = ?
+    `).get(identityDigest) as {
+      summary: string;
+      limitations_json: string;
+    } | undefined;
+    return row
+      ? {
+          summary: row.summary,
+          limitations: decodeLimitations(row.limitations_json),
+        }
+      : null;
+  }
+
+  putRepositorySummaryCache(input: {
+    identityDigest: string;
+    evidenceDigest: string;
+    summary: string;
+    limitations: string[];
+  }): void {
+    assertSha256Digest(input.identityDigest, "identityDigest");
+    assertSha256Digest(input.evidenceDigest, "evidenceDigest");
+    assertNonEmptyString(input.summary, "summary");
+    if (!input.limitations.every((item) => typeof item === "string")) {
+      throw new Error("limitations 必须是字符串数组。");
+    }
+    const now = new Date().toISOString();
+    this.database.prepare(`
+      INSERT OR IGNORE INTO repository_summary_cache (
+        identity_digest, evidence_digest, summary, limitations_json,
+        created_at, last_used_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      input.identityDigest,
+      input.evidenceDigest,
+      input.summary,
+      JSON.stringify(input.limitations),
+      now,
+      now,
+    );
+    this.database.prepare(`
+      UPDATE repository_summary_cache
+      SET last_used_at = ?
+      WHERE identity_digest = ?
+    `).run(now, input.identityDigest);
   }
 
   enqueueOutbox(input: {
@@ -556,7 +611,16 @@ export class ProjectProgressStore {
         PRIMARY KEY(run_id, event_key)
       );
 
-      PRAGMA user_version = 3;
+      CREATE TABLE IF NOT EXISTS repository_summary_cache (
+        identity_digest TEXT PRIMARY KEY,
+        evidence_digest TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        limitations_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT NOT NULL
+      );
+
+      PRAGMA user_version = 4;
     `);
   }
 }
@@ -614,6 +678,20 @@ function decodeAppliedPayload(value: string): ManagedProjectSummary["appliedPayl
     aiConfidence: parsed.aiConfidence as number,
     aiNote: parsed.aiNote,
   };
+}
+
+function decodeLimitations(value: string): string[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new Error("repository summary cache limitations 无效。");
+  }
+  return parsed;
+}
+
+function assertSha256Digest(value: string, name: string): void {
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
+    throw new Error(`${name} 必须是 SHA-256 hex。`);
+  }
 }
 
 function assertPositiveInteger(value: number, name: string): void {

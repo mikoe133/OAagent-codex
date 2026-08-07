@@ -15,6 +15,9 @@ const MAX_GITHUB_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_GITHUB_FILES_PAGE_SIZE = 100;
 const MCP_PATH = "/mcp";
 
+export const PROJECT_PROGRESS_COMMIT_DETAIL_TOOL_POLICY_VERSION =
+  "project-progress-commit-detail-v1";
+
 type GitHubFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export type ProjectProgressAgentLimits = {
