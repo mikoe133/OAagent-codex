@@ -123,10 +123,34 @@ describe("BoundedAutomationTraceQueue", () => {
     controller.abort(new Error("finalization cancelled"));
     await assert.rejects(cancelled, /finalization cancelled/);
   });
+
+  it("does not touch the spool after an ignored delivery abort settles late", async () => {
+    const deliveryGate = deferred<void>();
+    const deliveryController = new AbortController();
+    const spool = new MemoryTraceSpool();
+    const queue = new BoundedAutomationTraceQueue({
+      runId: "run-01",
+      spool,
+      signal: deliveryController.signal,
+      deliver: async () => {
+        await deliveryGate.promise;
+        return true;
+      },
+    });
+    queue.tryEnqueue(event("late", "succeeded", 1));
+    await waitUntil(() => queue.metrics.inFlight === 1);
+
+    deliveryController.abort(new Error("worker store is closing"));
+    deliveryGate.resolve();
+    await waitUntil(() => queue.metrics.inFlight === 0);
+
+    assert.equal(spool.deleteCalls, 0);
+  });
 });
 
 class MemoryTraceSpool implements AutomationTraceSpool {
   private readonly entries = new Map<string, ReturnType<AutomationTraceSpool["listAutomationTraceSpool"]>[number]>();
+  deleteCalls = 0;
 
   constructor(entries: ReturnType<AutomationTraceSpool["listAutomationTraceSpool"]> = []) {
     for (const entry of entries) {
@@ -150,6 +174,7 @@ class MemoryTraceSpool implements AutomationTraceSpool {
   }
 
   deleteAutomationTraceSpool(_runId: string, eventKey: string): void {
+    this.deleteCalls += 1;
     this.entries.delete(eventKey);
   }
 }

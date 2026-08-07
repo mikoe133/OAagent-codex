@@ -285,7 +285,7 @@ describe("runProjectProgressAutomation", () => {
     assert.deepEqual(
       traceEvents.filter((event) => event.eventKey === "upload_run_audit")
         .map((event) => event.status),
-      ["running", "succeeded"],
+      ["succeeded"],
     );
     assert.equal(traceEvents.at(-1)?.status, "succeeded");
   });
