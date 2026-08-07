@@ -145,6 +145,24 @@ describe("syncProjectProgress", () => {
     assert.equal(result.metrics.githubPeakConcurrency, 6);
     assert.equal(result.metrics.agentPeakConcurrency, 2);
     assert.equal(result.metrics.oaWritePeakConcurrency, 0);
+    assert.deepEqual(
+      traceEvents
+        .filter((event) => event.eventKey === "read_github")
+        .map((event) => ({
+          status: event.status,
+          progressCurrent: event.progressCurrent,
+          progressTotal: event.progressTotal,
+        })),
+      [
+        { status: "running", progressCurrent: 0, progressTotal: repositoryCount },
+        ...Array.from({ length: repositoryCount }, (_, index) => ({
+          status: "running" as const,
+          progressCurrent: index + 1,
+          progressTotal: repositoryCount,
+        })),
+        { status: "succeeded", progressCurrent: repositoryCount, progressTotal: repositoryCount },
+      ],
+    );
     assert.equal(
       traceEvents.filter((event) =>
         event.phase === "repository_summary" && event.status === "succeeded"
