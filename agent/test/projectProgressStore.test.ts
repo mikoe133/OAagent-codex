@@ -159,6 +159,32 @@ describe("ProjectProgressStore", () => {
     store.close();
   });
 
+  it("persists repository summaries by their complete cache identity", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "project-progress-store-"));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, "state.sqlite");
+    const first = new ProjectProgressStore(databasePath);
+    first.putRepositorySummaryCache({
+      identityDigest: "a".repeat(64),
+      evidenceDigest: "b".repeat(64),
+      summary: "完成仓库缓存实现。",
+      limitations: ["Patch 详情按预算裁剪"],
+    });
+    first.close();
+
+    const restarted = new ProjectProgressStore(databasePath);
+    assert.deepEqual(restarted.getRepositorySummaryCache("a".repeat(64)), {
+      summary: "完成仓库缓存实现。",
+      limitations: ["Patch 详情按预算裁剪"],
+    });
+    assert.equal(restarted.getRepositorySummaryCache("c".repeat(64)), null);
+    assert.throws(
+      () => restarted.getRepositorySummaryCache("not-a-digest"),
+      /identityDigest/,
+    );
+    restarted.close();
+  });
+
   it("persists managed summary ownership and applied outbox state", async () => {
     const store = await createStore();
     const digest = "b".repeat(64);

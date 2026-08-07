@@ -126,6 +126,108 @@ describe("CodexProjectProgressSummarizer", () => {
     );
   });
 
+  it("reuses a successful repository summary cache across projects without another Agent run", async () => {
+    const entries = new Map<string, { summary: string; limitations: string[] }>();
+    const cache = {
+      getRepositorySummaryCache: (identityDigest: string) =>
+        entries.get(identityDigest) ?? null,
+      putRepositorySummaryCache: (entry: {
+        identityDigest: string;
+        summary: string;
+        limitations: string[];
+      }) => {
+        entries.set(entry.identityDigest, {
+          summary: entry.summary,
+          limitations: entry.limitations,
+        });
+      },
+    };
+    let runs = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      runs += 1;
+      return {
+        finalResponse: JSON.stringify({
+          summary: "完成可复用的仓库语义总结。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-cache-source",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const summarizer = new CodexProjectProgressSummarizer({
+      ...config,
+      modelCatalogVersion: "catalog-v7",
+      repositorySummaryCache: cache,
+    }, runner);
+
+    const first = await summarizer.summarize(input);
+    const cached = await summarizer.summarize({
+      ...input,
+      projectId: 777,
+      projectName: "另一个项目",
+    });
+
+    assert.equal(runs, 1);
+    assert.equal(first.interaction?.responsePayloadSanitized.cache_hit, false);
+    assert.equal(cached.summary, first.summary);
+    assert.equal(cached.interaction?.responsePayloadSanitized.cache_hit, true);
+    assert.equal(
+      cached.interaction?.responsePayloadSanitized.execution_mode,
+      "repository_summary_cache",
+    );
+    assert.equal(cached.interaction?.upstreamRequestId, null);
+    assert.equal(cached.interaction?.inputTokens, null);
+  });
+
+  it("invalidates repository cache entries when tool budgets change", async () => {
+    const entries = new Map<string, { summary: string; limitations: string[] }>();
+    const cache = {
+      getRepositorySummaryCache: (identityDigest: string) =>
+        entries.get(identityDigest) ?? null,
+      putRepositorySummaryCache: (entry: {
+        identityDigest: string;
+        summary: string;
+        limitations: string[];
+      }) => {
+        entries.set(entry.identityDigest, {
+          summary: entry.summary,
+          limitations: entry.limitations,
+        });
+      },
+    };
+    let runs = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      runs += 1;
+      return {
+        finalResponse: JSON.stringify({
+          summary: `完成第 ${runs} 次仓库总结。`,
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: `thread-cache-${runs}`,
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const first = new CodexProjectProgressSummarizer({
+      ...config,
+      modelCatalogVersion: "catalog-v7",
+      repositorySummaryCache: cache,
+    }, runner);
+    const changedBudget = new CodexProjectProgressSummarizer({
+      ...config,
+      modelCatalogVersion: "catalog-v7",
+      repositorySummaryCache: cache,
+      agent: { ...config.agent, maxDetailCalls: config.agent.maxDetailCalls + 1 },
+    }, runner);
+
+    await first.summarize(input);
+    await changedBudget.summarize(input);
+
+    assert.equal(runs, 2);
+    assert.equal(entries.size, 2);
+  });
+
   it("applies the OA prompt profile and records its exact audit snapshot", async () => {
     const runner: ProjectProgressAgentRunner = async (runInput) => {
       assert.match(runInput.developerInstructions, /<automation_prompt_profile>/);
