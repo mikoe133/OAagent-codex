@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -263,6 +264,41 @@ describe("GitHubCommitDetailTool", () => {
     assert.equal(result.status, "success");
     assert.equal(calls, 2);
     assert.equal(requestExecutor.metrics.retries, 1);
+  });
+
+  it("keeps the process alive while the default retry backoff is awaited", () => {
+    const moduleUrl = new URL(
+      "../src/infrastructure/github/githubRequestExecutor.ts",
+      import.meta.url,
+    ).href;
+    const script = `
+      import { GitHubRequestExecutor } from ${JSON.stringify(moduleUrl)};
+      const executor = new GitHubRequestExecutor({
+        maxAttempts: 2,
+        baseBackoffMs: 20,
+        maxBackoffMs: 20,
+        random: () => 1,
+      });
+      let calls = 0;
+      const response = await executor.execute(
+        async () => {
+          calls += 1;
+          return calls === 1
+            ? new Response("busy", { status: 503 })
+            : Response.json({ ok: true });
+        },
+        { repository: "example/api" },
+      );
+      if (!response.ok || calls !== 2) process.exitCode = 2;
+    `;
+
+    const child = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(child.status, 0, child.stderr || child.stdout);
   });
 });
 
