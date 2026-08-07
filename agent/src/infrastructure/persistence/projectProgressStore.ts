@@ -34,6 +34,15 @@ export type AutomationClaimIdentity = {
   requestDigest: string;
 };
 
+export type AutomationTraceSpoolEntry = {
+  runId: string;
+  eventKey: string;
+  payload: Record<string, unknown>;
+  terminal: boolean;
+};
+
+const AUTOMATION_TRACE_SPOOL_CAPACITY = 100;
+
 export class ProjectProgressStore {
   private readonly database: DatabaseSync;
   private closed = false;
@@ -322,6 +331,102 @@ export class ProjectProgressStore {
     }
   }
 
+  upsertAutomationTraceSpool(input: AutomationTraceSpoolEntry): boolean {
+    assertNonEmptyString(input.runId, "runId");
+    assertNonEmptyString(input.eventKey, "eventKey");
+    if (input.runId.length > 255 || input.eventKey.length > 200) {
+      throw new Error("trace spool runId/eventKey 超过长度上限。");
+    }
+    const now = new Date().toISOString();
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const existing = this.database.prepare(`
+        SELECT terminal
+        FROM automation_trace_spool
+        WHERE run_id = ? AND event_key = ?
+      `).get(input.runId, input.eventKey) as { terminal: number } | undefined;
+      if (!existing) {
+        const row = this.database.prepare(`
+          SELECT COUNT(*) AS count
+          FROM automation_trace_spool
+          WHERE run_id = ?
+        `).get(input.runId) as { count: number };
+        if (row.count >= AUTOMATION_TRACE_SPOOL_CAPACITY) {
+          if (!input.terminal) {
+            this.database.exec("COMMIT;");
+            return false;
+          }
+          const evicted = this.database.prepare(`
+            DELETE FROM automation_trace_spool
+            WHERE rowid = (
+              SELECT rowid
+              FROM automation_trace_spool
+              WHERE run_id = ? AND terminal = 0
+              ORDER BY created_at, event_key
+              LIMIT 1
+            )
+          `).run(input.runId);
+          if (evicted.changes !== 1) {
+            this.database.exec("COMMIT;");
+            return false;
+          }
+        }
+      }
+      this.database.prepare(`
+        INSERT INTO automation_trace_spool (
+          run_id, event_key, payload_json, terminal, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, event_key) DO UPDATE SET
+          payload_json = excluded.payload_json,
+          terminal = excluded.terminal,
+          updated_at = excluded.updated_at
+        WHERE automation_trace_spool.terminal = 0 OR excluded.terminal = 1
+      `).run(
+        input.runId,
+        input.eventKey,
+        JSON.stringify(input.payload),
+        input.terminal ? 1 : 0,
+        now,
+        now,
+      );
+      this.database.exec("COMMIT;");
+      return true;
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  listAutomationTraceSpool(runId: string): AutomationTraceSpoolEntry[] {
+    assertNonEmptyString(runId, "runId");
+    const rows = this.database.prepare(`
+      SELECT run_id, event_key, payload_json, terminal
+      FROM automation_trace_spool
+      WHERE run_id = ?
+      ORDER BY created_at, event_key
+    `).all(runId) as Array<{
+      run_id: string;
+      event_key: string;
+      payload_json: string;
+      terminal: number;
+    }>;
+    return rows.map((row) => ({
+      runId: row.run_id,
+      eventKey: row.event_key,
+      payload: decodePayload(row.payload_json),
+      terminal: row.terminal === 1,
+    }));
+  }
+
+  deleteAutomationTraceSpool(runId: string, eventKey: string): void {
+    assertNonEmptyString(runId, "runId");
+    assertNonEmptyString(eventKey, "eventKey");
+    this.database.prepare(`
+      DELETE FROM automation_trace_spool
+      WHERE run_id = ? AND event_key = ?
+    `).run(runId, eventKey);
+  }
+
   close(): void {
     if (!this.closed) {
       this.database.close();
@@ -441,7 +546,17 @@ export class ProjectProgressStore {
         created_at TEXT NOT NULL
       );
 
-      PRAGMA user_version = 2;
+      CREATE TABLE IF NOT EXISTS automation_trace_spool (
+        run_id TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        terminal INTEGER NOT NULL CHECK(terminal IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(run_id, event_key)
+      );
+
+      PRAGMA user_version = 3;
     `);
   }
 }
@@ -510,5 +625,11 @@ function assertPositiveInteger(value: number, name: string): void {
 function assertIsoDate(value: string, name: string): void {
   if (!Number.isFinite(Date.parse(value))) {
     throw new Error(`${name} 必须是有效时间。`);
+  }
+}
+
+function assertNonEmptyString(value: string, name: string): void {
+  if (!value.trim()) {
+    throw new Error(`${name} 不能为空。`);
   }
 }
