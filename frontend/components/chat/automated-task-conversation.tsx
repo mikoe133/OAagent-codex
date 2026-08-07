@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import {
+  ArrowDown,
   ArrowLeft,
   CalendarClock,
   CircleAlert,
@@ -22,10 +23,7 @@ import type {
   AutomationJob,
   AutomationRun,
 } from "@/lib/automation-api"
-import {
-  formatAutomationPayload,
-  resolveAutomationRunReply,
-} from "@/lib/automation-run-presentation"
+import { resolveAutomationRunReply } from "@/lib/automation-run-presentation"
 
 interface AutomatedTaskConversationProps {
   task: AutomationJob
@@ -54,13 +52,41 @@ export function AutomatedTaskConversation({
 }: AutomatedTaskConversationProps) {
   const conversationEndRef = React.useRef<HTMLDivElement | null>(null)
   const lastScrolledRunIdRef = React.useRef<string | null>(null)
+  const [isAtLatest, setIsAtLatest] = React.useState(true)
   const latestRunId = runs[0]?.id ?? null
+
+  const scrollToLatest = React.useCallback((behavior: ScrollBehavior) => {
+    const scrollContainer = conversationEndRef.current?.closest<HTMLElement>(
+      '[data-slot="automated-tasks-view"]',
+    )
+    if (!scrollContainer) {
+      return
+    }
+    scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior })
+  }, [])
 
   React.useEffect(() => {
     if (!loading && latestRunId && latestRunId !== lastScrolledRunIdRef.current) {
       lastScrolledRunIdRef.current = latestRunId
-      conversationEndRef.current?.scrollIntoView({ block: "end" })
+      const animationFrame = requestAnimationFrame(() => scrollToLatest("auto"))
+      return () => cancelAnimationFrame(animationFrame)
     }
+  }, [latestRunId, loading, scrollToLatest])
+
+  React.useEffect(() => {
+    const marker = conversationEndRef.current
+    const scrollContainer = marker?.closest<HTMLElement>('[data-slot="automated-tasks-view"]')
+    if (!marker || !scrollContainer || loading) {
+      setIsAtLatest(true)
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsAtLatest(Boolean(entry?.isIntersecting)),
+      { root: scrollContainer, threshold: 0.1 },
+    )
+    observer.observe(marker)
+    return () => observer.disconnect()
   }, [latestRunId, loading])
 
   return (
@@ -147,7 +173,7 @@ export function AutomatedTaskConversation({
                 onRunSelected={onRunSelected}
               />
             ))}
-            <div ref={conversationEndRef} />
+            <div ref={conversationEndRef} aria-hidden="true" className="h-px" />
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-stone-300 bg-white/60 px-6 py-16 text-center theme-dark:border-zinc-700 theme-dark:bg-zinc-900/40">
@@ -161,6 +187,23 @@ export function AutomatedTaskConversation({
           </div>
         )}
       </div>
+
+      {!loading && runs.length > 0 && !isAtLatest ? (
+        <div className="pointer-events-none fixed bottom-6 right-6 z-30 sm:bottom-8 sm:right-10">
+          <Button
+            data-slot="automated-task-scroll-to-latest"
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => scrollToLatest("smooth")}
+            aria-label="回到最新运行"
+            title="回到最下方"
+            className="pointer-events-auto size-10 rounded-full border-stone-200 bg-white text-stone-600 shadow-lg transition-transform hover:-translate-y-0.5 hover:bg-stone-50 theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-800"
+          >
+            <ArrowDown className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -180,28 +223,6 @@ function RunConversation({
 
   return (
     <section data-slot="automated-task-run-conversation" aria-label={`运行 ${run.id}`}>
-      <div className="mb-6 flex items-center gap-3 text-xs text-stone-400 theme-dark:text-zinc-500">
-        <span className="h-px flex-1 bg-stone-200 theme-dark:bg-zinc-800" />
-        <span className="flex items-center gap-1.5 whitespace-nowrap">
-          <CalendarClock className="h-3.5 w-3.5" />
-          {formatDateTime(run.started_at ?? run.scheduled_at)}
-          <span aria-hidden="true">·</span>
-          {runStatusLabel(run.status)}
-          <span aria-hidden="true">·</span>
-          第 {run.attempt} 次
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => onRunSelected(run.id)}
-          className="h-7 rounded-full px-2 text-xs text-stone-500"
-        >
-          运行详情
-        </Button>
-        <span className="h-px flex-1 bg-stone-200 theme-dark:bg-zinc-800" />
-      </div>
-
       <div className="space-y-7">
         {interactions.length ? interactions.map((interaction) => (
           <ConversationPair
@@ -214,6 +235,32 @@ function RunConversation({
         )) : (
           <ConversationPair task={task} run={run} oaNavigationUrl={oaNavigationUrl} />
         )}
+      </div>
+
+      <div
+        data-slot="automated-task-run-metadata"
+        className="mt-5 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-xs text-stone-400 theme-dark:text-zinc-500"
+      >
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
+          <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />
+          <time dateTime={run.started_at ?? run.scheduled_at}>
+            {formatDateTime(run.started_at ?? run.scheduled_at)}
+          </time>
+        </span>
+        <span aria-hidden="true">·</span>
+        <span className="whitespace-nowrap">{runStatusLabel(run.status)}</span>
+        <span aria-hidden="true">·</span>
+        <span className="whitespace-nowrap">第 {run.attempt} 次</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onRunSelected(run.id)}
+          aria-label={`查看 ${formatDateTime(run.started_at ?? run.scheduled_at)} 的运行详情`}
+          className="h-7 rounded-full px-2 text-xs font-medium text-sky-600 hover:bg-sky-50 hover:text-sky-700 theme-dark:text-sky-400 theme-dark:hover:bg-sky-950/50 theme-dark:hover:text-sky-300"
+        >
+          运行详情
+        </Button>
       </div>
     </section>
   )
@@ -237,7 +284,7 @@ function ConversationPair({
   const requestMessage = {
     id: `${run.id}-${interactionKey}-request`,
     role: "user",
-    content: resolveRequest(task, interaction, project?.project_name),
+    content: resolveRequest(task, project?.project_name),
     createdAt: parseMessageDate(run.started_at ?? run.scheduled_at),
     status: "completed",
   } satisfies Message
@@ -260,30 +307,17 @@ function ConversationPair({
 
 function resolveRequest(
   task: AutomationJob,
-  interaction: AutomationAiInteraction | undefined,
   projectName: string | undefined,
 ): string {
   const content = [
     task.description || `执行自动任务“${task.display_name ?? task.name}”。`,
     projectName ? `当前项目：${projectName}` : null,
-    interaction?.request_payload_sanitized !== null && interaction?.request_payload_sanitized !== undefined
-      ? `脱敏输入：\n${formatAutomationPayload(interaction.request_payload_sanitized)}`
-      : null,
   ]
   return content.filter((item): item is string => Boolean(item)).join("\n\n")
 }
 
 function resolveReplyContent(run: AutomationRun, interaction?: AutomationAiInteraction): string {
-  const reply = resolveAutomationRunReply(run, interaction)
-  if (
-    !interaction?.final_summary?.trim() ||
-    interaction.response_payload_sanitized === null ||
-    interaction.response_payload_sanitized === undefined
-  ) {
-    return reply
-  }
-
-  return `${reply}\n\n**脱敏响应**\n\n\`\`\`json\n${formatAutomationPayload(interaction.response_payload_sanitized)}\n\`\`\``
+  return resolveAutomationRunReply(run, interaction)
 }
 
 function parseMessageDate(value: string | null | undefined): Date {

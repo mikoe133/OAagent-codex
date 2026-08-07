@@ -6,8 +6,69 @@ import {
 } from "../src/application/syncProjectProgress.js";
 import { GitHubRequestError } from "../src/infrastructure/github/githubClient.js";
 import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/githubTypes.js";
+import { AutomationLeaseLostError } from "../src/infrastructure/oa/automationOaClient.js";
+import { ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("syncProjectProgress", () => {
+  it("records model request outcomes and semaphore queue wait", async () => {
+    const metrics = new OperationMetricsRecorder();
+    const projects = [1, 2, 3].map((id) => ({
+      id,
+      projectName: `project-${id}`,
+      status: "updating" as const,
+      githubUrls: [`https://github.com/example/repository-${id}`],
+    }));
+    const report = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      operationMetrics: metrics,
+      concurrency: { github: 3, agent: 1, oaWrite: 1 },
+      oaClient: {
+        listProjects: async () => projects,
+        getProject: async (projectId) => projects[projectId - 1]!,
+      },
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: Number(repository.repository.split("-").at(-1)),
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(
+            Number(repository.repository.split("-").at(-1)),
+            repository.fullName,
+            `sha-${repository.repository}`,
+            "2026-07-24T01:00:00.000Z",
+          )],
+        }),
+      },
+      summarizer: {
+        summarize: async (input) => {
+          await delay(2);
+          if (input.repositoryFullName.endsWith("-2")) {
+            throw new Error("model unavailable");
+          }
+          return { summary: "完成更新。", limitations: [] };
+        },
+      },
+    });
+
+    const model = report.operationMetrics.find(
+      (item) => item.endpoint === "model.project-progress.summarize",
+    );
+    assert.deepEqual({
+      requests: model?.requests,
+      successes: model?.successes,
+      failures: model?.failures,
+      queueSamples: model?.queueWaitMs?.count,
+    }, {
+      requests: 3,
+      successes: 2,
+      failures: 1,
+      queueSamples: 3,
+    });
+  });
+
   it("fans out one Agent summary per active repository with 6/2/1 concurrency", async () => {
     const repositoryCount = 8;
     const project = {
@@ -84,6 +145,24 @@ describe("syncProjectProgress", () => {
     assert.equal(result.metrics.githubPeakConcurrency, 6);
     assert.equal(result.metrics.agentPeakConcurrency, 2);
     assert.equal(result.metrics.oaWritePeakConcurrency, 0);
+    assert.deepEqual(
+      traceEvents
+        .filter((event) => event.eventKey === "read_github")
+        .map((event) => ({
+          status: event.status,
+          progressCurrent: event.progressCurrent,
+          progressTotal: event.progressTotal,
+        })),
+      [
+        { status: "running", progressCurrent: 0, progressTotal: repositoryCount },
+        ...Array.from({ length: repositoryCount }, (_, index) => ({
+          status: "running" as const,
+          progressCurrent: index + 1,
+          progressTotal: repositoryCount,
+        })),
+        { status: "succeeded", progressCurrent: repositoryCount, progressTotal: repositoryCount },
+      ],
+    );
     assert.equal(
       traceEvents.filter((event) =>
         event.phase === "repository_summary" && event.status === "succeeded"
@@ -228,6 +307,72 @@ describe("syncProjectProgress", () => {
 
     assert.equal(githubReads, 0);
     assert.equal(result.projects[0]?.outcome, "archived");
+  });
+
+  it("uses complete project list rows without discovery detail reads", async () => {
+    let detailReads = 0;
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      oaClient: {
+        listProjects: async () => [{
+          id: 70,
+          projectName: "list-is-complete",
+          status: "maintenance",
+          githubUrls: [],
+          version: 3,
+        }],
+        getProject: async () => {
+          detailReads += 1;
+          throw new Error("default discovery must not read project details");
+        },
+      },
+      githubReader: {
+        readRepository: async () => {
+          throw new Error("must not read GitHub without repositories");
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+    });
+
+    assert.equal(detailReads, 0);
+    assert.equal(result.projects[0]?.outcome, "no_github_urls");
+  });
+
+  it("bounds compatibility project detail reads at four", async () => {
+    const projects = Array.from({ length: 12 }, (_, index) => ({
+      id: index + 1,
+      projectName: `legacy-${index + 1}`,
+      status: "maintenance" as const,
+      githubUrls: [],
+    }));
+    let active = 0;
+    let peak = 0;
+    let reads = 0;
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      projectDetailCompatibilityMode: true,
+      oaClient: {
+        listProjects: async () => projects,
+        getProject: async (projectId) => {
+          reads += 1;
+          active += 1;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          active -= 1;
+          return projects[projectId - 1]!;
+        },
+      },
+      githubReader: {
+        readRepository: async () => {
+          throw new Error("must not read GitHub without repositories");
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+    });
+
+    assert.equal(reads, 12);
+    assert.equal(peak, 4);
+    assert.equal(result.projects.length, 12);
   });
 
   it("skips repository Threads without current-day commits but still applies maintenance", async () => {
@@ -571,7 +716,7 @@ describe("syncProjectProgress", () => {
         listProjects: async () => [project],
         getProject: async () => {
           detailReads += 1;
-          return detailReads === 1 ? project : { ...project, status: "archived" as const };
+          return { ...project, status: "archived" as const };
         },
         updateProjectStatus: async () => {
           mutations += 1;
@@ -600,6 +745,7 @@ describe("syncProjectProgress", () => {
     });
 
     assert.equal(mutations, 0);
+    assert.equal(detailReads, 1);
     assert.match(result.projects[0]?.warnings.join(" ") ?? "", /archived/);
   });
 
@@ -712,6 +858,7 @@ describe("syncProjectProgress", () => {
     };
     const result = await syncProjectProgress({
       observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      projectDetailCompatibilityMode: true,
       oaClient: {
         listProjects: async () => [noRepositories, detailFailure],
         getProject: async (projectId) => {
@@ -1013,6 +1160,105 @@ describe("syncProjectProgress", () => {
     });
 
     assert.equal(result.retryRecommended, true);
+  });
+
+  it("stops all later mutations after definitive project fencing loss", async () => {
+    const projects = [31, 32].map((id) => ({
+      id,
+      projectName: `fenced-${id}`,
+      status: "maintenance" as const,
+      githubUrls: [`https://github.com/alpha/fenced-${id}`],
+      version: 1,
+    }));
+    let statusWrites = 0;
+    let summaryReads = 0;
+    let summaryWrites = 0;
+
+    await assert.rejects(
+      syncProjectProgress({
+        observedAt: new Date("2026-07-24T12:00:00.000Z"),
+        writeMode: "production",
+        oaClient: {
+          listProjects: async () => projects,
+          getProject: async (projectId) => projects.find((project) => project.id === projectId)!,
+          updateProjectStatus: async () => {
+            statusWrites += 1;
+            throw new ProjectProgressLeaseLostError(
+              "stale worker",
+              409,
+              "stale_fencing_token",
+            );
+          },
+          listCommitSummaries: async () => {
+            summaryReads += 1;
+            return [];
+          },
+          createCommitSummary: async (input) => {
+            summaryWrites += 1;
+            return { id: 800 + input.projectId, ...input };
+          },
+          updateCommitSummary: async (summaryId, input) => ({
+            id: summaryId,
+            projectId: 31,
+            summaryDate: "2026-07-24",
+            ...input,
+          }),
+        },
+        githubReader: {
+          readRepository: async (repository) => ({
+            repositoryId: Number(repository.repository.split("-").at(-1)),
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: "2026-07-24T01:00:00.000Z",
+            commits: [commit(
+              1,
+              repository.fullName,
+              `sha-${repository.repository}`,
+              "2026-07-24T01:00:00.000Z",
+            )],
+          }),
+        },
+        summarizer: { summarize: async () => ({ summary: "当天总结", limitations: [] }) },
+        store: createWritableStore(),
+      }),
+      ProjectProgressLeaseLostError,
+    );
+
+    assert.equal(statusWrites, 1);
+    assert.equal(summaryReads, 0);
+    assert.equal(summaryWrites, 0);
+  });
+
+  it("does not downgrade definitive lease loss from the trace channel", async () => {
+    let projectReads = 0;
+
+    await assert.rejects(
+      syncProjectProgress({
+        observedAt: new Date("2026-07-24T12:00:00.000Z"),
+        trace: async () => {
+          throw new AutomationLeaseLostError("expired", 409, "lease_expired");
+        },
+        oaClient: {
+          listProjects: async () => {
+            projectReads += 1;
+            return [];
+          },
+          getProject: async () => {
+            throw new Error("must not read");
+          },
+        },
+        githubReader: {
+          readRepository: async () => {
+            throw new Error("must not read");
+          },
+        },
+        summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+      }),
+      AutomationLeaseLostError,
+    );
+
+    assert.equal(projectReads, 0);
   });
 });
 

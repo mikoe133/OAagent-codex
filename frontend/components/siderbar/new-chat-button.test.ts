@@ -266,9 +266,13 @@ test("opens task run history as a read-only chat from the card body", () => {
   assert.match(automatedTaskConversationSource, /data-slot="automated-task-conversation"/)
   assert.match(automatedTaskConversationSource, /data-slot="automated-task-run-conversation"/)
   assert.match(automatedTaskConversationSource, /data-slot="automated-task-conversation-pair"/)
-  assert.match(automatedTaskConversationSource, /request_payload_sanitized/)
-  assert.match(automatedTaskConversationSource, /final_summary/)
-  assert.match(automatedTaskConversationSource, /response_payload_sanitized/)
+  assert.doesNotMatch(automatedTaskConversationSource, /request_payload_sanitized/)
+  assert.doesNotMatch(automatedTaskConversationSource, /脱敏输入/)
+  assert.match(automatedTaskConversationSource, /task\.description/)
+  assert.match(automatedTaskConversationSource, /当前项目：\$\{projectName\}/)
+  assert.match(automatedTaskConversationSource, /resolveAutomationRunReply\(run, interaction\)/)
+  assert.doesNotMatch(automatedTaskConversationSource, /response_payload_sanitized/)
+  assert.doesNotMatch(automatedTaskConversationSource, /脱敏响应/)
   assert.match(automatedTaskConversationSource, /import \{ MessageBubble \}/)
   assert.match(automatedTaskConversationSource, /satisfies Message/)
   assert.match(automatedTaskConversationSource, /<MessageBubble message=\{requestMessage\} showActions=\{false\}/)
@@ -306,6 +310,46 @@ test("keeps the automated task conversation header visible while scrolling", () 
   assert.match(conversationHeader, /aria-label="返回自动任务列表"/)
   assert.match(conversationHeader, /最近 \{runs\.length\} 次运行/)
   assert.doesNotMatch(conversationHeader, /<p/)
+})
+
+test("opens the automated task conversation at the latest run and can return there", () => {
+  assert.match(automatedTaskConversationSource, /const scrollToLatest = React\.useCallback/)
+  assert.match(
+    automatedTaskConversationSource,
+    /scrollContainer\.scrollTo\(\{ top: scrollContainer\.scrollHeight, behavior \}\)/,
+  )
+  assert.match(
+    automatedTaskConversationSource,
+    /requestAnimationFrame\(\(\) => scrollToLatest\("auto"\)\)/,
+  )
+  assert.match(automatedTaskConversationSource, /new IntersectionObserver/)
+  assert.match(automatedTaskConversationSource, /aria-label="回到最新运行"/)
+  assert.match(
+    automatedTaskConversationSource,
+    /onClick=\{\(\) => scrollToLatest\("smooth"\)\}/,
+  )
+  assert.match(automatedTaskConversationSource, /<ArrowDown/)
+})
+
+test("keeps every task run time and detail action visible at the conversation footer", () => {
+  const runConversationSource = automatedTaskConversationSource.match(
+    /function RunConversation[\s\S]*?function ConversationPair/,
+  )?.[0]
+
+  assert.ok(runConversationSource, "expected task run conversation markup")
+  assert.match(
+    runConversationSource,
+    /<div className="space-y-7">[\s\S]*?<\/div>\s*<div\s+data-slot="automated-task-run-metadata"/,
+  )
+  assert.match(runConversationSource, /<time dateTime=\{run\.started_at \?\? run\.scheduled_at\}/)
+  assert.match(runConversationSource, /formatDateTime\(run\.started_at \?\? run\.scheduled_at\)/)
+  assert.match(runConversationSource, /onClick=\{\(\) => onRunSelected\(run\.id\)\}/)
+  assert.match(runConversationSource, />\s*运行详情\s*<\/Button>/)
+  const metadataSource = runConversationSource.match(
+    /<div\s+data-slot="automated-task-run-metadata"[\s\S]*?<\/div>\s*<\/section>/,
+  )?.[0]
+  assert.ok(metadataSource, "expected task run metadata footer")
+  assert.doesNotMatch(metadataSource, /\bborder(?:-|\b)|\bshadow(?:-|\b)|\bbg-(?:white|zinc)/)
 })
 
 test("disables automated task creation with a simple under-development hint", () => {

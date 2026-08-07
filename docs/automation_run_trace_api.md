@@ -58,6 +58,10 @@ Content-Type: application/json
 {
   "worker_instance": "oaagent-production-01",
   "lease_token": "raw-lease-token",
+  "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
+  "run_mutation_token": "scoped-hmac-token",
+  "fencing_token": 7,
+  "idempotency_key": "sha256:64-hex-characters",
   "event_key": "repository_summary:openai/example:2026-08-03",
   "sequence": 510,
   "phase": "repository_summary",
@@ -77,7 +81,7 @@ Content-Type: application/json
 
 后端规则：
 
-1. 复用 claim、heartbeat 和 AI 审计相同的 `OA_AGENT_AUTOMATION_TOKEN`、`worker_instance`、lease token 摘要、deadline 和运行状态校验。
+1. 复用 claim、heartbeat 和 AI 审计相同的服务鉴权，并在事务内校验 scoped token、当前 lease/fence、deadline 和运行状态。
 2. 按 `(run_id, event_key)` 原子 upsert；重试不能生成重复节点。
 3. 首次 `running` 时设置 `started_at`，后续更新不得覆盖。
 4. `succeeded/fallback/failed/cancelled` 为终态，设置 `finished_at`；同一 key 不允许从终态回退到 `running/pending`。
@@ -86,7 +90,9 @@ Content-Type: application/json
 7. 成功可返回 `204 No Content`，也可返回标准 envelope；OAagent 两种都兼容。
 8. 接口不存在或 Trace 写入失败时，OAagent 会停用本次运行的 Trace 上报，但继续执行核心任务。
 
-推荐错误码沿用现有自动化内部接口：`automation_run_not_found`、`invalid_lease_token`、`lease_expired`、`run_not_writable`、`automation_trace_invalid`。
+推荐错误码沿用现有自动化内部接口：`automation_run_not_found`、`invalid_lease_token`、
+`lease_expired`、`invalid_run_mutation_token`、`stale_fencing_token`、
+`idempotency_conflict`、`run_not_writable`、`automation_trace_invalid`。
 
 ## 前端读取接口
 

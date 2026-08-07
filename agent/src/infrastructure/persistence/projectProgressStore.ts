@@ -1,6 +1,11 @@
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type {
+  CachedRepositorySummary,
+  RepositorySummaryCache,
+} from "../../domain/repositorySummaryCache.js";
 
 export type ProjectProgressOutboxIntent = {
   intentKey: string;
@@ -22,7 +27,27 @@ export type ManagedProjectSummary = {
   };
 };
 
-export class ProjectProgressStore {
+export type AutomationClaimIdentityInput = {
+  workerInstance: string;
+  supportedJobTypes: string[];
+  leaseSeconds: number;
+};
+
+export type AutomationClaimIdentity = {
+  claimRequestId: string;
+  requestDigest: string;
+};
+
+export type AutomationTraceSpoolEntry = {
+  runId: string;
+  eventKey: string;
+  payload: Record<string, unknown>;
+  terminal: boolean;
+};
+
+const AUTOMATION_TRACE_SPOOL_CAPACITY = 100;
+
+export class ProjectProgressStore implements RepositorySummaryCache {
   private readonly database: DatabaseSync;
   private closed = false;
 
@@ -33,6 +58,72 @@ export class ProjectProgressStore {
     this.database = new DatabaseSync(databasePath);
     this.database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.migrate();
+  }
+
+  getOrCreateAutomationClaimIdentity(
+    input: AutomationClaimIdentityInput,
+  ): AutomationClaimIdentity {
+    const normalized = normalizeClaimIdentityInput(input);
+    const requestDigest = createHash("sha256")
+      .update(JSON.stringify(normalized))
+      .digest("hex");
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const row = this.database.prepare(`
+        SELECT claim_request_id, worker_instance, request_digest
+        FROM automation_claim_identity
+        WHERE identity_slot = 1
+      `).get() as {
+        claim_request_id: string;
+        worker_instance: string;
+        request_digest: string;
+      } | undefined;
+      if (row) {
+        if (
+          row.worker_instance !== normalized.worker_instance ||
+          row.request_digest !== requestDigest
+        ) {
+          throw new Error(
+            "active claim identity 与当前 worker 或请求摘要不匹配。",
+          );
+        }
+        this.database.exec("COMMIT;");
+        return {
+          claimRequestId: row.claim_request_id,
+          requestDigest: row.request_digest,
+        };
+      }
+
+      const claimRequestId = randomUUID();
+      this.database.prepare(`
+        INSERT INTO automation_claim_identity (
+          identity_slot, claim_request_id, worker_instance,
+          request_digest, supported_job_types_json, lease_seconds, created_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?)
+      `).run(
+        claimRequestId,
+        normalized.worker_instance,
+        requestDigest,
+        JSON.stringify(normalized.supported_job_types),
+        normalized.lease_seconds,
+        new Date().toISOString(),
+      );
+      this.database.exec("COMMIT;");
+      return { claimRequestId, requestDigest };
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  clearAutomationClaimIdentity(claimRequestId: string): void {
+    if (!claimRequestId.trim()) {
+      throw new Error("claimRequestId 不能为空。");
+    }
+    this.database.prepare(`
+      DELETE FROM automation_claim_identity
+      WHERE identity_slot = 1 AND claim_request_id = ?
+    `).run(claimRequestId);
   }
 
   saveProjectRepositoryWatermark(
@@ -128,6 +219,57 @@ export class ProjectProgressStore {
           aiNote: row.draft_ai_note,
         }
       : null;
+  }
+
+  getRepositorySummaryCache(identityDigest: string): CachedRepositorySummary | null {
+    assertSha256Digest(identityDigest, "identityDigest");
+    const row = this.database.prepare(`
+      SELECT summary, limitations_json
+      FROM repository_summary_cache
+      WHERE identity_digest = ?
+    `).get(identityDigest) as {
+      summary: string;
+      limitations_json: string;
+    } | undefined;
+    return row
+      ? {
+          summary: row.summary,
+          limitations: decodeLimitations(row.limitations_json),
+        }
+      : null;
+  }
+
+  putRepositorySummaryCache(input: {
+    identityDigest: string;
+    evidenceDigest: string;
+    summary: string;
+    limitations: string[];
+  }): void {
+    assertSha256Digest(input.identityDigest, "identityDigest");
+    assertSha256Digest(input.evidenceDigest, "evidenceDigest");
+    assertNonEmptyString(input.summary, "summary");
+    if (!input.limitations.every((item) => typeof item === "string")) {
+      throw new Error("limitations 必须是字符串数组。");
+    }
+    const now = new Date().toISOString();
+    this.database.prepare(`
+      INSERT OR IGNORE INTO repository_summary_cache (
+        identity_digest, evidence_digest, summary, limitations_json,
+        created_at, last_used_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      input.identityDigest,
+      input.evidenceDigest,
+      input.summary,
+      JSON.stringify(input.limitations),
+      now,
+      now,
+    );
+    this.database.prepare(`
+      UPDATE repository_summary_cache
+      SET last_used_at = ?
+      WHERE identity_digest = ?
+    `).run(now, input.identityDigest);
   }
 
   enqueueOutbox(input: {
@@ -244,6 +386,102 @@ export class ProjectProgressStore {
     }
   }
 
+  upsertAutomationTraceSpool(input: AutomationTraceSpoolEntry): boolean {
+    assertNonEmptyString(input.runId, "runId");
+    assertNonEmptyString(input.eventKey, "eventKey");
+    if (input.runId.length > 255 || input.eventKey.length > 200) {
+      throw new Error("trace spool runId/eventKey 超过长度上限。");
+    }
+    const now = new Date().toISOString();
+    this.database.exec("BEGIN IMMEDIATE;");
+    try {
+      const existing = this.database.prepare(`
+        SELECT terminal
+        FROM automation_trace_spool
+        WHERE run_id = ? AND event_key = ?
+      `).get(input.runId, input.eventKey) as { terminal: number } | undefined;
+      if (!existing) {
+        const row = this.database.prepare(`
+          SELECT COUNT(*) AS count
+          FROM automation_trace_spool
+          WHERE run_id = ?
+        `).get(input.runId) as { count: number };
+        if (row.count >= AUTOMATION_TRACE_SPOOL_CAPACITY) {
+          if (!input.terminal) {
+            this.database.exec("COMMIT;");
+            return false;
+          }
+          const evicted = this.database.prepare(`
+            DELETE FROM automation_trace_spool
+            WHERE rowid = (
+              SELECT rowid
+              FROM automation_trace_spool
+              WHERE run_id = ? AND terminal = 0
+              ORDER BY created_at, event_key
+              LIMIT 1
+            )
+          `).run(input.runId);
+          if (evicted.changes !== 1) {
+            this.database.exec("COMMIT;");
+            return false;
+          }
+        }
+      }
+      this.database.prepare(`
+        INSERT INTO automation_trace_spool (
+          run_id, event_key, payload_json, terminal, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, event_key) DO UPDATE SET
+          payload_json = excluded.payload_json,
+          terminal = excluded.terminal,
+          updated_at = excluded.updated_at
+        WHERE automation_trace_spool.terminal = 0 OR excluded.terminal = 1
+      `).run(
+        input.runId,
+        input.eventKey,
+        JSON.stringify(input.payload),
+        input.terminal ? 1 : 0,
+        now,
+        now,
+      );
+      this.database.exec("COMMIT;");
+      return true;
+    } catch (error) {
+      this.database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  listAutomationTraceSpool(runId: string): AutomationTraceSpoolEntry[] {
+    assertNonEmptyString(runId, "runId");
+    const rows = this.database.prepare(`
+      SELECT run_id, event_key, payload_json, terminal
+      FROM automation_trace_spool
+      WHERE run_id = ?
+      ORDER BY created_at, event_key
+    `).all(runId) as Array<{
+      run_id: string;
+      event_key: string;
+      payload_json: string;
+      terminal: number;
+    }>;
+    return rows.map((row) => ({
+      runId: row.run_id,
+      eventKey: row.event_key,
+      payload: decodePayload(row.payload_json),
+      terminal: row.terminal === 1,
+    }));
+  }
+
+  deleteAutomationTraceSpool(runId: string, eventKey: string): void {
+    assertNonEmptyString(runId, "runId");
+    assertNonEmptyString(eventKey, "eventKey");
+    this.database.prepare(`
+      DELETE FROM automation_trace_spool
+      WHERE run_id = ? AND event_key = ?
+    `).run(runId, eventKey);
+  }
+
   close(): void {
     if (!this.closed) {
       this.database.close();
@@ -262,6 +500,16 @@ export class ProjectProgressStore {
         heartbeat_at TEXT,
         fencing_token INTEGER NOT NULL DEFAULT 0,
         caught_up_by TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS automation_claim_identity (
+        identity_slot INTEGER PRIMARY KEY CHECK(identity_slot = 1),
+        claim_request_id TEXT NOT NULL UNIQUE,
+        worker_instance TEXT NOT NULL,
+        request_digest TEXT NOT NULL,
+        supported_job_types_json TEXT NOT NULL,
+        lease_seconds INTEGER NOT NULL,
+        created_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS project_state (
@@ -353,9 +601,54 @@ export class ProjectProgressStore {
         created_at TEXT NOT NULL
       );
 
-      PRAGMA user_version = 1;
+      CREATE TABLE IF NOT EXISTS automation_trace_spool (
+        run_id TEXT NOT NULL,
+        event_key TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        terminal INTEGER NOT NULL CHECK(terminal IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(run_id, event_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS repository_summary_cache (
+        identity_digest TEXT PRIMARY KEY,
+        evidence_digest TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        limitations_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT NOT NULL
+      );
+
+      PRAGMA user_version = 4;
     `);
   }
+}
+
+function normalizeClaimIdentityInput(input: AutomationClaimIdentityInput): {
+  worker_instance: string;
+  supported_job_types: string[];
+  lease_seconds: number;
+} {
+  const workerInstance = input.workerInstance.trim();
+  if (!workerInstance) {
+    throw new Error("workerInstance 不能为空。");
+  }
+  assertPositiveInteger(input.leaseSeconds, "leaseSeconds");
+  const supportedJobTypes = [...new Set(
+    input.supportedJobTypes.map((jobType) => jobType.trim()),
+  )].sort();
+  if (
+    supportedJobTypes.length === 0 ||
+    supportedJobTypes.some((jobType) => jobType.length === 0)
+  ) {
+    throw new Error("supportedJobTypes 必须包含非空任务类型。");
+  }
+  return {
+    worker_instance: workerInstance,
+    supported_job_types: supportedJobTypes,
+    lease_seconds: input.leaseSeconds,
+  };
 }
 
 function decodePayload(value: string): Record<string, unknown> {
@@ -387,6 +680,20 @@ function decodeAppliedPayload(value: string): ManagedProjectSummary["appliedPayl
   };
 }
 
+function decodeLimitations(value: string): string[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new Error("repository summary cache limitations 无效。");
+  }
+  return parsed;
+}
+
+function assertSha256Digest(value: string, name: string): void {
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
+    throw new Error(`${name} 必须是 SHA-256 hex。`);
+  }
+}
+
 function assertPositiveInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`${name} 必须是正整数。`);
@@ -396,5 +703,11 @@ function assertPositiveInteger(value: number, name: string): void {
 function assertIsoDate(value: string, name: string): void {
   if (!Number.isFinite(Date.parse(value))) {
     throw new Error(`${name} 必须是有效时间。`);
+  }
+}
+
+function assertNonEmptyString(value: string, name: string): void {
+  if (!value.trim()) {
+    throw new Error(`${name} 不能为空。`);
   }
 }

@@ -3,8 +3,12 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import test from "node:test";
 
 import type { AppConfig, ModelProviderConfig } from "../src/config/config.js";
+import type { ProjectProgressConfig } from "../src/config/projectProgressConfig.js";
 import { resolveCodexModelBaseUrl } from "../src/infrastructure/codex/codexClient.js";
-import { startModelRelay } from "../src/infrastructure/codex/modelRelay.js";
+import {
+  startModelRelay,
+  startProjectProgressModelRelay,
+} from "../src/infrastructure/codex/modelRelay.js";
 
 const nexttoken: ModelProviderConfig = {
   name: "Nexttoken",
@@ -68,6 +72,49 @@ test("streams the Responses API through an HTTP/1.1 upstream connection", async 
     'event: response.output_text.delta\ndata: {"delta":"hello"}\n\n' +
       "event: response.completed\ndata: {}\n\n",
   );
+});
+
+test("routes a project progress OpenRouter Agent through the HTTP/1.1 relay", async (t) => {
+  const upstream = createServer(async (request, response) => {
+    assert.equal(request.httpVersion, "1.1");
+    assert.equal(request.method, "POST");
+    assert.equal(request.url, "/api/v1/responses");
+    assert.equal(request.headers.authorization, "Bearer openrouter-secret");
+    for await (const _chunk of request) {
+      // Drain the request before returning the synthetic Responses stream.
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end("event: response.completed\ndata: {}\n\n");
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => close(upstream));
+
+  const relay = await startProjectProgressModelRelay({
+    provider: "openrouter",
+    apiBaseUrl: `http://127.0.0.1:${upstreamPort}/api/v1`,
+    apiKey: "openrouter-secret",
+    model: "z-ai/glm-5.2",
+    parameters: {},
+  } satisfies ProjectProgressConfig["model"]);
+  t.after(() => relay.close());
+
+  assert.match(
+    relay.model.apiBaseUrl,
+    /^http:\/\/127\.0\.0\.1:\d+\/openrouter\/v1$/,
+  );
+  const result = await requestRelay(
+    `${relay.model.apiBaseUrl}/responses`,
+    "Bearer openrouter-secret",
+    "{}",
+  );
+  assert.equal(result.status, 200);
+
+  const unavailableProvider = await requestRelay(
+    `${relay.model.apiBaseUrl.replace("/openrouter/", "/nexttoken/")}/responses`,
+    "Bearer openrouter-secret",
+    "{}",
+  );
+  assert.equal(unavailableProvider.status, 404);
 });
 
 test("rejects an invalid provider credential without contacting upstream", async (t) => {

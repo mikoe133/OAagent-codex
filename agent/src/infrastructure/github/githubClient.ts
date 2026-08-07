@@ -1,39 +1,68 @@
 import type { ProjectProgressCommit } from "../../domain/projectProgress.js";
+import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
+import {
+  OperationMetricsRecorder,
+  PROJECT_PROGRESS_ENDPOINTS,
+} from "../observability/operationMetrics.js";
+import {
+  GitHubRequestBudgetExceededError,
+  GitHubRequestError,
+  GitHubRequestExecutor,
+  type GitHubRequestExecutorConfig,
+} from "./githubRequestExecutor.js";
 import type { GitHubRepositoryIdentity } from "./githubUrl.js";
 import type {
   GitHubRepositorySnapshot,
   ProjectProgressGitHubReader,
 } from "./githubTypes.js";
-import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
+
+export {
+  GitHubRequestBudgetExceededError,
+  GitHubRequestError,
+} from "./githubRequestExecutor.js";
 
 const DEFAULT_LOOKBACK_HOURS = 24 * 30;
 const PAGE_SIZE = 100;
 const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_MAX_BRANCHES = 500;
+const DEFAULT_MAX_COMMIT_PAGES_PER_BRANCH = 100;
 
 type GitHubFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-export class GitHubRequestError extends Error {
-  override name = "GitHubRequestError";
-
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly retryAt: string | null,
-  ) {
-    super(message);
-  }
-}
+export type GitHubRequestPolicy = Omit<GitHubRequestExecutorConfig, "requestLimiter"> & {
+  maxBranches?: number;
+  maxCommitPagesPerBranch?: number;
+  requestExecutor?: GitHubRequestExecutor;
+};
 
 export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   private readonly cache = new Map<string, Promise<GitHubRepositorySnapshot>>();
+  private readonly maxBranches: number;
+  private readonly maxCommitPagesPerBranch: number;
+  private readonly requestExecutor: GitHubRequestExecutor;
 
   constructor(
     private readonly token: string,
     private readonly fetchImpl: GitHubFetch = fetch,
     private readonly apiBaseUrl = "https://api.github.com",
     private readonly lookbackHours = DEFAULT_LOOKBACK_HOURS,
-    private readonly requestLimiter?: AsyncSemaphore,
-  ) {}
+    requestLimiter?: AsyncSemaphore,
+    private readonly operationMetrics?: OperationMetricsRecorder,
+    policy: GitHubRequestPolicy = {},
+  ) {
+    this.maxBranches = positiveInteger(
+      policy.maxBranches ?? DEFAULT_MAX_BRANCHES,
+      "maxBranches",
+    );
+    this.maxCommitPagesPerBranch = positiveInteger(
+      policy.maxCommitPagesPerBranch ?? DEFAULT_MAX_COMMIT_PAGES_PER_BRANCH,
+      "maxCommitPagesPerBranch",
+    );
+    this.requestExecutor = policy.requestExecutor ?? new GitHubRequestExecutor({
+      ...(requestLimiter ? { requestLimiter } : {}),
+      ...requestExecutorConfig(policy),
+    });
+  }
 
   readRepository(
     repository: GitHubRepositoryIdentity,
@@ -57,54 +86,76 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   ): Promise<GitHubRepositorySnapshot> {
     const metadata = decodeRepository(
       await this.request(
+        PROJECT_PROGRESS_ENDPOINTS.githubRepositoryGet,
+        repository.fullName,
         `/repos/${encode(repository.owner)}/${encode(repository.repository)}`,
         {},
         [],
         signal,
       ),
     );
-    const branches = await this.listBranches(repository, signal);
-    const since = new Date(
-      observedAt.getTime() - this.lookbackHours * 60 * 60 * 1_000,
-    ).toISOString();
-    const commitsByKey = new Map<string, ProjectProgressCommit>();
 
-    for (const branch of branches) {
-      for (let page = 1; ; page += 1) {
-        const payload = await this.request(
-          `/repos/${encode(repository.owner)}/${encode(repository.repository)}/commits`,
-          { sha: branch, since, per_page: PAGE_SIZE, page },
-          [409],
-          signal,
-        );
-        if (payload === null) {
-          break;
-        }
-        const commits = decodeCommits(payload, metadata.id, metadata.fullName);
-        for (const commit of commits) {
-          commitsByKey.set(`${metadata.id}:${commit.sha}`, commit);
-        }
-        if (commits.length < PAGE_SIZE) {
-          break;
+    try {
+      const branches = await this.listBranches(repository, signal);
+      const since = new Date(
+        observedAt.getTime() - this.lookbackHours * 60 * 60 * 1_000,
+      ).toISOString();
+      const commitsByKey = new Map<string, ProjectProgressCommit>();
+
+      for (const branch of branches) {
+        for (let page = 1; ; page += 1) {
+          const payload = await this.request(
+            PROJECT_PROGRESS_ENDPOINTS.githubCommitsList,
+            repository.fullName,
+            `/repos/${encode(repository.owner)}/${encode(repository.repository)}/commits`,
+            { sha: branch, since, per_page: PAGE_SIZE, page },
+            [409],
+            signal,
+          );
+          if (payload === null) {
+            break;
+          }
+          const commits = decodeCommits(payload, metadata.id, metadata.fullName);
+          for (const commit of commits) {
+            commitsByKey.set(`${metadata.id}:${commit.sha}`, commit);
+          }
+          if (commits.length < PAGE_SIZE) {
+            break;
+          }
+          if (page >= this.maxCommitPagesPerBranch) {
+            throw new GitHubRequestBudgetExceededError("repository");
+          }
         }
       }
-    }
 
-    const commits = [...commitsByKey.values()].sort((left, right) =>
-      left.committedAt.localeCompare(right.committedAt) || left.sha.localeCompare(right.sha),
-    );
-    const latestCommitAt = commits.reduce<string | null>(
-      (latest, commit) => !latest || commit.committedAt > latest ? commit.committedAt : latest,
-      null,
-    );
-    return {
-      repositoryId: metadata.id,
-      fullName: metadata.fullName,
-      canonicalUrl: `https://github.com/${metadata.fullName}`,
-      complete: true,
-      lastActivityAt: latestCommitAt ?? (branches.length === 0 ? metadata.createdAt : null),
-      commits,
-    };
+      const commits = [...commitsByKey.values()].sort((left, right) =>
+        left.committedAt.localeCompare(right.committedAt) || left.sha.localeCompare(right.sha)
+      );
+      const latestCommitAt = commits.reduce<string | null>(
+        (latest, commit) => !latest || commit.committedAt > latest ? commit.committedAt : latest,
+        null,
+      );
+      return {
+        repositoryId: metadata.id,
+        fullName: metadata.fullName,
+        canonicalUrl: `https://github.com/${metadata.fullName}`,
+        complete: true,
+        lastActivityAt: latestCommitAt ?? (branches.length === 0 ? metadata.createdAt : null),
+        commits,
+      };
+    } catch (error) {
+      if (!(error instanceof GitHubRequestBudgetExceededError)) {
+        throw error;
+      }
+      return {
+        repositoryId: metadata.id,
+        fullName: metadata.fullName,
+        canonicalUrl: `https://github.com/${metadata.fullName}`,
+        complete: false,
+        lastActivityAt: null,
+        commits: [],
+      };
+    }
   }
 
   private async listBranches(
@@ -114,6 +165,8 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     const branches: string[] = [];
     for (let page = 1; ; page += 1) {
       const payload = await this.request(
+        PROJECT_PROGRESS_ENDPOINTS.githubBranchesList,
+        repository.fullName,
         `/repos/${encode(repository.owner)}/${encode(repository.repository)}/branches`,
         { per_page: PAGE_SIZE, page },
         [],
@@ -121,6 +174,9 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
       );
       const pageBranches = decodeBranches(payload);
       branches.push(...pageBranches);
+      if (branches.length > this.maxBranches) {
+        throw new GitHubRequestBudgetExceededError("repository");
+      }
       if (pageBranches.length < PAGE_SIZE) {
         return branches;
       }
@@ -128,49 +184,66 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   }
 
   private async request(
+    endpoint: string,
+    repository: string,
     path: string,
     query: Record<string, string | number> = {},
-    nullableStatuses: number[] = [],
+    acceptedStatuses: number[] = [],
     signal?: AbortSignal,
   ): Promise<unknown | null> {
     const url = new URL(path, ensureTrailingSlash(this.apiBaseUrl));
     for (const [name, value] of Object.entries(query)) {
       url.searchParams.set(name, String(value));
     }
-    const execute = () => this.fetchImpl(url, {
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${this.token}`,
-        "x-github-api-version": "2022-11-28",
-        "user-agent": "oa-project-progress-worker",
-      },
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
-        : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
-    });
-    const response = this.requestLimiter
-      ? await this.requestLimiter.run(execute, signal)
-      : await execute();
-    if (nullableStatuses.includes(response.status)) {
-      return null;
-    }
-    if (!response.ok) {
-      const reset = response.headers.get("x-ratelimit-reset");
-      const retryAt = reset && /^\d+$/.test(reset)
-        ? new Date(Number(reset) * 1_000).toISOString()
-        : null;
-      throw new GitHubRequestError(
-        `GitHub 请求失败:HTTP ${response.status}`,
-        response.status,
-        retryAt,
+    const request = async () => {
+      const response = await this.requestExecutor.execute(
+        () => this.fetchImpl(url, {
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${this.token}`,
+            "x-github-api-version": "2022-11-28",
+            "user-agent": "oa-project-progress-worker",
+          },
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
+            : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
+        }),
+        {
+          repository,
+          ...(acceptedStatuses.length > 0 ? { acceptedStatuses } : {}),
+          ...(signal ? { signal } : {}),
+        },
       );
-    }
-    try {
-      return await response.json();
-    } catch {
-      throw new GitHubRequestError("GitHub 响应不是合法 JSON。", response.status, null);
-    }
+      if (acceptedStatuses.includes(response.status)) {
+        return null;
+      }
+      try {
+        return await response.json();
+      } catch {
+        throw new GitHubRequestError("GitHub 响应不是合法 JSON。", response.status, null);
+      }
+    };
+    return this.operationMetrics
+      ? this.operationMetrics.measure(endpoint, request)
+      : request();
   }
+}
+
+function requestExecutorConfig(policy: GitHubRequestPolicy): GitHubRequestExecutorConfig {
+  return {
+    ...(policy.maxAttempts === undefined ? {} : { maxAttempts: policy.maxAttempts }),
+    ...(policy.baseBackoffMs === undefined ? {} : { baseBackoffMs: policy.baseBackoffMs }),
+    ...(policy.maxBackoffMs === undefined ? {} : { maxBackoffMs: policy.maxBackoffMs }),
+    ...(policy.maxRequestsPerRun === undefined
+      ? {}
+      : { maxRequestsPerRun: policy.maxRequestsPerRun }),
+    ...(policy.maxRequestsPerRepository === undefined
+      ? {}
+      : { maxRequestsPerRepository: policy.maxRequestsPerRepository }),
+    ...(policy.random === undefined ? {} : { random: policy.random }),
+    ...(policy.now === undefined ? {} : { now: policy.now }),
+    ...(policy.sleep === undefined ? {} : { sleep: policy.sleep }),
+  };
 }
 
 function decodeRepository(value: unknown): { id: number; fullName: string; createdAt: string } {
@@ -221,7 +294,10 @@ function decodeCommits(
 }
 
 function sanitizeSubject(message: string): string {
-  return (message.split(/\r?\n/, 1)[0] ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 500);
+  return (message.split(/\r?\n/, 1)[0] ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .trim()
+    .slice(0, 500);
 }
 
 function parseIsoDate(value: unknown, field: string): string {
@@ -229,6 +305,13 @@ function parseIsoDate(value: unknown, field: string): string {
     throw new Error(`GitHub ${field} 无效。`);
   }
   return new Date(value).toISOString();
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} 必须是正整数。`);
+  }
+  return value;
 }
 
 function encode(value: string): string {

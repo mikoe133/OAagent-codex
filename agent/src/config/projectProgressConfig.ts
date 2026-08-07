@@ -24,9 +24,16 @@ export type ProjectProgressConfig = {
     token: string;
     tokenHeader: string;
     tokenPrefix: string;
+    projectDetailCompatibilityMode: boolean;
   };
   githubToken: string;
   githubApiBaseUrl: string;
+  githubLimits: {
+    maxBranches: number;
+    maxCommitPagesPerBranch: number;
+    maxRequestsPerRepository: number;
+    maxRequestsPerRun: number;
+  };
   model: {
     provider: ModelProviderId;
     apiBaseUrl: string;
@@ -141,6 +148,23 @@ export function loadProjectProgressConfig(
   if (oaWriteConcurrency !== 1) {
     throw new Error("PROJECT_PROGRESS_OA_WRITE_CONCURRENCY 当前必须为 1。");
   }
+  const maxRequestsPerRepository = parseIntegerInRange(
+    environment.PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY,
+    2_000,
+    1,
+    100_000,
+    "PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY",
+  );
+  const maxRequestsPerRun = parseIntegerInRange(
+    environment.PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN,
+    20_000,
+    1,
+    1_000_000,
+    "PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN",
+  );
+  if (maxRequestsPerRepository > maxRequestsPerRun) {
+    throw new Error("每个仓库的 GitHub 请求上限不能超过整次运行的请求上限。");
+  }
 
   return {
     oa: {
@@ -151,9 +175,31 @@ export function loadProjectProgressConfig(
       tokenPrefix: environment.OA_PROJECT_SYNC_TOKEN_PREFIX === undefined
         ? "Bearer"
         : environment.OA_PROJECT_SYNC_TOKEN_PREFIX.trim(),
+      projectDetailCompatibilityMode: parseBoolean(
+        environment.PROJECT_PROGRESS_OA_PROJECT_DETAIL_COMPATIBILITY_MODE,
+        false,
+      ),
     },
     githubToken: requireValue(environment, "PROJECT_PROGRESS_GITHUB_TOKEN"),
     githubApiBaseUrl: environment.GITHUB_API_BASE_URL?.trim() || "https://api.github.com",
+    githubLimits: {
+      maxBranches: parseIntegerInRange(
+        environment.PROJECT_PROGRESS_GITHUB_MAX_BRANCHES,
+        500,
+        1,
+        10_000,
+        "PROJECT_PROGRESS_GITHUB_MAX_BRANCHES",
+      ),
+      maxCommitPagesPerBranch: parseIntegerInRange(
+        environment.PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH,
+        100,
+        1,
+        1_000,
+        "PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH",
+      ),
+      maxRequestsPerRepository,
+      maxRequestsPerRun,
+    },
     model: {
       provider: modelSelection.modelProvider,
       apiBaseUrl: normalizeModelBaseUrl(
