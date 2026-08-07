@@ -841,10 +841,11 @@ Content-Type: application/json
 - [ ] OA CI 已提供后端 commit SHA、migration/事务锁测试和证据 URL
 - [ ] 日志/SQLite 中没有服务 token、raw lease/scoped token、GitHub token、Cookie 或模型 API Key
 
-### 10.1 OA fencing 部署门禁 fixture
+### 10.1 OA fencing 手动验收 fixture（暂未启用）
 
-`.github/workflows/ci-cd.yml` 的 `oa-fencing-contract` job 会在测试环境执行
-`agent/test/oaFencingIntegration.test.ts`。OA 测试环境需提供一个仅 CI 可访问的 fixture
+当前单 Worker 部署暂不在 `.github/workflows/ci-cd.yml` 中执行 fencing 门禁，
+`agent/test/oaFencingIntegration.test.ts` 仅保留为 OA 后端能力就绪后的手动验收测试。
+恢复多 Worker、自动接管或租约重分配前，OA 测试环境需提供一个仅 CI 可访问的 fixture
 控制端点，生产环境不得启用：
 
 ```http
@@ -869,8 +870,9 @@ Content-Type: application/json
 `{"scenario":"expire_current_lease","run_id":"..."}` 只允许测试身份使当前 run 不再可写，
 并保证下一次 claim 取得另一个 `job_key` 的待运行任务，同时返回同一 fixture ID。黑盒测试随后用标准 claim 和 project-sync API 验证：claim
 重放/冲突、跨 job key single-flight、旧 fence 拒绝、version CAS、相同幂等键重放以及
-同 key 不同 payload 冲突。门禁还要求 `OA_BACKEND_COMMIT_SHA` 和
-`OA_BACKEND_CI_EVIDENCE_URL`，缺少任一项不得部署。
+同 key 不同 payload 冲突。重新启用部署门禁时还必须提供
+`OA_BACKEND_COMMIT_SHA` 和 `OA_BACKEND_CI_EVIDENCE_URL`；当前缺少这些服务端
+能力和证据，因此不得把 Step 0 标记完成或扩大 Worker 副本数。
 
 ## 11. OpenAPI 与服务状态
 

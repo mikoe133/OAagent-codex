@@ -448,7 +448,7 @@ Git 和 GitHub CLI 当前可用，默认分支为 `origin/main`。每步使用�
 
 上下文：项目同步 mutation 当前只携带服务 token，本地取消无法撤回已经到达 OA 的旧 Worker 请求。该步骤是扩大并发、自动接管和可靠重试的前置条件。
 
-实施进展（2026-08-07）：Worker 已实现持久化 claim identity、兼容 claim 解码、scoped mutation 字段、稳定幂等键、`expected_version`、明确 lease/fence 失效后的立即停止，以及 CI 黑盒门禁。OA 服务端的 HMAC、事务 fencing、CAS、single-flight 和测试环境证据仍是外部依赖；门禁通过前 Step 0 不得标记完成，也不得扩大 Worker 副本数。
+实施进展（2026-08-07）：Worker 已实现持久化 claim identity、兼容 claim 解码、scoped mutation 字段、稳定幂等键、`expected_version`，并保留手动黑盒测试。当前按单 Worker 部署策略暂时移除 CI/CD fencing 门禁；OA 服务端的 HMAC、事务 fencing、CAS、single-flight 和测试环境证据仍是外部依赖。Step 0 仍不得标记完成，也不得扩大 Worker 副本数或启用自动接管。
 
 任务：
 
@@ -471,7 +471,7 @@ npm exec -w agent -- tsx --test test/projectProgressOaClient.test.ts
 OA_FENCING_TEST_BASE_URL="$OA_FENCING_TEST_BASE_URL" npm exec -w agent -- tsx --test test/oaFencingIntegration.test.ts
 ```
 
-在本仓库 `.github/workflows/ci-cd.yml` 增加部署门禁 job `oa-fencing-contract`，对 OA 测试环境执行上述黑盒测试，并记录 `oa_backend_commit_sha` 与 OA 后端 CI 证据 URL；缺少任一证据不得完成 Step 0。OA 后端仓库仍需运行自身 migration、事务并发和数据库锁测试，不能只用 Agent mock 代替。
+OA 后端能力完成后，再在 `.github/workflows/ci-cd.yml` 恢复部署门禁 job，对 OA 测试环境执行上述黑盒测试，并记录 `oa_backend_commit_sha` 与 OA 后端 CI 证据 URL。当前单 Worker 阶段仅保留手动测试，不阻断部署；缺少任一服务端证据仍不得完成 Step 0。OA 后端仓库仍需运行自身 migration、事务并发和数据库锁测试，不能只用 Agent mock 代替。
 
 必须增加 OA 集成测试：旧 token/fence 写入返回 409；version 不匹配返回 409/412；相同 idempotency key + payload hash 不重复生效；相同 key 不同 payload 返回 409；claim 响应丢失后同 request ID 返回同一 token；同 ID 不同请求返回 409；两个 Worker 使用不同 `job_key` 但相同 `concurrency_key` 时只有一个能获得活跃 run；cron/manual/retry 组合也遵守同一 writer scope。
 
