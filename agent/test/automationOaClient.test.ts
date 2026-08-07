@@ -20,10 +20,17 @@ describe("AutomationOaClient", () => {
       return Response.json({ data: claimPayload() });
     });
 
-    const claim = await client.claim("worker-01", 300);
+    const claim = await client.claim({
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      claimRequestId: "019fd15d-32c6-7fb2-9afb-68be0996b80f",
+    });
 
     assert.equal(claim?.runId, "run-01");
     assert.equal(claim?.modelProvider, "nexttoken");
+    assert.equal(claim?.runMutationToken, "run-mutation-secret");
+    assert.equal(claim?.fencingToken, 7);
+    assert.equal(claim?.concurrencyKey, "tenant-1:github_project_progress_sync:all_projects");
     assert.deepEqual(
       (claim as AutomationJobClaim & { promptProfile?: unknown } | null)?.promptProfile,
       {
@@ -37,6 +44,7 @@ describe("AutomationOaClient", () => {
       worker_instance: "worker-01",
       supported_job_types: ["github_project_progress_sync"],
       lease_seconds: 300,
+      claim_request_id: "019fd15d-32c6-7fb2-9afb-68be0996b80f",
     });
   });
 
@@ -169,6 +177,10 @@ describe("AutomationOaClient", () => {
     assert.deepEqual(traceBody, {
       worker_instance: "worker-01",
       lease_token: "lease-secret",
+      run_id: "run-01",
+      run_mutation_token: "run-mutation-secret",
+      fencing_token: 7,
+      idempotency_key: traceBody.idempotency_key,
       event_key: "read_github",
       sequence: 300,
       phase: "read_github",
@@ -182,6 +194,7 @@ describe("AutomationOaClient", () => {
       metadata_sanitized: { github_concurrency: 6 },
       occurred_at: "2026-07-30T12:00:30.000Z",
     });
+    assert.match(String(traceBody.idempotency_key), /^sha256:[a-f0-9]{64}$/);
   });
 
   it("classifies an expired lease as a terminal lease loss", async () => {
@@ -219,6 +232,9 @@ function claimPayload(): Record<string, unknown> {
   return {
     run_id: "run-01",
     lease_token: "lease-secret",
+    run_mutation_token: "run-mutation-secret",
+    fencing_token: 7,
+    concurrency_key: "tenant-1:github_project_progress_sync:all_projects",
     job_id: 1,
     job_key: "github-project-progress-sync",
     job_type: "github_project_progress_sync",
@@ -254,6 +270,9 @@ function decodeClaimForTest() {
   return {
     runId: "run-01",
     leaseToken: "lease-secret",
+    runMutationToken: "run-mutation-secret",
+    fencingToken: 7,
+    concurrencyKey: "tenant-1:github_project_progress_sync:all_projects",
     jobId: 1,
     jobKey: "github-project-progress-sync",
     jobType: "github_project_progress_sync",

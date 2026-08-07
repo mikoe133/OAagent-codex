@@ -77,6 +77,59 @@ describe("ProjectProgressOaClient", () => {
     assert.deepEqual(await request?.json(), { status: "maintenance" });
   });
 
+  it("fences project and summary mutations with stable idempotency and versions", async () => {
+    const requests: Request[] = [];
+    const client = createFencedClient(async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      const pathname = new URL(request.url).pathname;
+      if (pathname.endsWith("/status")) {
+        return Response.json({ data: { id: 7, version: 4 } });
+      }
+      return Response.json({ data: {
+        id: 101,
+        project_id: 7,
+        summary_date: "2026-07-24",
+        summary: "更新后的总结。",
+        ai_confidence: 91,
+        ai_note: "已更新。",
+        version: 3,
+      } });
+    });
+
+    await client.updateProjectStatus(7, "maintenance", 3);
+    await client.updateCommitSummary(101, {
+      summary: "更新后的总结。",
+      aiConfidence: 91,
+      aiNote: "已更新。",
+      expectedVersion: 2,
+    });
+
+    const statusBody = await requests[0]!.json() as Record<string, unknown>;
+    const summaryBody = await requests[1]!.json() as Record<string, unknown>;
+    assert.deepEqual(statusBody, {
+      status: "maintenance",
+      expected_version: 3,
+      run_id: "run-01",
+      run_mutation_token: "run-mutation-secret",
+      fencing_token: 7,
+      idempotency_key: statusBody.idempotency_key,
+    });
+    assert.deepEqual(summaryBody, {
+      summary: "更新后的总结。",
+      ai_confidence: 91,
+      ai_note: "已更新。",
+      expected_version: 2,
+      run_id: "run-01",
+      run_mutation_token: "run-mutation-secret",
+      fencing_token: 7,
+      idempotency_key: summaryBody.idempotency_key,
+    });
+    assert.match(String(statusBody.idempotency_key), /^sha256:[a-f0-9]{64}$/);
+    assert.match(String(summaryBody.idempotency_key), /^sha256:[a-f0-9]{64}$/);
+    assert.notEqual(statusBody.idempotency_key, summaryBody.idempotency_key);
+  });
+
   it("queries and creates a project-level daily summary", async () => {
     const requests: Request[] = [];
     const client = createClient(async (input, init) => {
@@ -231,6 +284,24 @@ function createClient(fetchImpl: typeof fetch): ProjectProgressOaClient {
       token: "secret",
       tokenHeader: "Authorization",
       tokenPrefix: "Bearer",
+    },
+    fetchImpl,
+  );
+}
+
+function createFencedClient(fetchImpl: typeof fetch): ProjectProgressOaClient {
+  return new ProjectProgressOaClient(
+    {
+      baseUrl: "https://oa.example.test",
+      alias: "default",
+      token: "secret",
+      tokenHeader: "Authorization",
+      tokenPrefix: "Bearer",
+      mutationContext: {
+        runId: "run-01",
+        runMutationToken: "run-mutation-secret",
+        fencingToken: 7,
+      },
     },
     fetchImpl,
   );

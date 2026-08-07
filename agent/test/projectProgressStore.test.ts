@@ -16,6 +16,36 @@ afterEach(async () => {
 });
 
 describe("ProjectProgressStore", () => {
+  it("persists and reuses a claim request identity across restarts", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "project-progress-store-"));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, "state.sqlite");
+    const input = {
+      workerInstance: "worker-01",
+      supportedJobTypes: ["github_project_progress_sync"],
+      leaseSeconds: 300,
+    };
+    const first = new ProjectProgressStore(databasePath);
+    const identity = first.getOrCreateAutomationClaimIdentity(input);
+    first.close();
+
+    const restarted = new ProjectProgressStore(databasePath);
+    assert.deepEqual(restarted.getOrCreateAutomationClaimIdentity(input), identity);
+    assert.match(identity.claimRequestId, /^[0-9a-f-]{36}$/);
+    assert.match(identity.requestDigest, /^[a-f0-9]{64}$/);
+    assert.throws(
+      () => restarted.getOrCreateAutomationClaimIdentity({
+        ...input,
+        leaseSeconds: 301,
+      }),
+      /claim identity.*请求摘要不匹配/i,
+    );
+    restarted.clearAutomationClaimIdentity(identity.claimRequestId);
+    const replacement = restarted.getOrCreateAutomationClaimIdentity(input);
+    assert.notEqual(replacement.claimRequestId, identity.claimRequestId);
+    restarted.close();
+  });
+
   it("keeps separate consumption watermarks for projects sharing a repository", async () => {
     const store = await createStore();
     store.saveProjectRepositoryWatermark(11, 9001, "2026-07-24T10:00:00.000Z");
