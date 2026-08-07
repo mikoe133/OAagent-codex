@@ -25,6 +25,7 @@ import {
 import type { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 import type { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
 import { resolveCodexModelCatalogPath } from "../infrastructure/codex/modelMetadataCatalog.js";
+import { startProjectProgressModelRelay } from "../infrastructure/codex/modelRelay.js";
 import {
   DeterministicProjectProgressSummarizer,
   type ProjectProgressAiInteraction,
@@ -306,84 +307,90 @@ function isRetryableAgentTransportError(error: unknown): boolean {
 export async function runProjectProgressAgent(
   input: ProjectProgressAgentRunInput,
 ): Promise<ProjectProgressAgentRunResult> {
-  const modelCatalogPath = resolveCodexModelCatalogPath(input.model.model);
-  const codex = new Codex({
-    codexPathOverride: input.codexExecutablePath,
-    env: buildAgentChildEnvironment(input),
-    config: {
-      ...(modelCatalogPath ? { model_catalog_json: modelCatalogPath } : {}),
-      model_provider: input.model.provider,
-      model_providers: {
-        [input.model.provider]: {
-          name: input.model.provider,
-          base_url: input.model.apiBaseUrl,
-          env_key: MODEL_API_KEY_ENV,
-          wire_api: "responses",
+  const modelRelay = await startProjectProgressModelRelay(input.model);
+  const model = modelRelay.model;
+  try {
+    const modelCatalogPath = resolveCodexModelCatalogPath(model.model);
+    const codex = new Codex({
+      codexPathOverride: input.codexExecutablePath,
+      env: buildAgentChildEnvironment(input),
+      config: {
+        ...(modelCatalogPath ? { model_catalog_json: modelCatalogPath } : {}),
+        model_provider: model.provider,
+        model_providers: {
+          [model.provider]: {
+            name: model.provider,
+            base_url: model.apiBaseUrl,
+            env_key: MODEL_API_KEY_ENV,
+            wire_api: "responses",
+          },
         },
-      },
-      developer_instructions: input.developerInstructions,
-      mcp_servers: {
-        [MCP_SERVER_NAME]: {
-          url: input.mcpUrl,
-          bearer_token_env_var: MCP_BEARER_TOKEN_ENV,
-          enabled_tools: [MCP_TOOL_NAME],
-          required: true,
-          startup_timeout_sec: 10,
-          tool_timeout_sec: 30,
+        developer_instructions: input.developerInstructions,
+        mcp_servers: {
+          [MCP_SERVER_NAME]: {
+            url: input.mcpUrl,
+            bearer_token_env_var: MCP_BEARER_TOKEN_ENV,
+            enabled_tools: [MCP_TOOL_NAME],
+            required: true,
+            startup_timeout_sec: 10,
+            tool_timeout_sec: 30,
+          },
         },
+        tools: { web_search: false },
+        include_permissions_instructions: false,
+        include_apps_instructions: false,
+        include_collaboration_mode_instructions: false,
+        include_environment_context: false,
+        features: {
+          shell_tool: false,
+          unified_exec: false,
+          apps: false,
+          in_app_browser: false,
+          browser_use: false,
+          computer_use: false,
+          image_generation: false,
+          multi_agent: false,
+          enable_fanout: false,
+          tool_suggest: false,
+          goals: false,
+          memories: false,
+          workspace_dependencies: false,
+        },
+        project_doc_max_bytes: 0,
+        project_doc_fallback_filenames: [],
+        model_context_window: 65_536,
+        model_auto_compact_token_limit: 50_000,
+        tool_output_token_limit: 6_000,
       },
-      tools: { web_search: false },
-      include_permissions_instructions: false,
-      include_apps_instructions: false,
-      include_collaboration_mode_instructions: false,
-      include_environment_context: false,
-      features: {
-        shell_tool: false,
-        unified_exec: false,
-        apps: false,
-        in_app_browser: false,
-        browser_use: false,
-        computer_use: false,
-        image_generation: false,
-        multi_agent: false,
-        enable_fanout: false,
-        tool_suggest: false,
-        goals: false,
-        memories: false,
-        workspace_dependencies: false,
-      },
-      project_doc_max_bytes: 0,
-      project_doc_fallback_filenames: [],
-      model_context_window: 65_536,
-      model_auto_compact_token_limit: 50_000,
-      tool_output_token_limit: 6_000,
-    },
-  });
-  const thread = codex.startThread({
-    model: input.model.model,
-    modelReasoningEffort: resolveReasoningEffort(input.model.parameters.reasoning_effort),
-    sandboxMode: "read-only",
-    approvalPolicy: "never",
-    workingDirectory: input.workingDirectory,
-    skipGitRepoCheck: true,
-    networkAccessEnabled: false,
-    webSearchMode: "disabled",
-  });
-  const turn = await thread.run(input.prompt, {
-    outputSchema: projectProgressOutputSchema(),
-    signal: input.signal
-      ? AbortSignal.any([input.signal, AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS)])
-      : AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
-  });
-  if (!turn.finalResponse.trim()) {
-    throw new Error("Agent 未返回项目进度总结。");
+    });
+    const thread = codex.startThread({
+      model: model.model,
+      modelReasoningEffort: resolveReasoningEffort(model.parameters.reasoning_effort),
+      sandboxMode: "read-only",
+      approvalPolicy: "never",
+      workingDirectory: input.workingDirectory,
+      skipGitRepoCheck: true,
+      networkAccessEnabled: false,
+      webSearchMode: "disabled",
+    });
+    const turn = await thread.run(input.prompt, {
+      outputSchema: projectProgressOutputSchema(),
+      signal: input.signal
+        ? AbortSignal.any([input.signal, AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS)])
+        : AbortSignal.timeout(AGENT_REQUEST_TIMEOUT_MS),
+    });
+    if (!turn.finalResponse.trim()) {
+      throw new Error("Agent 未返回项目进度总结。");
+    }
+    return {
+      finalResponse: turn.finalResponse,
+      usage: turn.usage,
+      upstreamRequestId: thread.id,
+      prohibitedToolUseCount: countProhibitedToolUse(turn.items),
+    };
+  } finally {
+    await modelRelay.close();
   }
-  return {
-    finalResponse: turn.finalResponse,
-    usage: turn.usage,
-    upstreamRequestId: thread.id,
-    prohibitedToolUseCount: countProhibitedToolUse(turn.items),
-  };
 }
 
 async function createThreadWorkspace(input: {
