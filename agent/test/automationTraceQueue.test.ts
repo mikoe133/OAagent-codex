@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import {
   AutomationTraceDrainTimeoutError,
@@ -122,6 +123,51 @@ describe("BoundedAutomationTraceQueue", () => {
     const cancelled = queue.drain({ timeoutMs: 1_000, signal: controller.signal });
     controller.abort(new Error("finalization cancelled"));
     await assert.rejects(cancelled, /finalization cancelled/);
+  });
+
+  it("keeps the process alive until an awaited drain timeout settles", () => {
+    const moduleUrl = new URL(
+      "../src/infrastructure/oa/automationTraceQueue.ts",
+      import.meta.url,
+    ).href;
+    const script = `
+      import {
+        AutomationTraceDrainTimeoutError,
+        BoundedAutomationTraceQueue,
+      } from ${JSON.stringify(moduleUrl)};
+      const queue = new BoundedAutomationTraceQueue({
+        runId: "liveness",
+        deliver: async () => await new Promise(() => undefined),
+      });
+      queue.tryEnqueue({
+        eventKey: "blocked",
+        sequence: 1,
+        phase: "blocked",
+        status: "running",
+        title: "blocked",
+        message: null,
+        progressCurrent: null,
+        progressTotal: null,
+        projectId: null,
+        repositoryFullName: null,
+        metadataSanitized: {},
+        occurredAt: "2026-08-07T00:00:00.000Z",
+      });
+      try {
+        await queue.drain({ timeoutMs: 20 });
+        process.exitCode = 2;
+      } catch (error) {
+        if (!(error instanceof AutomationTraceDrainTimeoutError)) throw error;
+      }
+    `;
+
+    const child = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(child.status, 0, child.stderr || child.stdout);
   });
 
   it("does not touch the spool after an ignored delivery abort settles late", async () => {
