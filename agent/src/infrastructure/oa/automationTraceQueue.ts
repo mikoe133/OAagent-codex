@@ -235,6 +235,7 @@ export class BoundedAutomationTraceQueue {
         }
 
         const delivered = await this.input.deliver(event, this.input.signal);
+        this.input.signal?.throwIfAborted();
         if (delivered) {
           this.input.spool?.deleteAutomationTraceSpool(
             this.input.runId,

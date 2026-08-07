@@ -11,6 +11,11 @@ import {
   SUPPORTED_JOB_TYPE,
 } from "../infrastructure/oa/automationOaClient.js";
 import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
+import {
+  AutomationTraceDrainTimeoutError,
+  BoundedAutomationTraceQueue,
+  type AutomationTraceSpool,
+} from "../infrastructure/oa/automationTraceQueue.js";
 import type {
   ProjectProgressProjectReport,
   ProjectProgressSyncReport,
@@ -53,6 +58,7 @@ export async function runProjectProgressAutomation(input: {
   leaseSeconds: number;
   heartbeatSeconds: number;
   claimIdentityStore?: AutomationClaimIdentityStore;
+  traceSpool?: AutomationTraceSpool;
   resolveExecution: (
     claim: AutomationJobClaim,
   ) => Promise<(
@@ -83,6 +89,7 @@ export async function runProjectProgressAutomation(input: {
     automationClient: input.automationClient,
     claim,
     workerInstance: input.workerInstance,
+    ...(input.traceSpool ? { spool: input.traceSpool } : {}),
   });
   await traceReporter.publish({
     eventKey: "worker_claimed",
@@ -110,6 +117,7 @@ export async function runProjectProgressAutomation(input: {
       title: "校验任务配置",
       message: summary,
     });
+    await traceReporter.drain();
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -282,6 +290,7 @@ export async function runProjectProgressAutomation(input: {
         retry_recommended: terminal.retryRecommended,
       },
     });
+    await traceReporter.drain();
     terminalUpdateStarted = true;
     await input.automationClient.updateRun({
       claim,
@@ -306,6 +315,7 @@ export async function runProjectProgressAutomation(input: {
       error instanceof ProjectProgressLeaseLostError ||
       heartbeat.leaseLost
     ) {
+      traceReporter.abort(error);
       throw error;
     }
     if (terminalUpdateStarted) {
@@ -323,6 +333,7 @@ export async function runProjectProgressAutomation(input: {
         : safeErrorSummary(error),
       metadataSanitized: { retry_recommended: retryRecommended },
     });
+    await traceReporter.drain();
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -356,21 +367,24 @@ function clearClaimIdentity(
 class AutomationTraceReporter {
   private disabled = false;
   private consecutiveFailures = 0;
-  private leaseLostError: AutomationLeaseLostError | null = null;
+  private readonly deliveryController = new AbortController();
+  private readonly queue: BoundedAutomationTraceQueue;
 
   constructor(private readonly input: {
     automationClient: AutomationOaClient;
     claim: AutomationJobClaim;
     workerInstance: string;
-  }) {}
+    spool?: AutomationTraceSpool;
+  }) {
+    this.queue = new BoundedAutomationTraceQueue({
+      runId: input.claim.runId,
+      deliver: (event, signal) => this.deliver(event, signal),
+      signal: this.deliveryController.signal,
+      ...(input.spool ? { spool: input.spool } : {}),
+    });
+  }
 
   async publish(event: ProjectProgressTraceEvent): Promise<void> {
-    if (this.leaseLostError) {
-      throw this.leaseLostError;
-    }
-    if (this.disabled) {
-      return;
-    }
     const payload: AutomationTraceEventInput = {
       eventKey: event.eventKey.slice(0, 200),
       sequence: event.sequence,
@@ -385,16 +399,51 @@ class AutomationTraceReporter {
       metadataSanitized: event.metadataSanitized ?? {},
       occurredAt: new Date().toISOString(),
     };
+    this.queue.tryEnqueue(payload);
+  }
+
+  async drain(): Promise<void> {
+    try {
+      await this.queue.drain({ timeoutMs: 3_000 });
+    } catch (error) {
+      if (!(error instanceof AutomationTraceDrainTimeoutError)) {
+        throw error;
+      }
+      this.abort(error);
+      try {
+        await this.queue.drain({ timeoutMs: 100 });
+      } catch (settleError) {
+        if (!(settleError instanceof AutomationTraceDrainTimeoutError)) {
+          throw settleError;
+        }
+      }
+    }
+  }
+
+  abort(reason: unknown): void {
+    if (!this.deliveryController.signal.aborted) {
+      this.deliveryController.abort(reason);
+    }
+  }
+
+  private async deliver(
+    event: AutomationTraceEventInput,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (this.disabled) {
+      return false;
+    }
     try {
       await this.input.automationClient.upsertTraceEvent({
         claim: this.input.claim,
         workerInstance: this.input.workerInstance,
-        event: payload,
+        event,
+        ...(signal ? { signal } : {}),
       });
       this.consecutiveFailures = 0;
+      return true;
     } catch (error) {
       if (error instanceof AutomationLeaseLostError) {
-        this.leaseLostError = error;
         throw error;
       }
       this.consecutiveFailures += 1;
@@ -407,6 +456,7 @@ class AutomationTraceReporter {
       } else if (this.consecutiveFailures >= 3) {
         this.disabled = true;
       }
+      return false;
     }
   }
 }

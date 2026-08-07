@@ -59,6 +59,7 @@ async function main(): Promise<void> {
         leaseSeconds: baseConfig.automation.leaseSeconds,
         heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
         claimIdentityStore: store,
+        traceSpool: store,
         resolveExecution: async (claim) => {
           const config = loadProjectProgressConfig(process.env, repoRoot, {
             modelProvider: claim.modelProvider,
