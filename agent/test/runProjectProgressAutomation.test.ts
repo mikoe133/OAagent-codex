@@ -290,6 +290,47 @@ describe("runProjectProgressAutomation", () => {
     assert.equal(traceEvents.at(-1)?.status, "succeeded");
   });
 
+  it("does not block business execution on an in-flight trace request", async () => {
+    let releaseBurst!: () => void;
+    const burstGate = new Promise<void>((resolve) => {
+      releaseBurst = resolve;
+    });
+    let publishReturnedImmediately = false;
+    const client = fakeClient({
+      upsertTraceEvent: async ({ event }) => {
+        if (event.eventKey === "burst") {
+          await burstGate;
+        }
+      },
+    });
+
+    const resultPromise = runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async (_shouldCancel, trace) => {
+        const publication = trace?.({
+          eventKey: "burst",
+          sequence: 300,
+          phase: "read_github",
+          status: "running",
+          title: "读取 GitHub",
+        }) ?? Promise.resolve();
+        publishReturnedImmediately = await Promise.race([
+          publication.then(() => true),
+          delay(10).then(() => false),
+        ]);
+        releaseBurst();
+        return report();
+      },
+    });
+
+    const result = await resultPromise;
+    assert.equal(result.status, "succeeded");
+    assert.equal(publishReturnedImmediately, true);
+  });
+
   it("keeps the business run working when OA has not enabled trace events", async () => {
     let traceCalls = 0;
     const client = fakeClient({
