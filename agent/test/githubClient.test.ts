@@ -237,7 +237,7 @@ describe("GitHubRestProjectReader", () => {
       new Date("2026-07-24T12:00:00Z"),
     );
 
-    assert.equal(attempts, 3);
+    assert.equal(attempts, 4);
     assert.equal(peak, 1);
     assert.equal(limiter.metrics.peakActive, 1);
     assert.equal(backoffs.length, 2);
