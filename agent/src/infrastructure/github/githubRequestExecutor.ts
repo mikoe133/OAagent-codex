@@ -330,7 +330,7 @@ function resolveConfig(config: GitHubRequestExecutorConfig): ResolvedConfig {
     random: config.random ?? Math.random,
     now: config.now ?? Date.now,
     sleep: config.sleep ?? (async (milliseconds, signal) => {
-      await delay(milliseconds, undefined, { ...(signal ? { signal } : {}), ref: false });
+      await delay(milliseconds, undefined, { ...(signal ? { signal } : {}) });
     }),
   };
 }
