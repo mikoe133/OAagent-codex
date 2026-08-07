@@ -21,6 +21,7 @@ describe("loadProjectProgressConfig", () => {
     assert.equal(config.oa.tokenHeader, "X-Worker-Token");
     assert.equal(config.oa.tokenPrefix, "Token");
     assert.equal(config.oa.token, "worker-token");
+    assert.equal(config.oa.projectDetailCompatibilityMode, false);
     assert.equal(config.stateDatabasePath, "/srv/oa-agent/.context/project-progress.sqlite");
     assert.equal(config.writeEnabled, false);
     assert.equal(config.writeAuthorization, "disabled");
@@ -206,6 +207,7 @@ describe("loadProjectProgressConfig", () => {
       PROJECT_PROGRESS_GITHUB_CONCURRENCY: "8",
       PROJECT_PROGRESS_AGENT_CONCURRENCY: "3",
       PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "1",
+      PROJECT_PROGRESS_OA_PROJECT_DETAIL_COMPATIBILITY_MODE: "true",
       PROJECT_PROGRESS_WORKSPACE_ROOT: "/var/lib/oaagent/workspaces",
     }, "/srv/oa-agent");
 
@@ -215,5 +217,6 @@ describe("loadProjectProgressConfig", () => {
       oaWrite: 1,
     });
     assert.equal(config.workspaceRoot, "/var/lib/oaagent/workspaces");
+    assert.equal(config.oa.projectDetailCompatibilityMode, true);
   });
 });

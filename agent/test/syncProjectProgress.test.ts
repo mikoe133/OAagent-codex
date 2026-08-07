@@ -291,6 +291,72 @@ describe("syncProjectProgress", () => {
     assert.equal(result.projects[0]?.outcome, "archived");
   });
 
+  it("uses complete project list rows without discovery detail reads", async () => {
+    let detailReads = 0;
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      oaClient: {
+        listProjects: async () => [{
+          id: 70,
+          projectName: "list-is-complete",
+          status: "maintenance",
+          githubUrls: [],
+          version: 3,
+        }],
+        getProject: async () => {
+          detailReads += 1;
+          throw new Error("default discovery must not read project details");
+        },
+      },
+      githubReader: {
+        readRepository: async () => {
+          throw new Error("must not read GitHub without repositories");
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+    });
+
+    assert.equal(detailReads, 0);
+    assert.equal(result.projects[0]?.outcome, "no_github_urls");
+  });
+
+  it("bounds compatibility project detail reads at four", async () => {
+    const projects = Array.from({ length: 12 }, (_, index) => ({
+      id: index + 1,
+      projectName: `legacy-${index + 1}`,
+      status: "maintenance" as const,
+      githubUrls: [],
+    }));
+    let active = 0;
+    let peak = 0;
+    let reads = 0;
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      projectDetailCompatibilityMode: true,
+      oaClient: {
+        listProjects: async () => projects,
+        getProject: async (projectId) => {
+          reads += 1;
+          active += 1;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          active -= 1;
+          return projects[projectId - 1]!;
+        },
+      },
+      githubReader: {
+        readRepository: async () => {
+          throw new Error("must not read GitHub without repositories");
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "unused", limitations: [] }) },
+    });
+
+    assert.equal(reads, 12);
+    assert.equal(peak, 4);
+    assert.equal(result.projects.length, 12);
+  });
+
   it("skips repository Threads without current-day commits but still applies maintenance", async () => {
     const statusUpdates: string[] = [];
     let summariesStarted = 0;
@@ -632,7 +698,7 @@ describe("syncProjectProgress", () => {
         listProjects: async () => [project],
         getProject: async () => {
           detailReads += 1;
-          return detailReads === 1 ? project : { ...project, status: "archived" as const };
+          return { ...project, status: "archived" as const };
         },
         updateProjectStatus: async () => {
           mutations += 1;
@@ -661,6 +727,7 @@ describe("syncProjectProgress", () => {
     });
 
     assert.equal(mutations, 0);
+    assert.equal(detailReads, 1);
     assert.match(result.projects[0]?.warnings.join(" ") ?? "", /archived/);
   });
 
@@ -773,6 +840,7 @@ describe("syncProjectProgress", () => {
     };
     const result = await syncProjectProgress({
       observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      projectDetailCompatibilityMode: true,
       oaClient: {
         listProjects: async () => [noRepositories, detailFailure],
         getProject: async (projectId) => {
