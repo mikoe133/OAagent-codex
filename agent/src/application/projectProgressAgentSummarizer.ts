@@ -7,6 +7,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { ProjectProgressConfig } from "../config/projectProgressConfig.js";
 import type { NormalizedProjectProgressCommit } from "../domain/projectProgress.js";
 import {
@@ -25,6 +26,8 @@ import {
 } from "./projectProgressSummarizer.js";
 
 const AGENT_REQUEST_TIMEOUT_MS = 180_000;
+const AGENT_TRANSIENT_MAX_ATTEMPTS = 2;
+const AGENT_TRANSIENT_RETRY_DELAY_MS = 1_000;
 const MODEL_API_KEY_ENV = "PROJECT_PROGRESS_AGENT_MODEL_API_KEY";
 const MCP_BEARER_TOKEN_ENV = "PROJECT_PROGRESS_AGENT_MCP_TOKEN";
 const MCP_SERVER_NAME = "github_project_progress";
@@ -103,6 +106,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
     });
     let mcpServer: ProjectProgressGitHubMcpServer | null = null;
     let agentRun: ProjectProgressAgentRunResult | null = null;
+    let agentAttempts = 0;
     try {
       mcpServer = await startProjectProgressGitHubMcpServer({
         githubToken: this.config.githubToken,
@@ -113,7 +117,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         operationMetrics: this.config.operationMetrics,
         ...(input.signal ? { signal: input.signal } : {}),
       });
-      agentRun = await this.runner({
+      const runInput: ProjectProgressAgentRunInput = {
         model: this.config.model,
         codexExecutablePath: path.join(
           this.config.workingDirectory,
@@ -133,7 +137,14 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           this.config.agent,
         ),
         ...(input.signal ? { signal: input.signal } : {}),
-      });
+      };
+      agentRun = await runAgentWithTransientRetry(
+        async () => {
+          agentAttempts += 1;
+          return this.runner(runInput);
+        },
+        input.signal,
+      );
       if (agentRun.prohibitedToolUseCount > 0) {
         throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
       }
@@ -157,6 +168,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           output: resolvedOutput,
           metrics,
           run: agentRun,
+          agentAttempts,
           latencyMs: Date.now() - startedAt,
           fallbackUsed: false,
         }),
@@ -179,6 +191,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           output,
           metrics,
           run: agentRun,
+          agentAttempts,
           latencyMs: Date.now() - startedAt,
           fallbackUsed: true,
           error,
@@ -189,6 +202,45 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       await removeThreadWorkspace(workspace);
     }
   }
+}
+
+async function runAgentWithTransientRetry(
+  run: () => Promise<ProjectProgressAgentRunResult>,
+  signal?: AbortSignal,
+): Promise<ProjectProgressAgentRunResult> {
+  for (let attempt = 1; attempt <= AGENT_TRANSIENT_MAX_ATTEMPTS; attempt += 1) {
+    signal?.throwIfAborted();
+    try {
+      return await run();
+    } catch (error) {
+      if (
+        attempt >= AGENT_TRANSIENT_MAX_ATTEMPTS ||
+        !isRetryableAgentTransportError(error)
+      ) {
+        throw error;
+      }
+      await delay(AGENT_TRANSIENT_RETRY_DELAY_MS, undefined, {
+        ...(signal ? { signal } : {}),
+        ref: false,
+      });
+    }
+  }
+  throw new Error("Agent 重试状态无效。");
+}
+
+function isRetryableAgentTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return [
+    /stream disconnected before completion/iu,
+    /error sending request/iu,
+    /connection (?:closed|reset)/iu,
+    /\bECONNRESET\b/iu,
+    /\bEPIPE\b/iu,
+    /fetch failed/iu,
+    /HTTP (?:408|425|429|500|502|503|504)\b/iu,
+  ].some((pattern) => pattern.test(error.message));
 }
 
 export async function runProjectProgressAgent(
@@ -442,6 +494,7 @@ function buildAgentInteraction(input: {
   output: ProjectProgressSummaryOutput;
   metrics: ReturnType<ProjectProgressGitHubMcpServer["tool"]["getMetrics"]>;
   run: ProjectProgressAgentRunResult | null;
+  agentAttempts: number;
   latencyMs: number;
   fallbackUsed: boolean;
   error?: unknown;
@@ -481,6 +534,7 @@ function buildAgentInteraction(input: {
       patch_chars_returned: input.metrics.patchCharsReturned,
       rejected_detail_calls: input.metrics.rejectedCalls,
       prohibited_tool_use_count: input.run?.prohibitedToolUseCount ?? 0,
+      agent_attempts: input.agentAttempts,
     },
     finalSummary: input.output.summary,
     limitations: input.output.limitations,

@@ -151,6 +151,66 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.match(result.interaction?.errorSummary ?? "", /结构化输出/);
   });
 
+  it("retries a transient disconnected stream before using the fallback", async () => {
+    let attempts = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error(
+          "stream disconnected before completion: error sending request for url (https://openrouter.ai/api/v1/responses)",
+        );
+      }
+      return {
+        finalResponse: JSON.stringify({
+          summary: "完成 OpenRouter 瞬时断流后的仓库总结。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-retry-02",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.equal(attempts, 2);
+    assert.equal(result.summary, "完成 OpenRouter 瞬时断流后的仓库总结。");
+    assert.equal(result.interaction?.fallbackUsed, false);
+    assert.equal(result.interaction?.responsePayloadSanitized.agent_attempts, 2);
+  });
+
+  it("records both attempts when a disconnected stream remains unavailable", async () => {
+    let attempts = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      attempts += 1;
+      throw new Error("stream disconnected before completion");
+    };
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.equal(attempts, 2);
+    assert.equal(result.interaction?.fallbackUsed, true);
+    assert.equal(result.interaction?.responsePayloadSanitized.agent_attempts, 2);
+    assert.match(result.interaction?.errorSummary ?? "", /stream disconnected/);
+  });
+
+  it("does not retry a non-transient Agent failure", async () => {
+    let attempts = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      attempts += 1;
+      throw new Error("模型配置无效");
+    };
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.equal(attempts, 1);
+    assert.equal(result.interaction?.fallbackUsed, true);
+    assert.equal(result.interaction?.responsePayloadSanitized.agent_attempts, 1);
+  });
+
   it("falls back when Agent returns a process step as the project summary", async () => {
     const runner: ProjectProgressAgentRunner = async () => ({
       finalResponse: JSON.stringify({
