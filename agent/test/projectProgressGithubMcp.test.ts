@@ -8,6 +8,7 @@ import {
   type ProjectProgressAgentLimits,
 } from "../src/infrastructure/github/projectProgressMcpServer.js";
 import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
+import { GitHubRequestExecutor } from "../src/infrastructure/github/githubRequestExecutor.js";
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 const limits: ProjectProgressAgentLimits = {
@@ -227,6 +228,41 @@ describe("GitHubCommitDetailTool", () => {
 
     assert.equal(peakRequests, 1);
     assert.equal(limiter.metrics.peakActive, 1);
+  });
+
+  it("uses the shared GitHub executor for bounded transient retries", async () => {
+    let calls = 0;
+    const requestExecutor = new GitHubRequestExecutor({
+      maxAttempts: 2,
+      sleep: async () => undefined,
+    });
+    const tool = new GitHubCommitDetailTool(
+      {
+        githubToken: "github-secret",
+        githubApiBaseUrl: "https://api.github.test",
+        candidates,
+        limits,
+        requestExecutor,
+      },
+      async () => {
+        calls += 1;
+        return calls === 1
+          ? new Response("busy", { status: 503 })
+          : Response.json({
+              stats: { additions: 1, deletions: 0, total: 1 },
+              files: [],
+            });
+      },
+    );
+
+    const result = await tool.readCommitDetails({
+      repository: "example/api",
+      sha: "abcdef123456",
+    });
+
+    assert.equal(result.status, "success");
+    assert.equal(calls, 2);
+    assert.equal(requestExecutor.metrics.retries, 1);
   });
 });
 
