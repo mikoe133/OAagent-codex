@@ -177,6 +177,16 @@ describe("ProjectProgressStore", () => {
       summary: "完成仓库缓存实现。",
       limitations: ["Patch 详情按预算裁剪"],
     });
+    restarted.putRepositorySummaryCache({
+      identityDigest: "a".repeat(64),
+      evidenceDigest: "d".repeat(64),
+      summary: "完成仓库缓存修正。",
+      limitations: [],
+    });
+    assert.deepEqual(restarted.getRepositorySummaryCache("a".repeat(64)), {
+      summary: "完成仓库缓存修正。",
+      limitations: [],
+    });
     assert.equal(restarted.getRepositorySummaryCache("c".repeat(64)), null);
     assert.throws(
       () => restarted.getRepositorySummaryCache("not-a-digest"),

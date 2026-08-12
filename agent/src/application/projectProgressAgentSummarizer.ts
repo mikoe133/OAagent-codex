@@ -28,6 +28,7 @@ import { resolveCodexModelCatalogPath } from "../infrastructure/codex/modelMetad
 import { startProjectProgressModelRelay } from "../infrastructure/codex/modelRelay.js";
 import {
   DeterministicProjectProgressSummarizer,
+  isLikelyProjectProgressProcessSummary,
   type ProjectProgressAiInteraction,
   type ProjectProgressSummarizer,
   type ProjectProgressSummaryInput,
@@ -129,7 +130,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       this.config.repositorySummaryCache,
       cacheIdentityDigest,
     );
-    if (cached) {
+    if (cached && !isLikelyProjectProgressProcessSummary(cached.summary)) {
       const output = {
         summary: cached.summary,
         limitations: cached.limitations,
@@ -200,7 +201,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
       }
       const output = decodeAgentOutput(agentRun.finalResponse);
-      if (isLikelyProcessSummary(output.summary)) {
+      if (isLikelyProjectProgressProcessSummary(output.summary)) {
         throw new Error("Agent 输出了分析步骤而非最终项目总结。");
       }
       const metrics = mcpServer.tool.getMetrics();
@@ -515,15 +516,6 @@ function decodeAgentOutput(value: string): ProjectProgressSummaryOutput {
       .filter(Boolean)
       .slice(0, 10),
   };
-}
-
-function isLikelyProcessSummary(summary: string): boolean {
-  const normalized = summary.replace(/\s+/gu, " ").trim();
-  return [
-    /分析候选\s+(?:commits?|提交)/iu,
-    /选择性读取.*(?:关键.*)?(?:commits?|提交).*(?:详情|信息)/iu,
-    /^(?:先|将|准备|开始|继续|下一步|接下来).{0,100}(?:分析|读取|查看|检查)/u,
-  ].some((pattern) => pattern.test(normalized));
 }
 
 function buildAgentInteraction(input: {

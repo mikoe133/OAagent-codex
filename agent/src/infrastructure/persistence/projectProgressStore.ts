@@ -253,10 +253,15 @@ export class ProjectProgressStore implements RepositorySummaryCache {
     }
     const now = new Date().toISOString();
     this.database.prepare(`
-      INSERT OR IGNORE INTO repository_summary_cache (
+      INSERT INTO repository_summary_cache (
         identity_digest, evidence_digest, summary, limitations_json,
         created_at, last_used_at
       ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(identity_digest) DO UPDATE SET
+        evidence_digest = excluded.evidence_digest,
+        summary = excluded.summary,
+        limitations_json = excluded.limitations_json,
+        last_used_at = excluded.last_used_at
     `).run(
       input.identityDigest,
       input.evidenceDigest,
@@ -265,11 +270,6 @@ export class ProjectProgressStore implements RepositorySummaryCache {
       now,
       now,
     );
-    this.database.prepare(`
-      UPDATE repository_summary_cache
-      SET last_used_at = ?
-      WHERE identity_digest = ?
-    `).run(now, input.identityDigest);
   }
 
   enqueueOutbox(input: {

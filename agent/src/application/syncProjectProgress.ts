@@ -34,7 +34,10 @@ import type {
   ProjectProgressAiInteraction,
   ProjectProgressSummarizer,
 } from "./projectProgressSummarizer.js";
-import { DeterministicProjectProgressSummarizer } from "./projectProgressSummarizer.js";
+import {
+  DeterministicProjectProgressSummarizer,
+  isLikelyProjectProgressProcessSummary,
+} from "./projectProgressSummarizer.js";
 
 export type ProjectProgressConcurrency = {
   github: number;
@@ -568,7 +571,8 @@ async function executeProjectProgressSync(
           project.id,
           group.summaryDate,
         );
-        const cached = existing?.sourceDigest === group.sourceDigest
+        const cached = existing?.sourceDigest === group.sourceDigest &&
+          !isLikelyProjectProgressProcessSummary(existing.summary)
           ? {
             summaryDate: group.summaryDate,
             commitCount: group.commits.length,
@@ -662,6 +666,9 @@ async function executeProjectProgressSync(
                 ...(input.cancellationSignal ? { signal: input.cancellationSignal } : {}),
               }),
             );
+            if (isLikelyProjectProgressProcessSummary(generated.summary)) {
+              throw new Error("总结器输出了分析步骤而非最终项目总结");
+            }
             return {
               key: task.key,
               repositoryKey: task.repositoryKey,
