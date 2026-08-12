@@ -75,6 +75,48 @@ describe("syncProjectProgress", () => {
     );
   });
 
+  it("classifies a punctuation-only repository summary as retryable failure", async () => {
+    const project = {
+      id: 4,
+      projectName: "punctuation-summary",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/example/punctuation-summary"],
+    };
+    const report = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+      },
+      githubReader: {
+        readRepository: async () => ({
+          repositoryId: 4,
+          fullName: "example/punctuation-summary",
+          canonicalUrl: "https://github.com/example/punctuation-summary",
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(
+            4,
+            "example/punctuation-summary",
+            "sha-punctuation",
+            "2026-07-24T01:00:00.000Z",
+          )],
+        }),
+      },
+      summarizer: {
+        summarize: async () => ({ summary: "...", limitations: [] }),
+      },
+    });
+
+    assert.equal(report.retryRecommended, true);
+    assert.equal(report.metrics.repositoryTasksFallback, 1);
+    assert.match(
+      report.projects[0]?.warnings.join(" ") ?? "",
+      /repository_summary_fallback:example\/punctuation-summary:2026-07-24/,
+    );
+    assert.notEqual(report.projects[0]?.summaries[0]?.summary, "...");
+  });
+
   it("fans out one Agent summary per active repository with 6/2/1 concurrency", async () => {
     const repositoryCount = 8;
     const project = {

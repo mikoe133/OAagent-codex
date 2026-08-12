@@ -184,7 +184,8 @@ export function isLikelyProjectProgressProcessSummary(summary: string): boolean 
 
 export function isInvalidProjectProgressSummary(summary: string): boolean {
   const normalized = summary.replace(/\s+/gu, " ").trim();
-  return isLikelyProjectProgressProcessSummary(normalized) || [
+  return !/[\p{L}\p{N}]/u.test(normalized) ||
+    isLikelyProjectProgressProcessSummary(normalized) || [
     /^(?:没有|无)(?:可用的?)?(?:候选)?(?:commits?|提交)[，,:：\s]*(?:因此)?(?:无法|不能).{0,30}(?:生成|形成|提供)?(?:项目)?(?:进展)?总结[。！!]?$/iu,
     /^(?:未找到|没有发现).{0,30}(?:commits?|提交).{0,30}(?:无法|不能).{0,30}(?:总结|生成)[。！!]?$/iu,
     /^(?:无法|不能)(?:根据|基于).{0,50}(?:commits?|提交).{0,30}(?:生成|形成|提供).{0,20}(?:进展)?总结[。！!]?$/iu,
