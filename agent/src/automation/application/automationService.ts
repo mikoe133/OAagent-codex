@@ -1823,7 +1823,7 @@ export class AutomationService implements AutomationOperations {
         `UPDATE automation_job_runs
             SET status = 'failed', finished_at = ?, duration_ms = ?,
                 error_code = 'job_timeout', error_summary = '任务执行超时',
-                retry_recommended = 1, lease_token_digest = NULL,
+                retry_recommended = 0, lease_token_digest = NULL,
                 lease_expires_at = NULL, updated_at = ?
           WHERE id = ?`,
         [now, duration, now, run.id],
@@ -1834,51 +1834,6 @@ export class AutomationService implements AutomationOperations {
           WHERE id = ?`,
         [now, now, run.job_id],
       );
-      if (run.attempt < run.retry_max_attempts_snapshot) {
-        const [retry] = await connection.query<RowDataPacket[]>(
-          `SELECT id FROM automation_job_runs
-            WHERE root_run_id = ? AND attempt = ? LIMIT 1`,
-          [run.root_run_id, run.attempt + 1],
-        );
-        if (!retry.length) {
-          const retryId = randomUUID();
-          const availableAt = new Date(
-            now.getTime() + run.retry_interval_seconds_snapshot * 1000,
-          );
-          await connection.execute<ResultSetHeader>(
-            `INSERT INTO automation_job_runs (
-               id, root_run_id, parent_run_id, job_id, job_key_snapshot,
-               job_name_snapshot, job_type_snapshot, description_snapshot,
-               tags_snapshot, trigger_source, scheduled_at, available_at,
-               triggered_at, status, attempt, model_provider_snapshot,
-               model_id_snapshot, model_parameters_snapshot,
-               model_catalog_version_snapshot, prompt_version_snapshot,
-               system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
-               retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
-               timeout_seconds_snapshot, deadline_at, projects_total,
-               projects_succeeded, projects_failed, mutations_applied,
-               retry_recommended, created_at, updated_at
-             ) SELECT ?, root_run_id, id, job_id, job_key_snapshot,
-                      job_name_snapshot, job_type_snapshot, description_snapshot,
-                      tags_snapshot, 'retry', scheduled_at, ?, ?, 'pending', attempt + 1,
-                      model_provider_snapshot, model_id_snapshot, model_parameters_snapshot,
-                      model_catalog_version_snapshot, prompt_version_snapshot,
-                      system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
-                      retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
-                      timeout_seconds_snapshot, ?, 0, 0, 0, 0, 0, ?, ?
-                 FROM automation_job_runs WHERE id = ?`,
-            [
-              retryId,
-              availableAt,
-              now,
-              new Date(availableAt.getTime() + run.timeout_seconds_snapshot * 1000),
-              now,
-              now,
-              run.id,
-            ],
-          );
-        }
-      }
     }
   }
 

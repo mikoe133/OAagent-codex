@@ -322,7 +322,7 @@ export async function runProjectProgressAutomation(input: {
     if (terminalUpdateStarted) {
       throw error;
     }
-    const retryRecommended = isRetryable(error);
+    const retryRecommended = false;
     await traceReporter.publish({
       eventKey: "finalize_run",
       sequence: 900,
@@ -562,7 +562,18 @@ function resolveTerminal(
     mapProjectOutcome(project) === "write_conflict" ||
     mapProjectOutcome(project) === "failed"
   ).length;
+  const summaryFailures = report.projects.filter((project) =>
+    project.warnings.some(isSummaryRetryWarning)
+  ).length;
   if (failed === 0) {
+    if (report.retryRecommended && summaryFailures > 0) {
+      return {
+        status: "partial_failed",
+        retryRecommended: true,
+        errorCode: "project_summary_failed",
+        errorSummary: `${summaryFailures} 个项目总结失败，已写入兜底结果。`,
+      };
+    }
     return {
       status: "succeeded",
       retryRecommended: false,
@@ -581,12 +592,10 @@ function resolveTerminal(
   };
 }
 
-function isRetryable(error: unknown): boolean {
-  if (error instanceof AutomationOaRequestError) {
-    return error.status >= 500;
-  }
-  return error instanceof TypeError ||
-    (error instanceof Error && /timeout|timed out|fetch failed/i.test(error.message));
+function isSummaryRetryWarning(warning: string): boolean {
+  return warning.startsWith("repository_summary_fallback:") ||
+    warning.startsWith("repository_summary_failed:") ||
+    warning.startsWith("repository_summary_incomplete:");
 }
 
 function safeErrorSummary(error: unknown): string {

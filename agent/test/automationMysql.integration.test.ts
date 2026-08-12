@@ -297,3 +297,81 @@ test(
     }
   },
 );
+
+test(
+  "does not create a retry when a run reaches its deadline",
+  { skip: !databaseUrl, timeout: 30_000 },
+  async () => {
+    const url = new URL(databaseUrl!);
+    assert.match(url.pathname, /_automation_test$/);
+    await runAutomationMigrations(url, new URL("../..", import.meta.url).pathname);
+    const database = createAutomationDatabase(url);
+    const service = new AutomationService(database, {
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+      modelProviders: {
+        nexttoken: {
+          name: "Nexttoken",
+          apiKey: "test",
+          baseUrl: "https://example.test/v1",
+          envKey: "NEXTTOKEN_API_KEY",
+        },
+      },
+      scheduleGraceSeconds: 120,
+      manualTriggerLimit: 3,
+      manualTriggerWindowSeconds: 300,
+    });
+    const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+
+    try {
+      const job = (await service.createJob(
+        {
+          job_key: `deadline-${suffix}`,
+          job_type: "github_project_progress_sync",
+          name: "Deadline job",
+          description: "",
+          enabled: true,
+          timezone: "Asia/Shanghai",
+          schedule_type: "cron",
+          cron_expression: "0 20 * * 1-5",
+          catch_up_policy: "latest",
+          overlap_policy: "forbid",
+          model_provider: "nexttoken",
+          model_id: "gpt-5.6-terra",
+          model_parameters: {},
+          retry_max_attempts: 3,
+          retry_interval_seconds: 0,
+          timeout_seconds: 600,
+          retention_days: 90,
+          tag_ids: [],
+        },
+        42,
+      )) as { id: number };
+      const triggered = (await service.triggerJob(job.id, 42)) as {
+        run_id: string;
+      };
+      await database.db
+        .updateTable("automation_job_runs")
+        .set({ deadline_at: new Date(Date.now() - 1_000) })
+        .where("id", "=", triggered.run_id)
+        .execute();
+
+      await service.runMaintenanceCycle();
+
+      const attempts = await database.db
+        .selectFrom("automation_job_runs")
+        .select(["status", "attempt", "retry_recommended", "error_code"])
+        .where("root_run_id", "=", triggered.run_id)
+        .orderBy("attempt", "asc")
+        .execute();
+      assert.deepEqual(attempts, [{
+        status: "failed",
+        attempt: 1,
+        retry_recommended: 0,
+        error_code: "job_timeout",
+      }]);
+    } finally {
+      await database.close();
+    }
+  },
+);
