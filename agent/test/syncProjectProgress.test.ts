@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  projectProgressExecutionPolicy,
   syncProjectProgress,
   type ProjectProgressTraceEvent,
 } from "../src/application/syncProjectProgress.js";
@@ -651,6 +652,14 @@ describe("syncProjectProgress", () => {
 
     assert.equal(summaries, 2);
     assert.equal(repairedResult.metrics.repositoryTasksTotal, 1);
+
+    const regeneratedResult = await syncProjectProgress({
+      ...dependencies,
+      forceRegenerateSummaries: true,
+    });
+
+    assert.equal(summaries, 3);
+    assert.equal(regeneratedResult.metrics.repositoryTasksTotal, 1);
   });
 
   it("applies status and summary writes only in explicit single-project test mode", async () => {
@@ -807,6 +816,82 @@ describe("syncProjectProgress", () => {
 
     assert.equal(summaryWrites, 0);
     assert.match(result.projects[0]?.warnings.join(" ") ?? "", /summary_unmanaged/);
+  });
+
+  it("lets a manual run overwrite the unique summary for the same project and date", async () => {
+    const updates: Array<{ summaryId: number; summary: string }> = [];
+    const project = {
+      id: 14,
+      projectName: "manual-overwrite",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/api"],
+    };
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      projectId: 14,
+      writeMode: "unsafe-test",
+      summaryWritePolicy: "manual-overwrite",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [{
+          id: 401,
+          projectId: 14,
+          summaryDate: "2026-07-24",
+          summary: "第一次手动总结",
+          aiConfidence: 80,
+          aiNote: "第一次执行",
+          version: 3,
+        }],
+        createCommitSummary: async () => {
+          throw new Error("must not create");
+        },
+        updateCommitSummary: async (summaryId, update) => {
+          updates.push({ summaryId, summary: update.summary });
+          return {
+            id: summaryId,
+            projectId: 14,
+            summaryDate: "2026-07-24",
+            summary: update.summary,
+            aiConfidence: update.aiConfidence,
+            aiNote: update.aiNote,
+            version: 4,
+          };
+        },
+      },
+      githubReader: {
+        readRepository: async () => ({
+          repositoryId: 1,
+          fullName: "alpha/api",
+          canonicalUrl: "https://github.com/alpha/api",
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(1, "alpha/api", "a", "2026-07-24T01:00:00.000Z")],
+        }),
+      },
+      summarizer: {
+        summarize: async () => ({ summary: "第二次手动总结", limitations: [] }),
+      },
+      store: createWritableStore(),
+    });
+
+    assert.deepEqual(updates, [{ summaryId: 401, summary: "第二次手动总结" }]);
+    assert.equal(result.mutationsApplied, 1);
+    assert.doesNotMatch(result.projects[0]?.warnings.join(" ") ?? "", /summary_unmanaged/);
+  });
+
+  it("maps only manual triggers to regeneration and overwrite", () => {
+    assert.deepEqual(projectProgressExecutionPolicy("manual"), {
+      forceRegenerateSummaries: true,
+      summaryWritePolicy: "manual-overwrite",
+    });
+    for (const triggerSource of ["schedule", "retry"]) {
+      assert.deepEqual(projectProgressExecutionPolicy(triggerSource), {
+        forceRegenerateSummaries: false,
+        summaryWritePolicy: "managed-only",
+      });
+    }
   });
 
   it("reports an applied status when summary reconciliation later fails", async () => {

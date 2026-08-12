@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   buildProjectDailyCommitGroups,
   decideProjectStatus,
@@ -238,7 +239,24 @@ export type ProjectProgressSyncInput = {
   projectDetailCompatibilityMode?: boolean;
   shouldCancel?: () => boolean;
   trace?: ProjectProgressTraceSink;
+  forceRegenerateSummaries?: boolean;
+  summaryWritePolicy?: "managed-only" | "manual-overwrite";
 };
+
+export function projectProgressExecutionPolicy(triggerSource: string): Pick<
+  ProjectProgressSyncInput,
+  "forceRegenerateSummaries" | "summaryWritePolicy"
+> {
+  return triggerSource === "manual"
+    ? {
+        forceRegenerateSummaries: true,
+        summaryWritePolicy: "manual-overwrite",
+      }
+    : {
+        forceRegenerateSummaries: false,
+        summaryWritePolicy: "managed-only",
+      };
+}
 
 export async function syncProjectProgress(
   input: ProjectProgressSyncInput,
@@ -571,7 +589,8 @@ async function executeProjectProgressSync(
           project.id,
           group.summaryDate,
         );
-        const cached = existing?.sourceDigest === group.sourceDigest &&
+        const cached = !input.forceRegenerateSummaries &&
+          existing?.sourceDigest === group.sourceDigest &&
           !isInvalidProjectProgressSummary(existing.summary)
           ? {
             summaryDate: group.summaryDate,
@@ -909,6 +928,7 @@ async function executeProjectProgressSync(
           writeLimiter: oaWriteLimiter,
           cancellationSignal: input.cancellationSignal,
           store: writableStore,
+          summaryWritePolicy: input.summaryWritePolicy ?? "managed-only",
           warnings: evaluation.warnings,
           shouldCancel: input.shouldCancel,
         });
@@ -1211,6 +1231,7 @@ async function applyMutations(input: {
   writeLimiter: AsyncSemaphore;
   cancellationSignal?: AbortSignal;
   store: WritableProjectProgressState;
+  summaryWritePolicy: "managed-only" | "manual-overwrite";
   warnings: string[];
   shouldCancel?: () => boolean;
 }): Promise<number> {
@@ -1277,6 +1298,7 @@ async function applyMutations(input: {
         writeLimiter: input.writeLimiter,
         cancellationSignal: input.cancellationSignal,
         store: input.store,
+        summaryWritePolicy: input.summaryWritePolicy,
         warnings: input.warnings,
       });
     } catch (error) {
@@ -1298,6 +1320,7 @@ async function reconcileSummary(input: {
   writeLimiter: AsyncSemaphore;
   cancellationSignal?: AbortSignal;
   store: WritableProjectProgressState;
+  summaryWritePolicy: "managed-only" | "manual-overwrite";
   warnings: string[];
 }): Promise<number> {
   const existing = await input.writer.listCommitSummaries(
@@ -1362,10 +1385,16 @@ async function reconcileSummary(input: {
     return 0;
   }
   if (!managed || managed.summaryId !== current.id) {
+    if (input.summaryWritePolicy === "manual-overwrite") {
+      return await overwriteSummary(input, current, desired);
+    }
     input.warnings.push(`summary_unmanaged:${input.proposal.summaryDate}:${current.id}`);
     return 0;
   }
   if (!summaryMatchesAppliedPayload(current, managed)) {
+    if (input.summaryWritePolicy === "manual-overwrite") {
+      return await overwriteSummary(input, current, desired);
+    }
     input.warnings.push(`summary_external_edit:${input.proposal.summaryDate}:${current.id}`);
     return 0;
   }
@@ -1376,6 +1405,21 @@ async function reconcileSummary(input: {
     return 0;
   }
 
+  return await overwriteSummary(input, current, desired);
+}
+
+async function overwriteSummary(
+  input: {
+    projectId: number;
+    proposal: ProjectProgressSummaryProposal;
+    writer: ProjectProgressOaWriter;
+    writeLimiter: AsyncSemaphore;
+    cancellationSignal?: AbortSignal;
+    store: WritableProjectProgressState;
+  },
+  current: OaCommitSummary,
+  desired: { summary: string; aiConfidence: number; aiNote: string },
+): Promise<number> {
   const intentKey = summaryIntentKey("update", input.projectId, input.proposal);
   input.store.enqueueOutbox({
     intentKey,
@@ -1447,7 +1491,18 @@ function summaryIntentKey(
   projectId: number,
   proposal: ProjectProgressSummaryProposal,
 ): string {
-  return `project-progress:summary:${operation}:${projectId}:${proposal.summaryDate}:${proposal.sourceDigest}`;
+  const payloadDigest = createHash("sha256")
+    .update(JSON.stringify(summaryPayload(proposal)))
+    .digest("hex");
+  return [
+    "project-progress",
+    "summary",
+    operation,
+    projectId,
+    proposal.summaryDate,
+    proposal.sourceDigest,
+    payloadDigest,
+  ].join(":");
 }
 
 function repositorySetKey(urls: string[]): string {

@@ -180,6 +180,53 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.equal(cached.interaction?.inputTokens, null);
   });
 
+  it("bypasses the repository cache for a manual regeneration", async () => {
+    const entries = new Map<string, { summary: string; limitations: string[] }>();
+    const cache = {
+      getRepositorySummaryCache: (identityDigest: string) =>
+        entries.get(identityDigest) ?? null,
+      putRepositorySummaryCache: (entry: {
+        identityDigest: string;
+        summary: string;
+        limitations: string[];
+      }) => {
+        entries.set(entry.identityDigest, {
+          summary: entry.summary,
+          limitations: entry.limitations,
+        });
+      },
+    };
+    let runs = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      runs += 1;
+      return {
+        finalResponse: JSON.stringify({
+          summary: `完成第 ${runs} 次手动总结。`,
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: `thread-manual-${runs}`,
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const first = new CodexProjectProgressSummarizer({
+      ...config,
+      repositorySummaryCache: cache,
+    }, runner);
+    const manual = new CodexProjectProgressSummarizer({
+      ...config,
+      repositorySummaryCache: cache,
+      bypassRepositorySummaryCacheRead: true,
+    }, runner);
+
+    await first.summarize(input);
+    const regenerated = await manual.summarize(input);
+
+    assert.equal(runs, 2);
+    assert.equal(regenerated.summary, "完成第 2 次手动总结。");
+    assert.equal(regenerated.interaction?.responsePayloadSanitized.cache_hit, false);
+  });
+
   it("invalidates repository cache entries when tool budgets change", async () => {
     const entries = new Map<string, { summary: string; limitations: string[] }>();
     const cache = {

@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { runProjectProgressAutomation } from "../application/runProjectProgressAutomation.js";
 import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
-import { syncProjectProgress } from "../application/syncProjectProgress.js";
+import {
+  projectProgressExecutionPolicy,
+  syncProjectProgress,
+} from "../application/syncProjectProgress.js";
 import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
 import { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
@@ -62,6 +65,7 @@ async function main(): Promise<void> {
         claimIdentityStore: store,
         traceSpool: store,
         resolveExecution: async (claim) => {
+          const executionPolicy = projectProgressExecutionPolicy(claim.triggerSource);
           const config = loadProjectProgressConfig(process.env, repoRoot, {
             modelProvider: claim.modelProvider,
             modelId: claim.modelId,
@@ -123,6 +127,8 @@ async function main(): Promise<void> {
                   ? { modelCatalogVersion: claim.modelCatalogVersion }
                   : {}),
                 repositorySummaryCache: store,
+                bypassRepositorySummaryCacheRead:
+                  executionPolicy.forceRegenerateSummaries,
                 githubRequestLimiter,
                 githubRequestExecutor,
                 operationMetrics,
@@ -136,6 +142,7 @@ async function main(): Promise<void> {
               projectDetailCompatibilityMode: config.oa.projectDetailCompatibilityMode,
               shouldCancel,
               trace,
+              ...executionPolicy,
             });
           };
         },
