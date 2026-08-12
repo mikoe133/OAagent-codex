@@ -23,7 +23,7 @@ test("proxies the task list to the OA management API with the HttpOnly session",
     )
 
     assert.equal(response.status, 200)
-    assert.equal(upstreamUrl, "https://oa.example.test/automation-jobs?page=2&alias=frontend-test")
+    assert.equal(upstreamUrl, "https://automation.example.test/automation-jobs?page=2&alias=frontend-test")
     assert.equal(upstreamHeaders.get("authorization"), "Bearer oa-session-token")
     assert.equal(upstreamHeaders.get("cookie"), "sessionid=oa-session-token")
     assert.equal(response.headers.get("cache-control"), "no-store")
@@ -60,7 +60,7 @@ test("maps job actions and forwards JSON without changing the OA response", asyn
       context("jobs", "42", "runs"),
     )
 
-    assert.equal(upstreamUrl, "https://oa.example.test/automation-jobs/42/runs?alias=frontend-test")
+    assert.equal(upstreamUrl, "https://automation.example.test/automation-jobs/42/runs?alias=frontend-test")
     assert.equal(method, "POST")
     assert.equal(body, requestBody)
     assert.equal(response.status, 202)
@@ -91,7 +91,7 @@ test("proxies prompt profiles with the OA session cookie and no Authorization he
     )
 
     assert.equal(response.status, 200)
-    assert.equal(upstreamUrl, "https://oa.example.test/automation-prompt-profiles/github_project_progress_sync?alias=frontend-test")
+    assert.equal(upstreamUrl, "https://automation.example.test/automation-prompt-profiles/github_project_progress_sync?alias=frontend-test")
     assert.equal(upstreamHeaders.get("cookie"), "sessionid=oa-session-token")
     assert.equal(upstreamHeaders.get("authorization"), null)
   } finally {
@@ -149,7 +149,7 @@ test("whitelists every documented OA automation management endpoint", async () =
 
     assert.deepEqual(upstreamRequests, cases.map((item) => ({
       method: item.method,
-      url: `https://oa.example.test${item.expected}${item.expected.includes("?") ? "&" : "?"}alias=frontend-test`,
+      url: `https://automation.example.test${item.expected}${item.expected.includes("?") ? "&" : "?"}alias=frontend-test`,
     })))
   } finally {
     globalThis.fetch = originalFetch
@@ -186,16 +186,51 @@ test("rejects missing sessions and non-whitelisted routes before contacting OA",
   }
 })
 
+test("falls back to the OA API base url while the Node automation service is not configured", async () => {
+  const originalAutomationBaseUrl = process.env.AUTOMATION_API_BASE_URL
+  const originalBaseUrl = process.env.OA_API_BASE_URL
+  const originalAlias = process.env.OA_AUTH_ALIAS
+  process.env.AUTOMATION_API_BASE_URL = ""
+  process.env.OA_API_BASE_URL = "https://oa.example.test"
+  process.env.OA_AUTH_ALIAS = "frontend-test"
+  const originalFetch = globalThis.fetch
+  let upstreamUrl = ""
+  globalThis.fetch = async (input) => {
+    upstreamUrl = String(input)
+    return Response.json({ code: 200, message: "ok", data: {}, success: true })
+  }
+
+  try {
+    const response = await GET(
+      new Request("http://localhost/api/automation/models", {
+        headers: { cookie: "sessionid=oa-session-token" },
+      }),
+      context("models"),
+    )
+
+    assert.equal(response.status, 200)
+    assert.equal(upstreamUrl, "https://oa.example.test/automation-models?alias=frontend-test")
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreEnv("AUTOMATION_API_BASE_URL", originalAutomationBaseUrl)
+    restoreEnv("OA_API_BASE_URL", originalBaseUrl)
+    restoreEnv("OA_AUTH_ALIAS", originalAlias)
+  }
+})
+
 function context(...segments: string[]) {
   return { params: Promise.resolve({ segments }) }
 }
 
 function configureEnvironment(): () => void {
+  const originalAutomationBaseUrl = process.env.AUTOMATION_API_BASE_URL
   const originalBaseUrl = process.env.OA_API_BASE_URL
   const originalAlias = process.env.OA_AUTH_ALIAS
+  process.env.AUTOMATION_API_BASE_URL = "https://automation.example.test"
   process.env.OA_API_BASE_URL = "https://oa.example.test"
   process.env.OA_AUTH_ALIAS = "frontend-test"
   return () => {
+    restoreEnv("AUTOMATION_API_BASE_URL", originalAutomationBaseUrl)
     restoreEnv("OA_API_BASE_URL", originalBaseUrl)
     restoreEnv("OA_AUTH_ALIAS", originalAlias)
   }

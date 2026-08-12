@@ -41,10 +41,14 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.equal(workflow.match(/PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \|\| '1' \}\}/g)?.length, 2)
   assert.equal(workflow.match(/AGENT_BIND_ADDRESS: \$\{\{ vars\.AGENT_BIND_ADDRESS \|\| '127\.0\.0\.1' \}\}/g)?.length, 2)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
+  assert.equal(workflow.match(/AUTOMATION_API_BASE_URL: \$\{\{ vars\.AUTOMATION_API_BASE_URL \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/PROJECT_SYNC_API_BASE_URL: \$\{\{ vars\.PROJECT_SYNC_API_BASE_URL \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_SSO_SHARED_SECRET: \$\{\{ secrets\.OA_AGENT_SSO_SHARED_SECRET \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_AUTOMATION_TOKEN: \$\{\{ secrets\.OA_AGENT_AUTOMATION_TOKEN \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/DATABASE_URL: \$\{\{ secrets\.DATABASE_URL \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/OA_SESSION_SECRET: \$\{\{ secrets\.OA_SESSION_SECRET \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_SSO_TTL_SECONDS: \$\{\{ vars\.OA_AGENT_SSO_TTL_SECONDS \}\}/g)?.length, 2)
-  assert.equal(workflow.match(/OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN; do/g)?.length, 2)
+  assert.equal(workflow.match(/OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN DATABASE_URL OA_SESSION_SECRET OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN; do/g)?.length, 2)
   assert.match(workflow, /bash scripts\/render-runtime-env\.sh/)
   assert.match(workflow, /push: \$\{\{ github\.event_name != 'pull_request' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/test'\) \}\}/)
   assert.match(workflow, /uses: actions\/upload-artifact@v4/)
@@ -53,6 +57,41 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.equal(workflow.match(/SKIP_IMAGE_PULL=1 bash -s/g)?.length, 2)
   assert.doesNotMatch(workflow, /GHCR_PULL_TOKEN/)
   assert.doesNotMatch(workflow, /docker login ghcr\.io/)
+})
+
+test("runs the Node automation contract against a real MySQL 8 service", async () => {
+  const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
+
+  assert.match(workflow, /^    services:\n      mysql:\n        image: mysql:8\.4$/m)
+  assert.match(workflow, /MYSQL_DATABASE: oagent_automation_test/)
+  assert.match(workflow, /npm run test:automation:integration/)
+  assert.match(
+    workflow,
+    /AUTOMATION_NODE_TEST_DATABASE_URL: mysql:\/\/root:automation-ci@127\.0\.0\.1:3306\/oagent_automation_test/,
+  )
+  assert.doesNotMatch(workflow, /shell: bash\n        shell: bash/)
+})
+
+test("passes automation maintenance controls into both deployment environments", async () => {
+  const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
+
+  for (const [name, fallback] of [
+    ["OA_SESSION_VERIFY_MAX_AGE", "0"],
+    ["AUTOMATION_MIGRATE_ON_START", "true"],
+    ["AUTOMATION_MAINTENANCE_ENABLED", "false"],
+    ["AUTOMATION_MAINTENANCE_INTERVAL_SECONDS", "30"],
+    ["AUTOMATION_MODEL_CATALOG_TTL_SECONDS", "300"],
+    ["AUTOMATION_MODEL_CATALOG_STALE_SECONDS", "86400"],
+    ["AUTOMATION_SCHEDULE_GRACE_SECONDS", "120"],
+    ["AUTOMATION_MANUAL_TRIGGER_LIMIT", "3"],
+    ["AUTOMATION_MANUAL_TRIGGER_WINDOW_SECONDS", "300"],
+  ]) {
+    const expression = name + ": ${{ vars." + name + " || '" + fallback + "' }}"
+    assert.equal(workflow.split(expression).length - 1, 2, name)
+  }
+
+  assert.equal(workflow.match(/AUTOMATION_EXPECTED_DATABASE_NAME: oagent_test/g)?.length, 1)
+  assert.equal(workflow.match(/AUTOMATION_EXPECTED_DATABASE_NAME: oagent$/gm)?.length, 1)
 })
 
 test("allows the server env to isolate Compose projects", async () => {
@@ -68,7 +107,49 @@ test("injects SSO configuration into the web container at runtime", async () => 
 
   assert.match(webService, /^      OA_AGENT_SSO_SHARED_SECRET: \$\{OA_AGENT_SSO_SHARED_SECRET\}$/m)
   assert.match(webService, /^      OA_AGENT_SSO_TTL_SECONDS: \$\{OA_AGENT_SSO_TTL_SECONDS\}$/m)
+  assert.match(webService, /^      AUTOMATION_API_BASE_URL: /m)
   assert.doesNotMatch(dockerfile, /OA_AGENT_SSO_(?:SHARED_SECRET|TTL_SECONDS)/)
+})
+
+test("passes split automation routing configuration to runtime containers", async () => {
+  const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
+  const workerService = compose.slice(
+    compose.indexOf("  project-progress-worker:"),
+    compose.indexOf("\n  web:"),
+  )
+  const webService = compose.slice(compose.indexOf("  web:"), compose.indexOf("\nvolumes:"))
+
+  assert.match(workerService, /^      AUTOMATION_API_BASE_URL: /m)
+  assert.match(workerService, /^      PROJECT_SYNC_API_BASE_URL: /m)
+  assert.match(webService, /^      AUTOMATION_API_BASE_URL: /m)
+})
+
+test("does not expose Node database and session secrets to the project worker", async () => {
+  const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
+  const workerService = compose.slice(
+    compose.indexOf("  project-progress-worker:"),
+    compose.indexOf("\n  web:"),
+  )
+
+  assert.doesNotMatch(workerService, /^    env_file:/m)
+  assert.doesNotMatch(workerService, /DATABASE_URL|OA_SESSION_SECRET/)
+  assert.match(workerService, /^      OA_AGENT_AUTOMATION_TOKEN: /m)
+  assert.match(workerService, /^      OA_PROJECT_SYNC_TOKEN: /m)
+  assert.match(workerService, /^      PROJECT_PROGRESS_GITHUB_TOKEN: /m)
+})
+
+test("does not expose worker-only credentials to the agent service", async () => {
+  const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
+  const agentService = compose.slice(
+    compose.indexOf("  agent:"),
+    compose.indexOf("\n  project-progress-worker:"),
+  )
+
+  assert.doesNotMatch(agentService, /^    env_file:/m)
+  assert.doesNotMatch(agentService, /OA_PROJECT_SYNC_TOKEN|PROJECT_PROGRESS_GITHUB_TOKEN/)
+  assert.match(agentService, /^      DATABASE_URL: /m)
+  assert.match(agentService, /^      OA_SESSION_SECRET: /m)
+  assert.match(agentService, /^      OA_AGENT_AUTOMATION_TOKEN: /m)
 })
 
 test("limits container resources and log growth on the shared server", async () => {

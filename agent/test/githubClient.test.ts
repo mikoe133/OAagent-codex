@@ -146,6 +146,67 @@ describe("GitHubRestProjectReader", () => {
     assert.equal(peakRequests, 2);
     assert.equal(limiter.metrics.peakActive, 2);
   });
+
+  it("reads branch histories concurrently and reports live branch progress", async () => {
+    const limiter = new AsyncSemaphore(2);
+    let activeCommitRequests = 0;
+    let peakCommitRequests = 0;
+    const progress: Array<{
+      branchesCompleted: number;
+      branchesTotal: number | null;
+      commitsRead: number;
+    }> = [];
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/repos/example/busy") {
+          return Response.json({
+            id: 201,
+            full_name: "example/busy",
+            created_at: "2026-07-01T00:00:00Z",
+          });
+        }
+        if (url.pathname.endsWith("/branches")) {
+          return Response.json(["main", "develop", "release", "hotfix"].map(
+            (name) => ({ name }),
+          ));
+        }
+        activeCommitRequests += 1;
+        peakCommitRequests = Math.max(peakCommitRequests, activeCommitRequests);
+        await delay(10);
+        activeCommitRequests -= 1;
+        return Response.json([
+          githubCommit(
+            `sha-${url.searchParams.get("sha")}`,
+            "2026-07-24T01:00:00Z",
+          ),
+        ]);
+      },
+      "https://api.github.test",
+      undefined,
+      limiter,
+    );
+
+    const snapshot = await reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/busy"),
+      new Date("2026-07-24T12:00:00Z"),
+      undefined,
+      (event) => {
+        progress.push(event);
+      },
+    );
+
+    assert.equal(snapshot.commits.length, 4);
+    assert.equal(peakCommitRequests, 2);
+    assert.deepEqual(
+      progress.filter((event) => event.branchesTotal !== null).map(
+        (event) => event.branchesCompleted,
+      ),
+      [0, 1, 2, 3, 4],
+    );
+    assert.equal(progress.at(-1)?.commitsRead, 4);
+  });
 });
 
 function githubCommit(sha: string, date: string) {

@@ -94,55 +94,57 @@ claim 优先级：deadline 超时处理 → 过期租约接管 → pending manua
 ## 配置
 
 ```dotenv
-OA_AGENT_INTERNAL_BASE_URL=http://127.0.0.1:3001
 OA_AGENT_AUTOMATION_TOKEN=replace-with-dedicated-service-token
 OA_PROJECT_SYNC_TOKEN=replace-with-dedicated-project-sync-token
+DATABASE_URL=<deployment-secret>
+OA_SESSION_SECRET=<same-as-old-oa>
+OA_SESSION_VERIFY_MAX_AGE=0
 AUTOMATION_MODEL_CATALOG_TTL_SECONDS=300
 AUTOMATION_MODEL_CATALOG_STALE_SECONDS=86400
 AUTOMATION_SCHEDULE_GRACE_SECONDS=120
 AUTOMATION_MANUAL_TRIGGER_LIMIT=3
 AUTOMATION_MANUAL_TRIGGER_WINDOW_SECONDS=300
 AUTOMATION_MAINTENANCE_ENABLED=true
+AUTOMATION_MAINTENANCE_INTERVAL_SECONDS=30
 ```
 
-模型目录读缓存 fresh TTL 为 5 分钟；OAagent 不可用时最多回退 24 小时 stale 缓存。创建、修改、启用、手动触发和显式校验始终实时调用 OAagent。
+模型目录与任务接口处于同一个 Node 进程，创建、修改、启用、手动触发和显式校验直接使用本地模型目录。当前单实例部署的手动触发限流保存在进程内；MySQL 保存所有任务与运行状态，不依赖 Redis。
 
 ## 数据库迁移与回滚
 
-按顺序执行：
+Node 自动任务库由迁移器读取部署平台 Secret 注入的 `DATABASE_URL` 后按顺序执行：
 
-```bash
-mysql < scripts/sql/20260730_001_create_automation_schema.up.sql
-mysql < scripts/sql/20260730_002_seed_automation_defaults.up.sql
-mysql < scripts/sql/20260731_003_add_automation_job_soft_delete.up.sql
+```text
+scripts/sql/001_automation_schema_baseline.up.sql
+scripts/sql/002_automation_defaults_seed.up.sql
 ```
 
 默认任务 `github-project-progress-sync` 保持 `enabled=false`、`configuration_status=unverified`、`next_run_at=NULL`。确认 OAagent、GitHub token、OA 项目同步 token 和每分钟分发器均可用后，通过校验接口再启用。
 
 回滚顺序相反：
 
-```bash
-mysql < scripts/sql/20260731_003_add_automation_job_soft_delete.down.sql
-mysql < scripts/sql/20260730_002_seed_automation_defaults.down.sql
-mysql < scripts/sql/20260730_001_create_automation_schema.down.sql
+```text
+scripts/sql/002_automation_defaults_seed.down.sql
+scripts/sql/001_automation_schema_baseline.down.sql
 ```
 
-软删除 down 脚本会丢失任务的删除标记，生产环境应优先使用新的前向修复迁移，不建议直接回滚。
+完整数据库连接串只放部署平台 Secret，不写入 Git、`.env.example` 或迁移文档。旧 OA 的增量 SQL `001、003、004、006、007` 已合并进 Node baseline；旧 `002` 会写 OA 权限表，Node 库不要原样执行。
 
 迁移不读取、不转换也不删除现有 `async_task` 或项目 commit summary 数据。
 
 ## 验证
 
 ```bash
-python -m pytest tests/automation -q
-python -m compileall fast
+npm test --workspace agent
+npm run typecheck --workspace agent
+npm run test:deploy
 ```
 
 真实事务并发 claim 测试只接受显式专用库，且数据库名必须以 `_automation_test` 结尾：
 
 ```bash
-AUTOMATION_TEST_DATABASE_URL='mysql+asyncmy://.../oa_automation_test' \
-  python -m pytest tests/automation/test_mysql_claim_concurrency.py -q
+AUTOMATION_NODE_TEST_DATABASE_URL='mysql://.../oa_automation_test' \
+  npm exec --workspace agent -- tsx --test test/automationMysql.integration.test.ts
 ```
 
-该测试会在专用库内创建并清理七张 automation 表；不要指向开发、测试共享库或生产库。
+该测试要求数据库名以 `_automation_test` 结尾；不要指向开发、共享测试库或生产库。

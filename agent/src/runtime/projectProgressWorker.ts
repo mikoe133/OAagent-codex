@@ -38,7 +38,7 @@ async function main(): Promise<void> {
 
   const runOnce = () => runProjectProgressAutomation({
     automationClient: new AutomationOaClient({
-      baseUrl: baseConfig.oa.baseUrl,
+      baseUrl: baseConfig.automation.baseUrl,
       token: automationToken,
     }),
     workerInstance: baseConfig.automation.workerInstance,

@@ -12,6 +12,7 @@ import { GitHubRequestError } from "../infrastructure/github/githubClient.js";
 import { normalizeGitHubRepositoryUrl } from "../infrastructure/github/githubUrl.js";
 import type { GitHubRepositoryIdentity } from "../infrastructure/github/githubUrl.js";
 import type {
+  GitHubRepositoryReadProgress,
   GitHubRepositorySnapshot,
   ProjectProgressGitHubReader,
 } from "../infrastructure/github/githubTypes.js";
@@ -390,20 +391,80 @@ async function executeProjectProgressSync(
     progressCurrent: 0,
     progressTotal: repositoriesByKey.size,
   });
+  let completedRepositoryReads = 0;
+  let readTraceQueue = Promise.resolve();
+  const queueReadTrace = (event: ProjectProgressTraceEvent) => {
+    readTraceQueue = readTraceQueue.then(() => emitTrace(input.trace, event));
+    return readTraceQueue;
+  };
   await Promise.all([...repositoriesByKey.entries()].map(async ([key, repository]) => {
+    let latestProgress: GitHubRepositoryReadProgress = {
+      branchesCompleted: 0,
+      branchesTotal: null,
+      commitsRead: 0,
+    };
     try {
       const snapshot = await githubLimiter.run(
-        () => input.githubReader.readRepository(
-          repository,
-          input.observedAt,
-          input.cancellationSignal,
-        ),
+        async () => {
+          await queueReadTrace({
+            eventKey: `read_github:${key}`,
+            sequence: 310,
+            phase: "read_github_repository",
+            status: "running",
+            title: "读取 GitHub 仓库",
+            message: "正在读取分支列表",
+            repositoryFullName: repository.fullName,
+          });
+          return input.githubReader.readRepository(
+            repository,
+            input.observedAt,
+            input.cancellationSignal,
+            async (progress) => {
+              latestProgress = progress;
+              await queueReadTrace(repositoryReadTraceEvent(
+                repository,
+                key,
+                progress,
+                "running",
+              ));
+            },
+          );
+        },
         input.cancellationSignal,
       );
       repositorySnapshots.set(key, { snapshot });
+      await queueReadTrace(repositoryReadTraceEvent(
+        repository,
+        key,
+        latestProgress,
+        "succeeded",
+      ));
     } catch (error) {
       repositorySnapshots.set(key, { error });
+      await queueReadTrace({
+        ...repositoryReadTraceEvent(
+          repository,
+          key,
+          latestProgress,
+          input.cancellationSignal?.aborted ? "cancelled" : "failed",
+        ),
+        message: input.cancellationSignal?.aborted
+          ? "已停止读取"
+          : "仓库读取失败",
+      });
     }
+    completedRepositoryReads += 1;
+    await queueReadTrace({
+      eventKey: "read_github",
+      sequence: 300,
+      phase: "read_github",
+      status: "running",
+      title: "读取 GitHub 分支与 Commit",
+      message: `已完成 ${completedRepositoryReads}/${repositoriesByKey.size} 个仓库`,
+      progressCurrent: completedRepositoryReads,
+      progressTotal: repositoriesByKey.size,
+      repositoryFullName: repository.fullName,
+    });
   }));
   cancelled ||= input.cancellationSignal?.aborted ?? false;
   const repositoryReadFailures = [...repositorySnapshots.values()].filter(
@@ -952,6 +1013,35 @@ function resolveConcurrency(
     throw new Error("项目进度并发配置无效，必须满足 GitHub>=1、Agent>=1、OA 写入=1。");
   }
   return resolved;
+}
+
+function repositoryReadTraceEvent(
+  repository: GitHubRepositoryIdentity,
+  repositoryKey: string,
+  progress: GitHubRepositoryReadProgress,
+  status: ProjectProgressTraceEvent["status"],
+): ProjectProgressTraceEvent {
+  const total = progress.branchesTotal;
+  return {
+    eventKey: `read_github:${repositoryKey}`,
+    sequence: 310,
+    phase: "read_github_repository",
+    status,
+    title: "读取 GitHub 仓库",
+    message: total === null
+      ? "正在读取分支列表"
+      : `已读取 ${progress.branchesCompleted}/${total} 个分支，发现 ${progress.commitsRead} 条 Commit`,
+    ...(total === null
+      ? {}
+      : {
+          progressCurrent: progress.branchesCompleted,
+          progressTotal: total,
+        }),
+    repositoryFullName: repository.fullName,
+    metadataSanitized: {
+      commits_read: progress.commitsRead,
+    },
+  };
 }
 
 async function emitTrace(

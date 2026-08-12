@@ -23,7 +23,7 @@ OA_PROJECT_SYNC_TOKEN=<两端一致的项目同步服务 token>
 ```dotenv
 PROJECT_PROGRESS_WORKER_INSTANCE=oaagent-test-01
 PROJECT_PROGRESS_LEASE_SECONDS=300
-PROJECT_PROGRESS_HEARTBEAT_SECONDS=60
+PROJECT_PROGRESS_HEARTBEAT_SECONDS=10
 ```
 
 `worker_instance` 在同一 Worker 生命周期内保持稳定。心跳间隔必须小于租约，并在项目结果与 AI 审计上报完成前持续运行。

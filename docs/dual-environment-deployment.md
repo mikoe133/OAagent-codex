@@ -1,11 +1,11 @@
 # OA Agent 双环境部署:简单操作步骤
 
-目标是在同一台服务器运行四个容器:
+目标是在同一台服务器运行六个容器:
 
 | 环境 | 容器 | 服务器目录 | Web 端口 | 公网域名 |
 | --- | --- | --- | --- | --- |
-| 测试 | `web` + `agent` | `/opt/rwkv/apps/oa-agent-test` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
-| 生产 | `web` + `agent` | `/opt/rwkv/apps/oa-agent-prod` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
+| 测试 | `web` + `agent` + `project-progress-worker` | `/opt/rwkv/apps/oa-agent-test` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
+| 生产 | `web` + `agent` + `project-progress-worker` | `/opt/rwkv/apps/oa-agent-prod` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
 
 代码已经自动完成:
 
@@ -86,7 +86,6 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 | `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan` 完整输出 | 第 2 步生成并核对 |
 | `NEXTTOKEN_API_KEY` | Nexttoken Key | Nexttoken 控制台创建 |
 | `OPENROUTER_API_KEY` | OpenRouter Key | OpenRouter 控制台创建 |
-| `OA_PROJECT_SYNC_TOKEN` | OA Worker 专用 token | OA 后台创建最小权限服务身份 |
 | `PROJECT_PROGRESS_GITHUB_TOKEN` | GitHub fine-grained PAT | AI GitHub 账号创建，只授予 Metadata/Contents Read |
 
 不需要配置:
@@ -134,21 +133,31 @@ GitHub 仓库 -> Settings -> Environments
 | --- | --- | --- |
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
+| `test` / `production` | `AUTOMATION_API_BASE_URL` | 无需配置；Compose 固定使用 `http://agent:3000` |
+| `test` / `production` | `PROJECT_SYNC_API_BASE_URL` | 原 OA 项目同步服务地址；未填时继承 `OA_DOCKER_API_BASE_URL` |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),例如 `300` |
 | `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),例如 `300` |
 | `test` | `AGENT_BIND_ADDRESS` | `192.168.251.1` |
 | `production` | `AGENT_BIND_ADDRESS` | 可选；默认 `127.0.0.1` |
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_HEADER` | 通常为 `Authorization`；session 测试可填 `Cookie` |
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_PREFIX` | 通常为 `Bearer`；session 测试可填 `sessionid=` |
+| `test` / `production` | `PROJECT_PROGRESS_HEARTBEAT_SECONDS` | 填 `10`，使取消请求及时传给 Worker |
+| `test` / `production` | `AUTOMATION_MIGRATE_ON_START` | 首次部署保持 `true` |
+| `test` / `production` | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `false`；切流确认后显式改为 `true` 并重新部署 |
 
 再分别为两个 Environment 添加以下 Secret：
 
 | Environment | Secret | 用途 |
 | --- | --- | --- |
 | `test` / `production` | `OA_AGENT_SSO_SHARED_SECRET` | OA 与 OAagent 的用户 SSO 签名；两端一致 |
-| `test` / `production` | `OA_AGENT_AUTOMATION_TOKEN` | OA 后端读取模型目录和校验任务模型；两端一致 |
+| `test` / `production` | `OA_AGENT_AUTOMATION_TOKEN` | Node 与 Worker 自动任务内部接口共用的专用凭证 |
+| `test` / `production` | `OA_PROJECT_SYNC_TOKEN` | Worker 调用对应原 OA 项目同步接口的专用凭证 |
+| `test` / `production` | `DATABASE_URL` | 各自独立的 Node 自动任务 MySQL 连接串 |
+| `test` / `production` | `OA_SESSION_SECRET` | 与对应原 OA 的 sessionid 签名密钥一致 |
 
-两个环境必须使用不同的高强度随机值。`OA_AGENT_AUTOMATION_TOKEN` 不得复用 SSO 密钥、用户 session、GitHub token 或模型 Key。
+两个环境必须使用不同的数据库、自动化 token、项目同步 token和 OA session 签名密钥。`OA_AGENT_AUTOMATION_TOKEN` 不得复用 SSO 密钥、用户 session、GitHub token 或模型 Key；完整 `DATABASE_URL` 只保存为 Environment Secret。
+
+CI 会阻止环境串库：`test` 的 URL 路径必须是 `/oagent_test`，`production` 必须是 `/oagent`。
 
 `192.168.251.1` 是当前服务器的 `docker0` 地址。测试 OA 后端容器无需加入 OAagent 的 Compose 网络,即可通过 `http://192.168.251.1:3003` 访问 Agent。换服务器后先执行 `ip -4 addr show docker0` 确认地址；生产环境仅在 OA 后端也需要跨容器访问 Agent 时配置对应地址。
 

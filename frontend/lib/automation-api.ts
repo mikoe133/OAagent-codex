@@ -180,6 +180,7 @@ export type AutomationRun = {
 
 export type AutomationRunProject = {
   id: number
+  run_id: string
   project_id: number
   project_name: string
   status_before: string | null
@@ -188,6 +189,7 @@ export type AutomationRunProject = {
   repository_count: number
   commit_count: number
   summary_date: string | null
+  source_digest: string | null
   generated_summary: string | null
   ai_confidence: number | null
   ai_note: string | null
@@ -196,21 +198,29 @@ export type AutomationRunProject = {
   started_at?: string | null
   finished_at?: string | null
   duration_ms: number | null
+  created_at: string
+  updated_at: string
 }
 
 export type AutomationAiInteraction = {
   id: number
+  run_id: string
   run_project_id: number
+  interaction_key: string
   provider: string
   model: string
+  model_catalog_version: string | null
   prompt_version: string | null
   fallback_used: boolean
+  upstream_request_id: string | null
   input_tokens: number | null
   output_tokens: number | null
   latency_ms: number | null
   status: "succeeded" | "failed" | "fallback"
   error_code: string | null
   error_summary: string | null
+  purged_at: string | null
+  created_at: string
   system_prompt_snapshot?: string | null
   request_payload_sanitized?: unknown
   response_payload_sanitized?: unknown

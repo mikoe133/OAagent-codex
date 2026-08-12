@@ -2,9 +2,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 export function readServerEnvValue(key: string): string | null {
-  const direct = process.env[key]?.trim()
-  if (direct) {
-    return direct
+  if (Object.prototype.hasOwnProperty.call(process.env, key)) {
+    return process.env[key]?.trim() || null
   }
 
   const cwd = process.cwd()

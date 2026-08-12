@@ -43,6 +43,7 @@ export type ProjectProgressConfig = {
     maxTotalPatchChars: number;
   };
   automation: {
+    baseUrl: string;
     token: string | null;
     workerInstance: string;
     leaseSeconds: number;
@@ -65,11 +66,14 @@ export function loadProjectProgressConfig(
   requestedModel: ProjectProgressRequestedModel = {},
 ): ProjectProgressConfig {
   const writeEnabled = parseBoolean(environment.PROJECT_PROGRESS_WRITE_ENABLED, false);
-  const oaBaseUrl = requireValue(environment, "OA_API_BASE_URL");
+  const projectSyncBaseUrl = environment.PROJECT_SYNC_API_BASE_URL?.trim() ||
+    requireProjectSyncBaseUrl(environment);
+  const automationBaseUrl = environment.AUTOMATION_API_BASE_URL?.trim() ||
+    projectSyncBaseUrl;
   const writeAuthorization = resolveWriteAuthorization(
     environment,
     writeEnabled,
-    oaBaseUrl,
+    projectSyncBaseUrl,
   );
   const tokenHeader = environment.OA_PROJECT_SYNC_TOKEN_HEADER?.trim() || "Authorization";
   try {
@@ -92,7 +96,7 @@ export function loadProjectProgressConfig(
   );
   const heartbeatSeconds = parseIntegerInRange(
     environment.PROJECT_PROGRESS_HEARTBEAT_SECONDS,
-    60,
+    10,
     10,
     300,
     "PROJECT_PROGRESS_HEARTBEAT_SECONDS",
@@ -144,7 +148,7 @@ export function loadProjectProgressConfig(
 
   return {
     oa: {
-      baseUrl: oaBaseUrl,
+      baseUrl: projectSyncBaseUrl,
       alias: environment.OA_AUTH_ALIAS?.trim() || "default",
       token: requireValue(environment, "OA_PROJECT_SYNC_TOKEN"),
       tokenHeader,
@@ -186,6 +190,7 @@ export function loadProjectProgressConfig(
       maxTotalPatchChars,
     },
     automation: {
+      baseUrl: automationBaseUrl,
       token: environment.OA_AGENT_AUTOMATION_TOKEN?.trim() || null,
       workerInstance: resolveWorkerInstance(environment.PROJECT_PROGRESS_WORKER_INSTANCE),
       leaseSeconds,
@@ -226,6 +231,14 @@ function resolveWorkerInstance(value: string | undefined): string {
     throw new Error("PROJECT_PROGRESS_WORKER_INSTANCE 必须是 1-255 字符的单行文本。");
   }
   return resolved;
+}
+
+function requireProjectSyncBaseUrl(environment: Record<string, string | undefined>): string {
+  const value = environment.OA_API_BASE_URL?.trim();
+  if (!value) {
+    throw new Error("缺少 PROJECT_SYNC_API_BASE_URL 或 OA_API_BASE_URL。");
+  }
+  return value;
 }
 
 function parseIntegerInRange(

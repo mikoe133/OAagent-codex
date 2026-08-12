@@ -1,6 +1,8 @@
 import type { ProjectProgressCommit } from "../../domain/projectProgress.js";
 import type { GitHubRepositoryIdentity } from "./githubUrl.js";
 import type {
+  GitHubRepositoryReadProgress,
+  GitHubRepositoryReadProgressSink,
   GitHubRepositorySnapshot,
   ProjectProgressGitHubReader,
 } from "./githubTypes.js";
@@ -9,6 +11,7 @@ import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
 const DEFAULT_LOOKBACK_HOURS = 24 * 30;
 const PAGE_SIZE = 100;
 const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
+const BRANCH_READ_CONCURRENCY = 6;
 
 type GitHubFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -39,14 +42,25 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     repository: GitHubRepositoryIdentity,
     observedAt: Date,
     signal?: AbortSignal,
+    onProgress?: GitHubRepositoryReadProgressSink,
   ): Promise<GitHubRepositorySnapshot> {
     const key = repository.fullName.toLowerCase();
     const cached = this.cache.get(key);
     if (cached) {
       return cached;
     }
-    const request = this.readRepositoryUncached(repository, observedAt, signal);
+    const request = this.readRepositoryUncached(
+      repository,
+      observedAt,
+      signal,
+      onProgress,
+    );
     this.cache.set(key, request);
+    void request.catch(() => {
+      if (this.cache.get(key) === request) {
+        this.cache.delete(key);
+      }
+    });
     return request;
   }
 
@@ -54,6 +68,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     repository: GitHubRepositoryIdentity,
     observedAt: Date,
     signal?: AbortSignal,
+    onProgress?: GitHubRepositoryReadProgressSink,
   ): Promise<GitHubRepositorySnapshot> {
     const metadata = decodeRepository(
       await this.request(
@@ -68,8 +83,20 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
       observedAt.getTime() - this.lookbackHours * 60 * 60 * 1_000,
     ).toISOString();
     const commitsByKey = new Map<string, ProjectProgressCommit>();
+    let branchesCompleted = 0;
+    let commitsRead = 0;
+    let progressQueue = Promise.resolve();
+    const reportProgress = (progress: GitHubRepositoryReadProgress) => {
+      progressQueue = progressQueue.then(() => notifyProgress(onProgress, progress));
+      return progressQueue;
+    };
 
-    for (const branch of branches) {
+    await reportProgress({
+      branchesCompleted,
+      branchesTotal: branches.length,
+      commitsRead,
+    });
+    await forEachConcurrent(branches, BRANCH_READ_CONCURRENCY, async (branch) => {
       for (let page = 1; ; page += 1) {
         const payload = await this.request(
           `/repos/${encode(repository.owner)}/${encode(repository.repository)}/commits`,
@@ -81,6 +108,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
           break;
         }
         const commits = decodeCommits(payload, metadata.id, metadata.fullName);
+        commitsRead += commits.length;
         for (const commit of commits) {
           commitsByKey.set(`${metadata.id}:${commit.sha}`, commit);
         }
@@ -88,7 +116,13 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
           break;
         }
       }
-    }
+      branchesCompleted += 1;
+      await reportProgress({
+        branchesCompleted,
+        branchesTotal: branches.length,
+        commitsRead,
+      });
+    });
 
     const commits = [...commitsByKey.values()].sort((left, right) =>
       left.committedAt.localeCompare(right.committedAt) || left.sha.localeCompare(right.sha),
@@ -170,6 +204,53 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     } catch {
       throw new GitHubRequestError("GitHub 响应不是合法 JSON。", response.status, null);
     }
+  }
+}
+
+async function notifyProgress(
+  sink: GitHubRepositoryReadProgressSink | undefined,
+  progress: GitHubRepositoryReadProgress,
+): Promise<void> {
+  if (!sink) {
+    return;
+  }
+  try {
+    await sink(progress);
+  } catch {
+    return;
+  }
+}
+
+async function forEachConcurrent<T>(
+  items: readonly T[],
+  concurrency: number,
+  operation: (item: T) => Promise<void>,
+): Promise<void> {
+  let nextIndex = 0;
+  let failed = false;
+  let failure: unknown;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (!failed) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const item = items[index];
+        if (item === undefined) {
+          return;
+        }
+        try {
+          await operation(item);
+        } catch (error) {
+          failed = true;
+          failure = error;
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
+  if (failed) {
+    throw failure;
   }
 }
 

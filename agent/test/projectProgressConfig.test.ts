@@ -7,6 +7,8 @@ describe("loadProjectProgressConfig", () => {
     const config = loadProjectProgressConfig(
       {
         OA_API_BASE_URL: "https://oa.example.test",
+        AUTOMATION_API_BASE_URL: "https://automation.example.test",
+        PROJECT_SYNC_API_BASE_URL: "https://project-sync.example.test",
         OA_AUTH_ALIAS: "production",
         OA_API_TOKEN_HEADER: "Cookie",
         OA_PROJECT_SYNC_TOKEN: "worker-token",
@@ -18,6 +20,8 @@ describe("loadProjectProgressConfig", () => {
       "/srv/oa-agent",
     );
 
+    assert.equal(config.oa.baseUrl, "https://project-sync.example.test");
+    assert.equal(config.automation.baseUrl, "https://automation.example.test");
     assert.equal(config.oa.tokenHeader, "X-Worker-Token");
     assert.equal(config.oa.tokenPrefix, "Token");
     assert.equal(config.oa.token, "worker-token");
@@ -25,7 +29,7 @@ describe("loadProjectProgressConfig", () => {
     assert.equal(config.writeEnabled, false);
     assert.equal(config.writeAuthorization, "disabled");
     assert.equal(config.automation.leaseSeconds, 300);
-    assert.equal(config.automation.heartbeatSeconds, 60);
+    assert.equal(config.automation.heartbeatSeconds, 10);
     assert.deepEqual(config.concurrency, {
       github: 6,
       agent: 2,
@@ -43,6 +47,38 @@ describe("loadProjectProgressConfig", () => {
       maxPatchCharsPerFile: 1_200,
       maxTotalPatchChars: 12_000,
     });
+  });
+
+  it("can run the worker with split automation and project sync base urls", () => {
+    const config = loadProjectProgressConfig(
+      {
+        AUTOMATION_API_BASE_URL: "https://automation-node.example.test",
+        PROJECT_SYNC_API_BASE_URL: "https://old-oa.example.test",
+        OA_PROJECT_SYNC_TOKEN: "worker-token",
+        OA_AGENT_AUTOMATION_TOKEN: "automation-token",
+        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        NEXTTOKEN_API_KEY: "model-token",
+      },
+      "/srv/oa-agent",
+    );
+
+    assert.equal(config.automation.baseUrl, "https://automation-node.example.test");
+    assert.equal(config.oa.baseUrl, "https://old-oa.example.test");
+  });
+
+  it("keeps OA_API_BASE_URL as the compatibility fallback", () => {
+    const config = loadProjectProgressConfig(
+      {
+        OA_API_BASE_URL: "https://legacy-oa.example.test",
+        OA_PROJECT_SYNC_TOKEN: "worker-token",
+        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        NEXTTOKEN_API_KEY: "model-token",
+      },
+      "/srv/oa-agent",
+    );
+
+    assert.equal(config.automation.baseUrl, "https://legacy-oa.example.test");
+    assert.equal(config.oa.baseUrl, "https://legacy-oa.example.test");
   });
 
   it("rejects test writes without an explicit unsafe acknowledgement", () => {

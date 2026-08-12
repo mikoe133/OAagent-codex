@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS automation_run_trace_events;
+DROP TABLE IF EXISTS automation_job_change_logs;
+DROP TABLE IF EXISTS automation_ai_interactions;
+DROP TABLE IF EXISTS automation_job_run_projects;
+DROP TABLE IF EXISTS automation_job_runs;
+DROP TABLE IF EXISTS automation_prompt_profiles;
+DROP TABLE IF EXISTS automation_job_tags;
+DROP TABLE IF EXISTS automation_tags;
+DROP TABLE IF EXISTS automation_jobs;
