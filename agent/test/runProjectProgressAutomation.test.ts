@@ -280,10 +280,10 @@ describe("runProjectProgressAutomation", () => {
       resolveExecution: async () => async () => fallbackReport,
     });
 
-    assert.equal(result.status, "partial_failed");
+    assert.equal(result.status, "failed");
     assert.deepEqual(projectOutcomes, ["failed"]);
     assert.deepEqual(terminalUpdates, [{
-      status: "partial_failed",
+      status: "failed",
       retryRecommended: true,
       errorCode: "project_summary_failed",
     }]);

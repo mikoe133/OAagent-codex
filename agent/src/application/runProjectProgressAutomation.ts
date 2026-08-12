@@ -518,6 +518,9 @@ function mapProjectOutcome(
   if (project.warnings.some(isWriteConflictWarning)) {
     return "write_conflict";
   }
+  if (project.warnings.some(isSummaryRetryWarning)) {
+    return "failed";
+  }
   return project.outcome;
 }
 
@@ -565,15 +568,27 @@ function resolveTerminal(
   const summaryFailures = report.projects.filter((project) =>
     project.warnings.some(isSummaryRetryWarning)
   ).length;
+  const nonSummaryFailures = report.projects.filter((project) =>
+    !project.warnings.some(isSummaryRetryWarning) && (
+      mapProjectOutcome(project) === "invalid_github_urls" ||
+      mapProjectOutcome(project) === "incomplete" ||
+      mapProjectOutcome(project) === "write_conflict" ||
+      mapProjectOutcome(project) === "failed"
+    )
+  ).length;
+  if (
+    nonSummaryFailures === 0 &&
+    report.retryRecommended &&
+    summaryFailures > 0
+  ) {
+    return {
+      status: summaryFailures === report.projects.length ? "failed" : "partial_failed",
+      retryRecommended: true,
+      errorCode: "project_summary_failed",
+      errorSummary: `${summaryFailures} 个项目总结失败，已写入兜底结果。`,
+    };
+  }
   if (failed === 0) {
-    if (report.retryRecommended && summaryFailures > 0) {
-      return {
-        status: "partial_failed",
-        retryRecommended: true,
-        errorCode: "project_summary_failed",
-        errorSummary: `${summaryFailures} 个项目总结失败，已写入兜底结果。`,
-      };
-    }
     return {
       status: "succeeded",
       retryRecommended: false,
