@@ -247,15 +247,22 @@ export function projectProgressExecutionPolicy(triggerSource: string): Pick<
   ProjectProgressSyncInput,
   "forceRegenerateSummaries" | "summaryWritePolicy"
 > {
-  return triggerSource === "manual"
-    ? {
-        forceRegenerateSummaries: true,
-        summaryWritePolicy: "manual-overwrite",
-      }
-    : {
-        forceRegenerateSummaries: false,
-        summaryWritePolicy: "managed-only",
-      };
+  if (triggerSource === "manual") {
+    return {
+      forceRegenerateSummaries: true,
+      summaryWritePolicy: "manual-overwrite",
+    };
+  }
+  if (triggerSource === "retry") {
+    return {
+      forceRegenerateSummaries: true,
+      summaryWritePolicy: "managed-only",
+    };
+  }
+  return {
+    forceRegenerateSummaries: false,
+    summaryWritePolicy: "managed-only",
+  };
 }
 
 export async function syncProjectProgress(
@@ -866,6 +873,13 @@ async function executeProjectProgressSync(
           continue;
         }
         const results = repositoryGroupResults as SuccessfulRepositorySummaryResult[];
+        for (const result of results) {
+          if (result.status === "fallback") {
+            evaluation.warnings.push(
+              `repository_summary_fallback:${result.repositoryKey}:${plan.group.summaryDate}`,
+            );
+          }
+        }
         const limitations = [...new Set(results.flatMap((result) => result.limitations))];
         const anomalyCount = plan.group.commits.filter(
           (commit) => commit.timestampAnomaly,
@@ -1199,15 +1213,10 @@ function combineRepositorySummaries(
 }
 
 function projectNeedsRetry(report: ProjectProgressProjectReport): boolean {
-  if (report.outcome === "incomplete") {
-    return report.warnings.length === 0 || report.warnings.some(
-      (warning) => !warning.startsWith("repository_configuration_error:"),
-    );
-  }
   return report.warnings.some((warning) =>
-    warning.startsWith("write_failed:") ||
-    warning.startsWith("status_write_failed:") ||
-    warning.startsWith("summary_write_failed:")
+    warning.startsWith("repository_summary_fallback:") ||
+    warning.startsWith("repository_summary_failed:") ||
+    warning.startsWith("repository_summary_incomplete:")
   );
 }
 

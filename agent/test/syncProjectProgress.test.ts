@@ -68,6 +68,11 @@ describe("syncProjectProgress", () => {
       failures: 1,
       queueSamples: 3,
     });
+    assert.equal(report.retryRecommended, true);
+    assert.match(
+      report.projects[1]?.warnings.join(" ") ?? "",
+      /repository_summary_fallback:example\/repository-2:2026-07-24/,
+    );
   });
 
   it("fans out one Agent summary per active repository with 6/2/1 concurrency", async () => {
@@ -564,7 +569,7 @@ describe("syncProjectProgress", () => {
     assert.equal(watermarks, 0);
     assert.equal(result.projects[0]?.outcome, "incomplete");
     assert.deepEqual(result.projects[0]?.summaries, []);
-    assert.equal(result.retryRecommended, true);
+    assert.equal(result.retryRecommended, false);
   });
 
   it("treats a GitHub 404 as a non-retryable repository configuration error", async () => {
@@ -881,17 +886,19 @@ describe("syncProjectProgress", () => {
     assert.doesNotMatch(result.projects[0]?.warnings.join(" ") ?? "", /summary_unmanaged/);
   });
 
-  it("maps only manual triggers to regeneration and overwrite", () => {
+  it("regenerates manual and retry summaries but only manual runs overwrite", () => {
     assert.deepEqual(projectProgressExecutionPolicy("manual"), {
       forceRegenerateSummaries: true,
       summaryWritePolicy: "manual-overwrite",
     });
-    for (const triggerSource of ["schedule", "retry"]) {
-      assert.deepEqual(projectProgressExecutionPolicy(triggerSource), {
-        forceRegenerateSummaries: false,
-        summaryWritePolicy: "managed-only",
-      });
-    }
+    assert.deepEqual(projectProgressExecutionPolicy("retry"), {
+      forceRegenerateSummaries: true,
+      summaryWritePolicy: "managed-only",
+    });
+    assert.deepEqual(projectProgressExecutionPolicy("schedule"), {
+      forceRegenerateSummaries: false,
+      summaryWritePolicy: "managed-only",
+    });
   });
 
   it("reports an applied status when summary reconciliation later fails", async () => {
@@ -935,6 +942,7 @@ describe("syncProjectProgress", () => {
 
     assert.equal(result.mutationsApplied, 1);
     assert.match(result.projects[0]?.warnings.join(" ") ?? "", /summary_write_failed/);
+    assert.equal(result.retryRecommended, false);
   });
 
   it("reports missing repositories and project detail failures without side effects", async () => {
@@ -1216,7 +1224,7 @@ describe("syncProjectProgress", () => {
     assert.doesNotMatch(result.projects[0]?.warnings.join(" ") ?? "", /summary_write_failed/);
   });
 
-  it("recommends a scheduler retry after a transient project failure", async () => {
+  it("does not retry a project detail failure", async () => {
     const project = {
       id: 25,
       projectName: "retry",
@@ -1253,7 +1261,7 @@ describe("syncProjectProgress", () => {
       store: createWritableStore(),
     });
 
-    assert.equal(result.retryRecommended, true);
+    assert.equal(result.retryRecommended, false);
   });
 
   it("stops all later mutations after definitive project fencing loss", async () => {

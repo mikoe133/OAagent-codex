@@ -246,6 +246,43 @@ describe("runProjectProgressAutomation", () => {
     assert.equal(peakUploads, 1);
   });
 
+  it("requests a retry when summary generation used a fallback", async () => {
+    const terminalUpdates: Array<{
+      status: AutomationRunStatus;
+      retryRecommended?: boolean;
+      errorCode?: string | null;
+    }> = [];
+    const client = fakeClient({
+      updateRun: async ({ status, retryRecommended, errorCode }) => {
+        if (status !== "running") {
+          terminalUpdates.push({ status, retryRecommended, errorCode });
+        }
+      },
+    });
+    const fallbackReport = report({ withProject: true });
+    fallbackReport.retryRecommended = true;
+    fallbackReport.metrics.repositoryTasksSucceeded = 0;
+    fallbackReport.metrics.repositoryTasksFallback = 1;
+    fallbackReport.projects[0]!.warnings.push(
+      "repository_summary_fallback:example/api:2026-07-30",
+    );
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async () => fallbackReport,
+    });
+
+    assert.equal(result.status, "partial_failed");
+    assert.deepEqual(terminalUpdates, [{
+      status: "partial_failed",
+      retryRecommended: true,
+      errorCode: "project_summary_failed",
+    }]);
+  });
+
   it("reports live trace stages while the run is active", async () => {
     const traceEvents: Array<{ eventKey: string; status: string }> = [];
     const client = fakeClient({
@@ -402,6 +439,34 @@ describe("runProjectProgressAutomation", () => {
 
     assert.equal(result.status, "cancelled");
     assert.deepEqual(statuses, ["running", "cancelled"]);
+  });
+
+  it("does not retry a Worker infrastructure failure", async () => {
+    const updates: Array<{
+      status: AutomationRunStatus;
+      retryRecommended?: boolean;
+    }> = [];
+    const client = fakeClient({
+      updateRun: async ({ status, retryRecommended }) => {
+        updates.push({ status, retryRecommended });
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+
+    assert.equal(result.status, "failed");
+    assert.deepEqual(updates, [
+      { status: "running", retryRecommended: undefined },
+      { status: "failed", retryRecommended: false },
+    ]);
   });
 
   it("never reports a terminal status after losing the lease", async () => {
