@@ -12,6 +12,7 @@ import { request as httpsRequest } from "node:https";
 import type { AddressInfo } from "node:net";
 import type { ModelProviderConfig } from "../../config/config.js";
 import type { ModelProviderId } from "../../config/modelCatalog.js";
+import type { ProjectProgressConfig } from "../../config/projectProgressConfig.js";
 
 const RELAY_HOST = "127.0.0.1";
 const HOP_BY_HOP_HEADERS = new Set([
@@ -26,10 +27,15 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-type ModelProviders = Record<ModelProviderId, ModelProviderConfig>;
+type ModelProviders = Partial<Record<ModelProviderId, ModelProviderConfig>>;
 
 export type ModelRelay = {
   baseUrl: string;
+  close(): Promise<void>;
+};
+
+export type ProjectProgressModelRelay = {
+  model: ProjectProgressConfig["model"];
   close(): Promise<void>;
 };
 
@@ -44,6 +50,27 @@ export async function startModelRelay(
   return {
     baseUrl: `http://${RELAY_HOST}:${address.port}`,
     close: () => closeServer(server),
+  };
+}
+
+export async function startProjectProgressModelRelay(
+  model: ProjectProgressConfig["model"],
+): Promise<ProjectProgressModelRelay> {
+  const providerConfig: ModelProviderConfig = {
+    name: model.provider,
+    apiKey: model.apiKey,
+    baseUrl: model.apiBaseUrl,
+    envKey: model.provider === "nexttoken"
+      ? "NEXTTOKEN_API_KEY"
+      : "OPENROUTER_API_KEY",
+  };
+  const relay = await startModelRelay({ [model.provider]: providerConfig });
+  return {
+    model: {
+      ...model,
+      apiBaseUrl: `${relay.baseUrl}/${model.provider}/v1`,
+    },
+    close: relay.close,
   };
 }
 
@@ -74,6 +101,10 @@ function proxyModelRequest(
 
   const providerId = route[1] as ModelProviderId;
   const provider = providers[providerId];
+  if (!provider) {
+    writeJson(response, 404, { error: "not found" });
+    return;
+  }
   if (!credentialsMatch(request.headers.authorization, provider.apiKey)) {
     writeJson(response, 401, { error: "unauthorized" });
     return;

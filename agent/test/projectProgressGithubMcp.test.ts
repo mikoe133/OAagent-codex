@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -8,6 +9,8 @@ import {
   type ProjectProgressAgentLimits,
 } from "../src/infrastructure/github/projectProgressMcpServer.js";
 import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
+import { GitHubRequestExecutor } from "../src/infrastructure/github/githubRequestExecutor.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 const limits: ProjectProgressAgentLimits = {
   maxDetailCalls: 3,
@@ -161,6 +164,38 @@ describe("GitHubCommitDetailTool", () => {
     assert.doesNotMatch(JSON.stringify(result), /github-secret|abcdef123456|example\/api/);
   });
 
+  it("records bounded detail requests under github.commit.get", async () => {
+    const operationMetrics = new OperationMetricsRecorder();
+    const tool = new GitHubCommitDetailTool(
+      {
+        githubToken: "github-secret",
+        githubApiBaseUrl: "https://api.github.test",
+        candidates,
+        limits,
+        operationMetrics,
+      },
+      async () => Response.json({
+        stats: { additions: 1, deletions: 0, total: 1 },
+        files: [],
+      }),
+    );
+
+    await tool.readCommitDetails({
+      repository: "example/api",
+      sha: "abcdef123456",
+    });
+
+    assert.deepEqual(operationMetrics.snapshot().map((metric) => ({
+      endpoint: metric.endpoint,
+      requests: metric.requests,
+      successes: metric.successes,
+    })), [{
+      endpoint: "github.commit.get",
+      requests: 1,
+      successes: 1,
+    }]);
+  });
+
   it("shares the GitHub HTTP limiter across independent repository tools", async () => {
     const limiter = new AsyncSemaphore(1);
     let activeRequests = 0;
@@ -194,6 +229,76 @@ describe("GitHubCommitDetailTool", () => {
 
     assert.equal(peakRequests, 1);
     assert.equal(limiter.metrics.peakActive, 1);
+  });
+
+  it("uses the shared GitHub executor for bounded transient retries", async () => {
+    let calls = 0;
+    const requestExecutor = new GitHubRequestExecutor({
+      maxAttempts: 2,
+      sleep: async () => undefined,
+    });
+    const tool = new GitHubCommitDetailTool(
+      {
+        githubToken: "github-secret",
+        githubApiBaseUrl: "https://api.github.test",
+        candidates,
+        limits,
+        requestExecutor,
+      },
+      async () => {
+        calls += 1;
+        return calls === 1
+          ? new Response("busy", { status: 503 })
+          : Response.json({
+              stats: { additions: 1, deletions: 0, total: 1 },
+              files: [],
+            });
+      },
+    );
+
+    const result = await tool.readCommitDetails({
+      repository: "example/api",
+      sha: "abcdef123456",
+    });
+
+    assert.equal(result.status, "success");
+    assert.equal(calls, 2);
+    assert.equal(requestExecutor.metrics.retries, 1);
+  });
+
+  it("keeps the process alive while the default retry backoff is awaited", () => {
+    const moduleUrl = new URL(
+      "../src/infrastructure/github/githubRequestExecutor.ts",
+      import.meta.url,
+    ).href;
+    const script = `
+      import { GitHubRequestExecutor } from ${JSON.stringify(moduleUrl)};
+      const executor = new GitHubRequestExecutor({
+        maxAttempts: 2,
+        baseBackoffMs: 20,
+        maxBackoffMs: 20,
+        random: () => 1,
+      });
+      let calls = 0;
+      const response = await executor.execute(
+        async () => {
+          calls += 1;
+          return calls === 1
+            ? new Response("busy", { status: 503 })
+            : Response.json({ ok: true });
+        },
+        { repository: "example/api" },
+      );
+      if (!response.ok || calls !== 2) process.exitCode = 2;
+    `;
+
+    const child = spawnSync(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      { encoding: "utf8" },
+    );
+
+    assert.equal(child.status, 0, child.stderr || child.stdout);
   });
 });
 

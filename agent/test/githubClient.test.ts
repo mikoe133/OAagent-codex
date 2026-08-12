@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  GitHubRequestBudgetExceededError,
   GitHubRequestError,
   GitHubRestProjectReader,
 } from "../src/infrastructure/github/githubClient.js";
 import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
 import { normalizeGitHubRepositoryUrl } from "../src/infrastructure/github/githubUrl.js";
+import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("GitHubRestProjectReader", () => {
   it("deduplicates commits across branches and caches a shared repository", async () => {
@@ -206,6 +208,172 @@ describe("GitHubRestProjectReader", () => {
       [0, 1, 2, 3, 4],
     );
     assert.equal(progress.at(-1)?.commitsRead, 4);
+  });
+
+  it("records requests under stable GitHub endpoint names", async () => {
+    const metrics = new OperationMetricsRecorder();
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/branches")) {
+          return Response.json([{ name: "main" }]);
+        }
+        if (url.pathname.endsWith("/commits")) {
+          return Response.json([]);
+        }
+        return Response.json({
+          id: 201,
+          full_name: "example/measured",
+          created_at: "2026-07-24T01:00:00Z",
+        });
+      },
+      "https://api.github.test",
+      undefined,
+      undefined,
+      metrics,
+    );
+
+    await reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/measured"),
+      new Date("2026-07-24T12:00:00Z"),
+    );
+
+    assert.deepEqual(
+      Object.fromEntries(metrics.snapshot().map((item) => [item.endpoint, item.requests])),
+      {
+        "github.branches.list": 1,
+        "github.commits.list": 1,
+        "github.repository.get": 1,
+      },
+    );
+  });
+
+  it("retries rate limits and transient server failures with a released permit", async () => {
+    const statuses = [429, 503, 200];
+    let active = 0;
+    let peak = 0;
+    let attempts = 0;
+    const backoffs: number[] = [];
+    const limiter = new AsyncSemaphore(1);
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async (input) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await delay(1);
+        active -= 1;
+        attempts += 1;
+        const status = statuses.shift() ?? 200;
+        if (new URL(String(input)).pathname.endsWith("/branches")) {
+          return Response.json([]);
+        }
+        if (status !== 200) {
+          return new Response("rate limited", {
+            status,
+            headers: status === 429 ? { "retry-after": "0" } : {},
+          });
+        }
+        return Response.json({
+          id: 301,
+          full_name: "example/retry",
+          created_at: "2026-07-24T01:00:00Z",
+        });
+      },
+      "https://api.github.test",
+      undefined,
+      limiter,
+      undefined,
+      {
+        maxAttempts: 3,
+        baseBackoffMs: 1,
+        sleep: async (milliseconds) => {
+          backoffs.push(milliseconds);
+        },
+      },
+    );
+
+    await reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/retry"),
+      new Date("2026-07-24T12:00:00Z"),
+    );
+
+    assert.equal(attempts, 4);
+    assert.equal(peak, 1);
+    assert.equal(limiter.metrics.peakActive, 1);
+    assert.equal(backoffs.length, 2);
+  });
+
+  it("returns an incomplete snapshot when a repository request budget is exhausted", async () => {
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith("/branches")) {
+          return Response.json([{ name: "main" }, { name: "develop" }]);
+        }
+        return Response.json({
+          id: 302,
+          full_name: "example/budget",
+          created_at: "2026-07-24T01:00:00Z",
+        });
+      },
+      "https://api.github.test",
+      undefined,
+      undefined,
+      undefined,
+      { maxBranches: 1 },
+    );
+
+    const snapshot = await reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/budget"),
+      new Date("2026-07-24T12:00:00Z"),
+    );
+
+    assert.equal(snapshot.complete, false);
+    assert.deepEqual(snapshot.commits, []);
+  });
+
+  it("stops retry backoff and does not issue another request after cancellation", async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    let sleepStarted!: () => void;
+    const sleepGate = new Promise<void>((resolve) => {
+      sleepStarted = resolve;
+    });
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async () => {
+        attempts += 1;
+        return new Response("busy", { status: 503 });
+      },
+      "https://api.github.test",
+      undefined,
+      undefined,
+      undefined,
+      {
+        maxAttempts: 3,
+        baseBackoffMs: 10,
+        sleep: async (_milliseconds, signal) => {
+          sleepStarted();
+          await new Promise<void>((resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+            if (signal?.aborted) reject(signal.reason);
+            else void sleepGate.then(resolve);
+          });
+        },
+      },
+    );
+    const request = reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/cancel"),
+      new Date("2026-07-24T12:00:00Z"),
+      controller.signal,
+    );
+    await sleepGate;
+    controller.abort(new Error("cancelled"));
+
+    await assert.rejects(request, /cancelled/);
+    assert.equal(attempts, 1);
   });
 });
 

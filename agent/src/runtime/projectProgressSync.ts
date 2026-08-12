@@ -5,9 +5,11 @@ import { CodexProjectProgressSummarizer } from "../application/projectProgressAg
 import { syncProjectProgress } from "../application/syncProjectProgress.js";
 import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
+import { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
+import { OperationMetricsRecorder } from "../infrastructure/observability/operationMetrics.js";
 import { parseProjectProgressOptions } from "./projectProgressOptions.js";
 
 async function main(): Promise<void> {
@@ -38,18 +40,31 @@ async function main(): Promise<void> {
     );
   }
   const store = new ProjectProgressStore(config.stateDatabasePath);
+  const operationMetrics = new OperationMetricsRecorder();
   const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
+  const githubRequestExecutor = new GitHubRequestExecutor({
+    requestLimiter: githubRequestLimiter,
+    maxConcurrentRequestsPerRepository: config.concurrency.github,
+    maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
+    maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
+  });
 
   try {
     const report = await syncProjectProgress({
       observedAt: options.observedAt ?? new Date(),
-      oaClient: new ProjectProgressOaClient(config.oa),
+      oaClient: new ProjectProgressOaClient(config.oa, fetch, operationMetrics),
       githubReader: new GitHubRestProjectReader(
         config.githubToken,
         fetch,
         config.githubApiBaseUrl,
         undefined,
         githubRequestLimiter,
+        operationMetrics,
+        {
+          requestExecutor: githubRequestExecutor,
+          maxBranches: config.githubLimits.maxBranches,
+          maxCommitPagesPerBranch: config.githubLimits.maxCommitPagesPerBranch,
+        },
       ),
       summarizer: new CodexProjectProgressSummarizer({
         model: config.model,
@@ -59,12 +74,18 @@ async function main(): Promise<void> {
         workingDirectory: repoRoot,
         workspaceRoot: config.workspaceRoot,
         runId: `manual-${Date.now()}`,
+        modelCatalogVersion: "manual-runtime-v1",
+        repositorySummaryCache: store,
         githubRequestLimiter,
+        githubRequestExecutor,
+        operationMetrics,
       }),
       store,
       writeMode: options.writeMode,
       concurrency: config.concurrency,
       githubRequestLimiter,
+      operationMetrics,
+      projectDetailCompatibilityMode: config.oa.projectDetailCompatibilityMode,
       ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
     });
     console.log(JSON.stringify({

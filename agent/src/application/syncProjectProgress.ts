@@ -16,12 +16,19 @@ import type {
   GitHubRepositorySnapshot,
   ProjectProgressGitHubReader,
 } from "../infrastructure/github/githubTypes.js";
+import { isDefinitiveLeaseLossError } from "../infrastructure/oa/fencedMutation.js";
 import type {
   OaCommitSummary,
   OaProject,
   ProjectProgressOaReader,
   ProjectProgressOaWriter,
 } from "../infrastructure/oa/projectProgressOaClient.js";
+import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
+import {
+  OperationMetricsRecorder,
+  PROJECT_PROGRESS_ENDPOINTS,
+  type OperationMetricSnapshot,
+} from "../infrastructure/observability/operationMetrics.js";
 import type { ManagedProjectSummary } from "../infrastructure/persistence/projectProgressStore.js";
 import type {
   ProjectProgressAiInteraction,
@@ -99,6 +106,7 @@ export type ProjectProgressSyncReport = {
     agentPeakConcurrency: number;
     oaWritePeakConcurrency: number;
   };
+  operationMetrics: OperationMetricSnapshot[];
   projects: ProjectProgressProjectReport[];
 };
 
@@ -223,6 +231,8 @@ export type ProjectProgressSyncInput = {
   writeMode?: "dry-run" | "unsafe-test" | "production";
   concurrency?: ProjectProgressConcurrency;
   githubRequestLimiter?: AsyncSemaphore;
+  operationMetrics?: OperationMetricsRecorder;
+  projectDetailCompatibilityMode?: boolean;
   shouldCancel?: () => boolean;
   trace?: ProjectProgressTraceSink;
 };
@@ -231,9 +241,11 @@ export async function syncProjectProgress(
   input: ProjectProgressSyncInput,
 ): Promise<ProjectProgressSyncReport> {
   const cancellation = createCancellationMonitor(input.shouldCancel);
+  const operationMetrics = input.operationMetrics ?? new OperationMetricsRecorder();
   try {
     return await executeProjectProgressSync({
       ...input,
+      operationMetrics,
       ...(cancellation.signal ? { cancellationSignal: cancellation.signal } : {}),
     });
   } finally {
@@ -242,7 +254,10 @@ export async function syncProjectProgress(
 }
 
 async function executeProjectProgressSync(
-  input: ProjectProgressSyncInput & { cancellationSignal?: AbortSignal },
+  input: ProjectProgressSyncInput & {
+    operationMetrics: OperationMetricsRecorder;
+    cancellationSignal?: AbortSignal;
+  },
 ): Promise<ProjectProgressSyncReport> {
   const writeMode = input.writeMode ?? "dry-run";
   const concurrency = resolveConcurrency(input.concurrency);
@@ -262,7 +277,7 @@ async function executeProjectProgressSync(
     status: "running",
     title: "读取 OA 项目列表",
   });
-  const listedProjects = await input.oaClient.listProjects();
+  const listedProjects = await input.oaClient.listProjects(input.cancellationSignal);
   const projects = input.projectId === undefined
     ? listedProjects
     : listedProjects.filter((project) => project.id === input.projectId);
@@ -294,7 +309,14 @@ async function executeProjectProgressSync(
     progressCurrent: 0,
     progressTotal: projects.length,
   });
-  for (const listedProject of projects) {
+  const discoveryProjects = await resolveDiscoveryProjects(
+    projects,
+    input.oaClient,
+    input.projectDetailCompatibilityMode ?? false,
+    input.cancellationSignal,
+  );
+  for (const discovery of discoveryProjects) {
+    const listedProject = discovery.listedProject;
     if (input.shouldCancel?.()) {
       cancelled = true;
       break;
@@ -304,16 +326,17 @@ async function executeProjectProgressSync(
       continue;
     }
 
-    let project: OaProject;
-    try {
-      project = await input.oaClient.getProject(listedProject.id);
-    } catch (error) {
+    if (discovery.error !== undefined) {
       entries.push({
         kind: "report",
-        report: incompleteReport(listedProject, `project_detail_failed:${errorMessage(error)}`),
+        report: incompleteReport(
+          listedProject,
+          `project_detail_failed:${errorMessage(discovery.error)}`,
+        ),
       });
       continue;
     }
+    const project = discovery.project;
     if (project.status === "archived") {
       entries.push({ kind: "report", report: archivedReport(project) });
       continue;
@@ -452,19 +475,20 @@ async function executeProjectProgressSync(
           ? "已停止读取"
           : "仓库读取失败",
       });
+    } finally {
+      completedRepositoryReads += 1;
+      await queueReadTrace({
+        eventKey: "read_github",
+        sequence: 300,
+        phase: "read_github",
+        status: "running",
+        title: "读取 GitHub 分支与 Commit",
+        message: `已完成 ${completedRepositoryReads}/${repositoriesByKey.size} 个仓库`,
+        progressCurrent: completedRepositoryReads,
+        progressTotal: repositoriesByKey.size,
+        repositoryFullName: repository.fullName,
+      });
     }
-    completedRepositoryReads += 1;
-    await queueReadTrace({
-      eventKey: "read_github",
-      sequence: 300,
-      phase: "read_github",
-      status: "running",
-      title: "读取 GitHub 分支与 Commit",
-      message: `已完成 ${completedRepositoryReads}/${repositoriesByKey.size} 个仓库`,
-      progressCurrent: completedRepositoryReads,
-      progressTotal: repositoriesByKey.size,
-      repositoryFullName: repository.fullName,
-    });
   }));
   cancelled ||= input.cancellationSignal?.aborted ?? false;
   const repositoryReadFailures = [...repositorySnapshots.values()].filter(
@@ -610,8 +634,12 @@ async function executeProjectProgressSync(
   });
   if (!cancelled) {
     await Promise.all([...repositoryTasks.values()].map(async (task) => {
+      const finishQueueWait = input.operationMetrics.startQueueWait(
+        PROJECT_PROGRESS_ENDPOINTS.modelProjectProgressSummarize,
+      );
       try {
         const result = await agentLimiter.run(async () => {
+          finishQueueWait();
           await emitTrace(input.trace, {
             eventKey: `repository_summary:${task.repositoryKey}:${task.summaryDate}`,
             sequence: 510,
@@ -623,14 +651,17 @@ async function executeProjectProgressSync(
             metadataSanitized: { commit_count: task.commits.length },
           });
           try {
-            const generated = await input.summarizer.summarize({
-              projectId: task.projectId,
-              projectName: task.projectName,
-              repositoryFullName: task.repositoryKey,
-              summaryDate: task.summaryDate,
-              commits: task.commits,
-              ...(input.cancellationSignal ? { signal: input.cancellationSignal } : {}),
-            });
+            const generated = await input.operationMetrics.measure(
+              PROJECT_PROGRESS_ENDPOINTS.modelProjectProgressSummarize,
+              () => input.summarizer.summarize({
+                projectId: task.projectId,
+                projectName: task.projectName,
+                repositoryFullName: task.repositoryKey,
+                summaryDate: task.summaryDate,
+                commits: task.commits,
+                ...(input.cancellationSignal ? { signal: input.cancellationSignal } : {}),
+              }),
+            );
             return {
               key: task.key,
               repositoryKey: task.repositoryKey,
@@ -692,6 +723,7 @@ async function executeProjectProgressSync(
           progressTotal: repositoryTasks.size,
         });
       } catch (error) {
+        finishQueueWait();
         if (input.cancellationSignal?.aborted) {
           cancelled = true;
           await emitTrace(input.trace, {
@@ -876,6 +908,9 @@ async function executeProjectProgressSync(
         mutationsApplied += applied;
         projectMutationsApplied += applied;
       } catch (error) {
+        if (error instanceof ProjectProgressLeaseLostError) {
+          throw error;
+        }
         evaluation.warnings.push(`write_failed:${errorMessage(error)}`);
       }
       if (input.shouldCancel?.()) {
@@ -968,8 +1003,45 @@ async function executeProjectProgressSync(
       agentPeakConcurrency: agentLimiter.metrics.peakActive,
       oaWritePeakConcurrency: oaWriteLimiter.metrics.peakActive,
     },
+    operationMetrics: input.operationMetrics.snapshot(),
     projects: reports,
   };
+}
+
+type ProjectDiscovery = {
+  listedProject: OaProject;
+  project: OaProject;
+  error?: undefined;
+} | {
+  listedProject: OaProject;
+  project: OaProject;
+  error: unknown;
+};
+
+async function resolveDiscoveryProjects(
+  projects: OaProject[],
+  reader: ProjectProgressOaReader,
+  compatibilityMode: boolean,
+  signal?: AbortSignal,
+): Promise<ProjectDiscovery[]> {
+  if (!compatibilityMode) {
+    return projects.map((project) => ({ listedProject: project, project }));
+  }
+  const detailLimiter = new AsyncSemaphore(4);
+  return await Promise.all(projects.map(async (listedProject): Promise<ProjectDiscovery> => {
+    if (listedProject.status === "archived") {
+      return { listedProject, project: listedProject };
+    }
+    try {
+      const project = await detailLimiter.run(
+        () => reader.getProject(listedProject.id, signal),
+        signal,
+      );
+      return { listedProject, project };
+    } catch (error) {
+      return { listedProject, project: listedProject, error };
+    }
+  }));
 }
 
 function createCancellationMonitor(
@@ -1053,7 +1125,10 @@ async function emitTrace(
   }
   try {
     await sink(event);
-  } catch {
+  } catch (error) {
+    if (isDefinitiveLeaseLossError(error)) {
+      throw error;
+    }
     return;
   }
 }
@@ -1163,12 +1238,19 @@ async function applyMutations(input: {
     });
     try {
       await input.writeLimiter.run(
-        () => input.writer.updateProjectStatus(latest.id, input.targetStatus),
+        () => input.writer.updateProjectStatus(
+          latest.id,
+          input.targetStatus,
+          latest.version,
+        ),
         input.cancellationSignal,
       );
       input.store.markOutboxApplied(intentKey);
       applied += 1;
     } catch (error) {
+      if (error instanceof ProjectProgressLeaseLostError) {
+        throw error;
+      }
       input.warnings.push(`status_write_failed:${errorMessage(error)}`);
     }
   }
@@ -1191,6 +1273,9 @@ async function applyMutations(input: {
         warnings: input.warnings,
       });
     } catch (error) {
+      if (error instanceof ProjectProgressLeaseLostError) {
+        throw error;
+      }
       input.warnings.push(
         `summary_write_failed:${proposal.summaryDate}:${errorMessage(error)}`,
       );
@@ -1237,6 +1322,9 @@ async function reconcileSummary(input: {
         input.cancellationSignal,
       );
     } catch (createError) {
+      if (createError instanceof ProjectProgressLeaseLostError) {
+        throw createError;
+      }
       const raced = await input.writer.listCommitSummaries(
         input.projectId,
         input.proposal.summaryDate,
@@ -1289,7 +1377,10 @@ async function reconcileSummary(input: {
     payload: { summaryId: current.id, ...desired },
   });
   await input.writeLimiter.run(
-    () => input.writer.updateCommitSummary(current.id, desired),
+    () => input.writer.updateCommitSummary(current.id, {
+      ...desired,
+      expectedVersion: current.version,
+    }),
     input.cancellationSignal,
   );
   markSummaryApplied(input, current.id);

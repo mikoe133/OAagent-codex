@@ -19,6 +19,7 @@
     "start:project-progress": "node dist/runtime/projectProgressSync.js --dry-run",
     "start:project-progress:apply": "node dist/runtime/projectProgressSync.js --apply",
     "run:project-progress-worker": "tsx src/runtime/projectProgressWorker.ts",
+    "benchmark:project-progress": "tsx src/benchmark/projectProgressBaseline.ts",
     "start:project-progress-worker": "node dist/runtime/projectProgressWorker.js",
     "migrate:automation": "tsx src/runtime/automationMigrate.ts",
     "start:migrate:automation": "node dist/runtime/automationMigrate.js",

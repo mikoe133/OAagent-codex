@@ -8,7 +8,14 @@ import type {
 import {
   AutomationLeaseLostError,
   AutomationOaRequestError,
+  SUPPORTED_JOB_TYPE,
 } from "../infrastructure/oa/automationOaClient.js";
+import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
+import {
+  AutomationTraceDrainTimeoutError,
+  BoundedAutomationTraceQueue,
+  type AutomationTraceSpool,
+} from "../infrastructure/oa/automationTraceQueue.js";
 import type {
   ProjectProgressProjectReport,
   ProjectProgressSyncReport,
@@ -33,11 +40,25 @@ export type ProjectProgressAutomationResult = {
   report: ProjectProgressSyncReport | null;
 };
 
+export type AutomationClaimIdentityStore = {
+  getOrCreateAutomationClaimIdentity(input: {
+    workerInstance: string;
+    supportedJobTypes: string[];
+    leaseSeconds: number;
+  }): {
+    claimRequestId: string;
+    requestDigest: string;
+  };
+  clearAutomationClaimIdentity(claimRequestId: string): void;
+};
+
 export async function runProjectProgressAutomation(input: {
   automationClient: AutomationOaClient;
   workerInstance: string;
   leaseSeconds: number;
   heartbeatSeconds: number;
+  claimIdentityStore?: AutomationClaimIdentityStore;
+  traceSpool?: AutomationTraceSpool;
   resolveExecution: (
     claim: AutomationJobClaim,
   ) => Promise<(
@@ -45,17 +66,30 @@ export async function runProjectProgressAutomation(input: {
     trace?: ProjectProgressTraceSink,
   ) => Promise<ProjectProgressSyncReport>>;
 }): Promise<ProjectProgressAutomationResult> {
-  const claim = await input.automationClient.claim(
-    input.workerInstance,
-    input.leaseSeconds,
-  );
+  const claimIdentity = input.claimIdentityStore?.getOrCreateAutomationClaimIdentity({
+    workerInstance: input.workerInstance,
+    supportedJobTypes: [SUPPORTED_JOB_TYPE],
+    leaseSeconds: input.leaseSeconds,
+  });
+  const claim = claimIdentity
+    ? await input.automationClient.claim({
+        workerInstance: input.workerInstance,
+        leaseSeconds: input.leaseSeconds,
+        claimRequestId: claimIdentity.claimRequestId,
+      })
+    : await input.automationClient.claim(
+        input.workerInstance,
+        input.leaseSeconds,
+      );
   if (!claim) {
+    clearClaimIdentity(input.claimIdentityStore, claimIdentity?.claimRequestId);
     return { claimed: false, runId: null, status: "idle", report: null };
   }
   const traceReporter = new AutomationTraceReporter({
     automationClient: input.automationClient,
     claim,
     workerInstance: input.workerInstance,
+    ...(input.traceSpool ? { spool: input.traceSpool } : {}),
   });
   await traceReporter.publish({
     eventKey: "worker_claimed",
@@ -83,6 +117,7 @@ export async function runProjectProgressAutomation(input: {
       title: "校验任务配置",
       message: summary,
     });
+    await traceReporter.drain();
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -92,6 +127,7 @@ export async function runProjectProgressAutomation(input: {
       errorCode: "worker_configuration_error",
       errorSummary: summary,
     });
+    clearClaimIdentity(input.claimIdentityStore, claimIdentity?.claimRequestId);
     return {
       claimed: true,
       runId: claim.runId,
@@ -122,6 +158,7 @@ export async function runProjectProgressAutomation(input: {
   });
   await heartbeat.start();
   heartbeat.assertLease();
+  let terminalUpdateStarted = false;
 
   try {
     const startedAt = new Date();
@@ -254,6 +291,8 @@ export async function runProjectProgressAutomation(input: {
         retry_recommended: terminal.retryRecommended,
       },
     });
+    await traceReporter.drain();
+    terminalUpdateStarted = true;
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -263,6 +302,7 @@ export async function runProjectProgressAutomation(input: {
       errorCode: terminal.errorCode,
       errorSummary: terminal.errorSummary,
     });
+    clearClaimIdentity(input.claimIdentityStore, claimIdentity?.claimRequestId);
     return {
       claimed: true,
       runId: claim.runId,
@@ -271,7 +311,15 @@ export async function runProjectProgressAutomation(input: {
     };
   } catch (error) {
     await heartbeat.stop();
-    if (error instanceof AutomationLeaseLostError || heartbeat.leaseLost) {
+    if (
+      error instanceof AutomationLeaseLostError ||
+      error instanceof ProjectProgressLeaseLostError ||
+      heartbeat.leaseLost
+    ) {
+      traceReporter.abort(error);
+      throw error;
+    }
+    if (terminalUpdateStarted) {
       throw error;
     }
     const retryRecommended = isRetryable(error);
@@ -286,6 +334,7 @@ export async function runProjectProgressAutomation(input: {
         : safeErrorSummary(error),
       metadataSanitized: { retry_recommended: retryRecommended },
     });
+    await traceReporter.drain();
     await input.automationClient.updateRun({
       claim,
       workerInstance: input.workerInstance,
@@ -297,6 +346,7 @@ export async function runProjectProgressAutomation(input: {
         : "worker_execution_failed",
       errorSummary: safeErrorSummary(error),
     });
+    clearClaimIdentity(input.claimIdentityStore, claimIdentity?.claimRequestId);
     return {
       claimed: true,
       runId: claim.runId,
@@ -306,20 +356,36 @@ export async function runProjectProgressAutomation(input: {
   }
 }
 
+function clearClaimIdentity(
+  store: AutomationClaimIdentityStore | undefined,
+  claimRequestId: string | undefined,
+): void {
+  if (store && claimRequestId) {
+    store.clearAutomationClaimIdentity(claimRequestId);
+  }
+}
+
 class AutomationTraceReporter {
   private disabled = false;
   private consecutiveFailures = 0;
+  private readonly deliveryController = new AbortController();
+  private readonly queue: BoundedAutomationTraceQueue;
 
   constructor(private readonly input: {
     automationClient: AutomationOaClient;
     claim: AutomationJobClaim;
     workerInstance: string;
-  }) {}
+    spool?: AutomationTraceSpool;
+  }) {
+    this.queue = new BoundedAutomationTraceQueue({
+      runId: input.claim.runId,
+      deliver: (event, signal) => this.deliver(event, signal),
+      signal: this.deliveryController.signal,
+      ...(input.spool ? { spool: input.spool } : {}),
+    });
+  }
 
   async publish(event: ProjectProgressTraceEvent): Promise<void> {
-    if (this.disabled) {
-      return;
-    }
     const payload: AutomationTraceEventInput = {
       eventKey: event.eventKey.slice(0, 200),
       sequence: event.sequence,
@@ -334,14 +400,53 @@ class AutomationTraceReporter {
       metadataSanitized: event.metadataSanitized ?? {},
       occurredAt: new Date().toISOString(),
     };
+    this.queue.tryEnqueue(payload);
+  }
+
+  async drain(): Promise<void> {
+    try {
+      await this.queue.drain({ timeoutMs: 3_000 });
+    } catch (error) {
+      if (!(error instanceof AutomationTraceDrainTimeoutError)) {
+        throw error;
+      }
+      this.abort(error);
+      try {
+        await this.queue.drain({ timeoutMs: 100 });
+      } catch (settleError) {
+        if (!(settleError instanceof AutomationTraceDrainTimeoutError)) {
+          throw settleError;
+        }
+      }
+    }
+  }
+
+  abort(reason: unknown): void {
+    if (!this.deliveryController.signal.aborted) {
+      this.deliveryController.abort(reason);
+    }
+  }
+
+  private async deliver(
+    event: AutomationTraceEventInput,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (this.disabled) {
+      return false;
+    }
     try {
       await this.input.automationClient.upsertTraceEvent({
         claim: this.input.claim,
         workerInstance: this.input.workerInstance,
-        event: payload,
+        event,
+        ...(signal ? { signal } : {}),
       });
       this.consecutiveFailures = 0;
+      return true;
     } catch (error) {
+      if (error instanceof AutomationLeaseLostError) {
+        throw error;
+      }
       this.consecutiveFailures += 1;
       if (
         error instanceof AutomationOaRequestError &&
@@ -352,6 +457,7 @@ class AutomationTraceReporter {
       } else if (this.consecutiveFailures >= 3) {
         this.disabled = true;
       }
+      return false;
     }
   }
 }

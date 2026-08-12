@@ -4,11 +4,19 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import * as z from "zod/v4";
 import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
+import { GitHubRequestExecutor } from "./githubRequestExecutor.js";
+import {
+  OperationMetricsRecorder,
+  PROJECT_PROGRESS_ENDPOINTS,
+} from "../observability/operationMetrics.js";
 
 const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_GITHUB_RESPONSE_BYTES = 10 * 1024 * 1024;
 const MAX_GITHUB_FILES_PAGE_SIZE = 100;
 const MCP_PATH = "/mcp";
+
+export const PROJECT_PROGRESS_COMMIT_DETAIL_TOOL_POLICY_VERSION =
+  "project-progress-commit-detail-v1";
 
 type GitHubFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -67,6 +75,7 @@ export type ProjectProgressCommitDetailResult = {
 
 export class GitHubCommitDetailTool {
   private readonly allowedCommits: Map<string, Set<string>>;
+  private readonly requestExecutor: GitHubRequestExecutor;
   private readonly seenCommits = new Set<string>();
   private readonly metrics: ProjectProgressCommitDetailMetrics = {
     detailCalls: 0,
@@ -83,11 +92,16 @@ export class GitHubCommitDetailTool {
       candidates: ProjectProgressCommitCandidate[];
       limits: ProjectProgressAgentLimits;
       requestLimiter?: AsyncSemaphore;
+      requestExecutor?: GitHubRequestExecutor;
+      operationMetrics?: OperationMetricsRecorder;
       signal?: AbortSignal;
     },
     private readonly fetchImpl: GitHubFetch = fetch,
   ) {
     this.allowedCommits = buildAllowedCommits(config.candidates);
+    this.requestExecutor = config.requestExecutor ?? new GitHubRequestExecutor({
+      ...(config.requestLimiter ? { requestLimiter: config.requestLimiter } : {}),
+    });
   }
 
   getMetrics(): ProjectProgressCommitDetailMetrics {
@@ -214,27 +228,33 @@ export class GitHubCommitDetailTool {
     );
     url.searchParams.set("per_page", String(MAX_GITHUB_FILES_PAGE_SIZE));
     this.metrics.githubRequests += 1;
-    const execute = () => this.fetchImpl(url, {
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${this.config.githubToken}`,
-        "x-github-api-version": "2022-11-28",
-        "user-agent": "oa-project-progress-agent",
-      },
-      signal: this.config.signal
-        ? AbortSignal.any([
-          this.config.signal,
-          AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
-        ])
-        : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
-    });
-    const response = this.config.requestLimiter
-      ? await this.config.requestLimiter.run(execute, this.config.signal)
-      : await execute();
-    if (!response.ok) {
-      throw new Error(`GitHub Commit 详情请求失败:HTTP ${response.status}`);
-    }
-    return readLimitedJson(response, MAX_GITHUB_RESPONSE_BYTES);
+    const request = async () => {
+      const execute = () => this.fetchImpl(url, {
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${this.config.githubToken}`,
+          "x-github-api-version": "2022-11-28",
+          "user-agent": "oa-project-progress-agent",
+        },
+        signal: this.config.signal
+          ? AbortSignal.any([
+            this.config.signal,
+            AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
+          ])
+          : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
+      });
+      const response = await this.requestExecutor.execute(execute, {
+        repository,
+        ...(this.config.signal ? { signal: this.config.signal } : {}),
+      });
+      return readLimitedJson(response, MAX_GITHUB_RESPONSE_BYTES);
+    };
+    return this.config.operationMetrics
+      ? this.config.operationMetrics.measure(
+        PROJECT_PROGRESS_ENDPOINTS.githubCommitGet,
+        request,
+      )
+      : request();
   }
 }
 
@@ -252,6 +272,8 @@ export async function startProjectProgressGitHubMcpServer(input: {
   limits: ProjectProgressAgentLimits;
   fetchImpl?: GitHubFetch;
   requestLimiter?: AsyncSemaphore;
+  requestExecutor?: GitHubRequestExecutor;
+  operationMetrics?: OperationMetricsRecorder;
   signal?: AbortSignal;
 }): Promise<ProjectProgressGitHubMcpServer> {
   const bearerToken = randomBytes(32).toString("base64url");
