@@ -99,6 +99,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       promptProfile?: ProjectProgressPromptProfile | null;
       modelCatalogVersion?: string;
       repositorySummaryCache?: RepositorySummaryCache;
+      bypassRepositorySummaryCacheRead?: boolean;
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
     private readonly fallback: ProjectProgressSummarizer = new DeterministicProjectProgressSummarizer(),
@@ -126,10 +127,12 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       evidenceEnvelope,
       developerInstructions,
     });
-    const cached = readRepositorySummaryCache(
-      this.config.repositorySummaryCache,
-      cacheIdentityDigest,
-    );
+    const cached = this.config.bypassRepositorySummaryCacheRead
+      ? null
+      : readRepositorySummaryCache(
+          this.config.repositorySummaryCache,
+          cacheIdentityDigest,
+        );
     if (cached && !isInvalidProjectProgressSummary(cached.summary)) {
       const output = {
         summary: cached.summary,

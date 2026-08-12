@@ -103,6 +103,8 @@ npm run sync:project-progress -- --project-id 62
 
 该命令不参与 OA 自动化调度，只用于诊断。
 
+手动触发会跳过当日草稿和仓库总结缓存，重新生成总结，并覆盖同一项目、同一日期下唯一的一条 OA 总结。定时执行和自动重试只更新当前 Worker 已托管的总结；存在多条同日总结时，任何来源都不会自动覆盖。
+
 ## 服务器轮询
 
 Compose 的 `project-progress-worker` 默认常驻运行，并随 `docker compose up -d` 启动和自动恢复，不需要额外安装定时器。以下 systemd timer 仅用于尚未迁移的旧部署，它会通过 `--once` 每分钟执行一次，并用 `flock` 保证单实例：
