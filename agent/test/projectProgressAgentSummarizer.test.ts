@@ -460,6 +460,23 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.match(result.interaction?.errorSummary ?? "", /最终项目总结/);
   });
 
+  it("falls back when Agent returns punctuation instead of a summary", async () => {
+    const runner: ProjectProgressAgentRunner = async () => ({
+      finalResponse: JSON.stringify({ summary: "...", limitations: [] }),
+      usage: null,
+      upstreamRequestId: "thread-punctuation-summary",
+      prohibitedToolUseCount: 0,
+    });
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.match(result.summary, /update/);
+    assert.equal(result.interaction?.fallbackUsed, true);
+    assert.equal(result.interaction?.status, "fallback");
+    assert.equal(result.interaction?.errorCode, "agent_summary_failed");
+  });
+
   it("ignores a cached process step and replaces it with a final summary", async () => {
     const entries = new Map<string, { summary: string; limitations: string[] }>();
     const cache = {

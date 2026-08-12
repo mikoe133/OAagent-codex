@@ -252,11 +252,16 @@ describe("runProjectProgressAutomation", () => {
       retryRecommended?: boolean;
       errorCode?: string | null;
     }> = [];
+    const projectOutcomes: string[] = [];
     const client = fakeClient({
       updateRun: async ({ status, retryRecommended, errorCode }) => {
         if (status !== "running") {
           terminalUpdates.push({ status, retryRecommended, errorCode });
         }
+      },
+      upsertProjectResult: async ({ result }) => {
+        projectOutcomes.push(result.outcome);
+        return 123;
       },
     });
     const fallbackReport = report({ withProject: true });
@@ -275,9 +280,10 @@ describe("runProjectProgressAutomation", () => {
       resolveExecution: async () => async () => fallbackReport,
     });
 
-    assert.equal(result.status, "partial_failed");
+    assert.equal(result.status, "failed");
+    assert.deepEqual(projectOutcomes, ["failed"]);
     assert.deepEqual(terminalUpdates, [{
-      status: "partial_failed",
+      status: "failed",
       retryRecommended: true,
       errorCode: "project_summary_failed",
     }]);
