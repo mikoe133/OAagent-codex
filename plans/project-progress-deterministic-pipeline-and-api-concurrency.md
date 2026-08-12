@@ -135,7 +135,7 @@ evidenceDigest
 | OA 业务写入 | 1 | 100 | 状态、总结、run project、AI interaction、run 终态串行 |
 | OA Trace | 1 | 100，按 `event_key` 合并 | 共享 OA 非 Heartbeat 总池，低优先级 |
 | GitHub HTTP | 6 | 200 | 仓库扫描和 Agent Commit 详情共享同一池 |
-| 单仓库 GitHub HTTP | 1 | 1 | 分支和分页按仓库串行，避免热点仓库突发 |
+| 单仓库 GitHub HTTP | 6 | 6 | 分支可并发读取，同一分支的分页保持串行 |
 | Codex Thread | 2 | 100 | 每个活跃仓库一个 Thread |
 | 单 Thread Commit 详情 | 1 | 0 | 禁止同一 Thread 并发读取多个 Patch |
 | SQLite 写入 | 1 | 100 | 单写者，事务尽量短 |
@@ -276,8 +276,8 @@ Trace 不加入业务写入顺序。它进入低优先级队列，同一个 `eve
 | 接口 | 全局并发 | 单仓库并发 | 超时 | 重试 |
 | --- | ---: | ---: | ---: | --- |
 | `GET /repos/{owner}/{repo}` | 6 | 1 | 20s | 网络、408、429、500/502/503/504 总尝试最多 3 次 |
-| `GET /repos/{owner}/{repo}/branches` | 6 | 1 | 20s | 同上；分页串行 |
-| `GET /repos/{owner}/{repo}/commits` | 6 | 1 | 20s | 同上；每个分支分页串行 |
+| `GET /repos/{owner}/{repo}/branches` | 6 | 6 | 20s | 同上；分支列表分页串行 |
+| `GET /repos/{owner}/{repo}/commits` | 6 | 6 | 20s | 同上；分支间并发，每个分支分页串行 |
 | `GET /repos/{owner}/{repo}/commits/{sha}` | 6 | 1/Thread | 20s | 同上；仍受详情调用和 Patch 预算限制 |
 
 所有 GitHub 请求必须共享同一个 token 级 limiter，不能为仓库扫描和 Agent 工具各建一个并发 6 的池。状态码策略：
@@ -368,7 +368,7 @@ Agent 约束保持：
 
 ```text
 T_oa_read  ~= pageCount * L_oa_list + projectsWritten * L_oa_prewrite_read
-T_github   ~= (Qgh / 6) * L_github，且受单仓库串行分页约束
+T_github   ~= (Qgh / 6) * L_github，且受单分支串行分页约束
 T_agent    ~= ceil(A / 2) * L_agent_thread
 T_oa_write ~= Woa * L_oa_write
 T_total    ~= T_oa_read + T_github + T_agent + T_oa_write
@@ -542,13 +542,13 @@ npm exec -w agent -- tsx --test test/syncProjectProgress.test.ts
 
 上下文：仓库扫描和 Agent Commit 详情已共享 limiter，但当前只报告 rate limit，没有安全重试、暂停闸门和恢复规则。
 
-实施进展（2026-08-07）：仓库扫描和 Agent MCP 已共享同一个 `GitHubRequestExecutor`。执行器实现全局固定并发、单仓库串行、429/受限 403/408/指定 5xx/网络瞬态分类、`Retry-After`、full-jitter backoff、secondary 30 秒共享暂停、run/仓库请求预算与 rate-limit header 指标；primary limit 按 `max(100, 10% * limit)` 保留额度，并按 `(remaining - reserve) / seconds_to_reset` pace 新请求，触达 reserve 时在发请求前停止并返回 `retryAt`。分支数、单分支 Commit 页数和请求预算均可配置，耗尽时返回 incomplete；排队、backoff、暂停和 fetch 均接收 `AbortSignal`。剩余缺口是扫描完成后的可选详情额度公平分配，以及把 executor 指标接入 run 级结构化输出；动态 `6/3/1` 容量仍属于 Step 4。因此本步骤仍为 `in_progress`。
+实施进展（2026-08-12）：仓库扫描和 Agent MCP 已共享同一个 `GitHubRequestExecutor`。执行器实现全局固定并发、单仓库有界并发、单分支串行分页、429/受限 403/408/指定 5xx/网络瞬态分类、`Retry-After`、full-jitter backoff、secondary 30 秒共享暂停、run/仓库请求预算与 rate-limit header 指标；primary limit 按 `max(100, 10% * limit)` 保留额度，并按 `(remaining - reserve) / seconds_to_reset` pace 新请求，触达 reserve 时在发请求前停止并返回 `retryAt`。分支数、单分支 Commit 页数和请求预算均可配置，耗尽时返回 incomplete；排队、backoff、暂停和 fetch 均接收 `AbortSignal`。剩余缺口是扫描完成后的可选详情额度公平分配，以及把 executor 指标接入 run 级结构化输出；动态 `6/3/1` 容量仍属于 Step 4。因此本步骤仍为 `in_progress`。
 
 任务：
 
 - 把所有 GitHub 请求统一通过 token 级 request executor；
 - 增加状态码分类、`Retry-After`、full-jitter backoff；
-- 增加单仓库串行 limiter和单仓库分支/页数/请求硬上限；
+- 增加单仓库有界并发 limiter 和单仓库分支/页数/请求硬上限；
 - 增加 secondary rate limit 暂停闸门；
 - 增加 reset-aware token bucket、run 请求预算和详情预算分配；
 - GitHub queue wait、retry/backoff、`Retry-After`、暂停闸门和在途 fetch 在本步骤接收 `workAbortSignal`；

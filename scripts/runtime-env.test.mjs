@@ -15,7 +15,6 @@ const obsoleteRuntimeEnvNames = [
   "AGENT_MAX_STEPS",
   "AGENT_TOOL_TIMEOUT_MS",
   "AGENT_TOTAL_TIMEOUT_MS",
-  "DATABASE_URL",
   "MODEL_TOOL_MODE",
   "OAAGENT_CLIENT_KEYS",
   "OA_API_token",
@@ -38,6 +37,9 @@ test("keeps obsolete environment settings out of deployable configuration", asyn
     assert.doesNotMatch(exampleEnv, assignment)
     assert.doesNotMatch(runtimeEnvRenderer, new RegExp(`\\b${name}\\b`))
   }
+  assert.match(exampleEnv, /^DATABASE_URL=$/m)
+  assert.doesNotMatch(exampleEnv, /^DATABASE_URL=.+$/m)
+  assert.match(runtimeEnvRenderer, /printf 'DATABASE_URL=%s\\n'/)
 })
 
 test("renders a private runtime env for one isolated Compose environment", async (context) => {
@@ -57,7 +59,7 @@ test("renders a private runtime env for one isolated Compose environment", async
     OA_AGENT_AUTOMATION_TOKEN: "test-automation-secret",
     PROJECT_PROGRESS_WORKER_INSTANCE: "oaagent-test-01",
     PROJECT_PROGRESS_LEASE_SECONDS: "300",
-    PROJECT_PROGRESS_HEARTBEAT_SECONDS: "60",
+    PROJECT_PROGRESS_HEARTBEAT_SECONDS: "10",
     AGENT_PORT: "3003",
     WEB_PORT: "3001",
   })
@@ -70,13 +72,15 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^OPENROUTER_API_KEY=test-openrouter-secret$/m)
   assert.match(content, /^OPENROUTER_API_BASE_URL=https:\/\/openrouter\.ai\/api\/v1$/m)
   assert.match(content, /^OA_DOCKER_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
+  assert.match(content, /^AUTOMATION_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
+  assert.match(content, /^PROJECT_SYNC_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
   assert.match(content, /^OA_PROJECT_SYNC_TOKEN=test-worker-secret$/m)
   assert.match(content, /^OA_PROJECT_SYNC_TOKEN_HEADER=Authorization$/m)
   assert.match(content, /^OA_PROJECT_SYNC_TOKEN_PREFIX=Bearer$/m)
   assert.match(content, /^PROJECT_PROGRESS_GITHUB_TOKEN=test-github-secret$/m)
   assert.match(content, /^PROJECT_PROGRESS_WORKER_INSTANCE=oaagent-test-01$/m)
   assert.match(content, /^PROJECT_PROGRESS_LEASE_SECONDS=300$/m)
-  assert.match(content, /^PROJECT_PROGRESS_HEARTBEAT_SECONDS=60$/m)
+  assert.match(content, /^PROJECT_PROGRESS_HEARTBEAT_SECONDS=10$/m)
   assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS=12$/m)
   assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_FILES_PER_COMMIT=20$/m)
   assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_PATCH_CHARS_PER_FILE=1200$/m)
@@ -90,6 +94,8 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^OA_AGENT_SSO_SHARED_SECRET=test-sso-secret$/m)
   assert.match(content, /^OA_AGENT_SSO_TTL_SECONDS=300$/m)
   assert.match(content, /^OA_AGENT_AUTOMATION_TOKEN=test-automation-secret$/m)
+  assert.match(content, /^AUTOMATION_MODEL_CATALOG_TTL_SECONDS=300$/m)
+  assert.match(content, /^AUTOMATION_MODEL_CATALOG_STALE_SECONDS=86400$/m)
   assert.match(content, /^OA_API_TOKEN_HEADER=Cookie$/m)
   assert.match(content, /^OA_API_TOKEN_PREFIX=sessionid=$/m)
   assert.match(content, /^AGENT_BIND_ADDRESS=127\.0\.0\.1$/m)
@@ -101,6 +107,29 @@ test("renders a private runtime env for one isolated Compose environment", async
 
   const metadata = await stat(outputPath)
   assert.equal(metadata.mode & 0o777, 0o600)
+})
+
+test("renders split automation and project sync API base urls", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
+  context.after(() => rm(directory, { recursive: true, force: true }))
+  const outputPath = path.join(directory, ".env")
+
+  const result = runRender(outputPath, {
+    COMPOSE_PROJECT_NAME: "oa-agent-test",
+    NEXTTOKEN_API_KEY: "test-nexttoken-secret",
+    OPENROUTER_API_KEY: "test-openrouter-secret",
+    OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
+    AUTOMATION_API_BASE_URL: "https://automation-node.example.com",
+    PROJECT_SYNC_API_BASE_URL: "https://old-oa.example.com",
+    OA_AGENT_SSO_SHARED_SECRET: "test-sso-secret",
+    OA_AGENT_SSO_TTL_SECONDS: "300",
+    WEB_PORT: "3001",
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const content = await readFile(outputPath, "utf8")
+  assert.match(content, /^AUTOMATION_API_BASE_URL=https:\/\/automation-node\.example\.com$/m)
+  assert.match(content, /^PROJECT_SYNC_API_BASE_URL=https:\/\/old-oa\.example\.com$/m)
 })
 
 test("preserves an explicit Docker host bind address", async (context) => {
@@ -205,6 +234,27 @@ test("rejects an invalid SSO TTL", async (context) => {
   assert.match(result.stderr, /OA_AGENT_SSO_TTL_SECONDS must be a positive integer/)
 })
 
+test("rejects a database URL for the wrong deployment environment", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
+  context.after(() => rm(directory, { recursive: true, force: true }))
+  const outputPath = path.join(directory, ".env")
+
+  const result = runRender(outputPath, {
+    COMPOSE_PROJECT_NAME: "oa-agent-test",
+    NEXTTOKEN_API_KEY: "test-nexttoken-secret",
+    OPENROUTER_API_KEY: "test-openrouter-secret",
+    OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
+    OA_AGENT_SSO_SHARED_SECRET: "test-sso-secret",
+    OA_AGENT_SSO_TTL_SECONDS: "300",
+    DATABASE_URL: "mysql://oagent:p%21ss@db.example.test:3306/oagent",
+    AUTOMATION_EXPECTED_DATABASE_NAME: "oagent_test",
+    WEB_PORT: "3001",
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /DATABASE_URL must target oagent_test, got oagent/)
+})
+
 test("rejects agent and web services that share a host port", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "oa-runtime-env-"))
   context.after(() => rm(directory, { recursive: true, force: true }))
@@ -238,6 +288,9 @@ function runRender(outputPath, overrides) {
       OA_PROJECT_SYNC_TOKEN_PREFIX: "Bearer",
       PROJECT_PROGRESS_GITHUB_TOKEN: "test-github-secret",
       OA_AGENT_AUTOMATION_TOKEN: "test-automation-secret",
+      DATABASE_URL: "mysql://oagent:p%21ss@db.example.test:3306/oagent_test",
+      AUTOMATION_EXPECTED_DATABASE_NAME: "oagent_test",
+      OA_SESSION_SECRET: "test-oa-session-secret",
       AGENT_BIND_ADDRESS: "127.0.0.1",
       AGENT_PORT: "3003",
       WEB_BIND_ADDRESS: "127.0.0.1",

@@ -50,7 +50,7 @@ async function main(): Promise<void> {
       const heartbeatLimiter = new AsyncSemaphore(1);
       const result = await runProjectProgressAutomation({
         automationClient: new AutomationOaClient({
-          baseUrl: baseConfig.oa.baseUrl,
+          baseUrl: baseConfig.automation.baseUrl,
           token: automationToken,
         }, fetch, operationMetrics, {
           scheduler: oaRequestScheduler,
@@ -73,6 +73,7 @@ async function main(): Promise<void> {
           const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
           const githubRequestExecutor = new GitHubRequestExecutor({
             requestLimiter: githubRequestLimiter,
+            maxConcurrentRequestsPerRepository: config.concurrency.github,
             maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
             maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
           });

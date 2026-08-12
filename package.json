@@ -25,6 +25,7 @@
     "sync:project-progress:apply": "npm run sync:project-progress:apply -w agent --",
     "run:project-progress-worker": "npm run run:project-progress-worker -w agent --",
     "test:deploy": "node --test scripts/*.test.mjs",
+    "test:automation:integration": "npm run test:automation:integration --workspace agent && npm run test:automation:integration --workspace frontend",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "dependencies": {

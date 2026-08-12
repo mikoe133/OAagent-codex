@@ -4,6 +4,7 @@ import { validateHeaderName } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { parseAutomationConfig, type AutomationConfig } from "./automationConfig.js";
 import {
   getDefaultModel,
   resolveRequestedModel,
@@ -51,6 +52,8 @@ export type AppConfig = {
   oaApiToolToken: string;
   /** OA 后端调用自动化模型目录与校验接口的专用 token。 */
   automationApiToken: string | null;
+  /** Node 自动任务存储、认证与 maintenance 配置。 */
+  automation: AutomationConfig;
   /** 后台服务监听端口。 */
   serverPort: number;
   /** 后台服务监听地址。 */
@@ -172,6 +175,7 @@ export function loadConfig(): AppConfig {
     oaApiToolToken:
       process.env.AGENT_OA_TOOL_TOKEN?.trim() || randomBytes(32).toString("hex"),
     automationApiToken: process.env.OA_AGENT_AUTOMATION_TOKEN?.trim() || null,
+    automation: parseAutomationConfig(process.env),
     serverPort,
     serverHost,
     sessionStorePath,

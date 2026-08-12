@@ -74,13 +74,15 @@ export function AutomationRunDetailDialog({
   onCancelled,
 }: AutomationRunDetailDialogProps) {
   const [isCancelling, setIsCancelling] = React.useState(false)
+  const [cancelRequested, setCancelRequested] = React.useState(false)
   const [cancelError, setCancelError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (open) {
       setCancelError(null)
+      setCancelRequested(Boolean(run?.cancel_requested_at))
     }
-  }, [open, run?.id])
+  }, [open, run?.cancel_requested_at, run?.id])
 
   async function handleCancel() {
     if (!run) {
@@ -90,6 +92,7 @@ export function AutomationRunDetailDialog({
     setCancelError(null)
     try {
       await cancelAutomationRun(run.id)
+      setCancelRequested(true)
       await onCancelled?.()
     } catch (cancelFailure) {
       setCancelError(resolveError(cancelFailure))
@@ -134,6 +137,11 @@ export function AutomationRunDetailDialog({
             {cancelError ? (
               <Alert variant="destructive">
                 <AlertDescription>{cancelError}</AlertDescription>
+              </Alert>
+            ) : null}
+            {cancelRequested && ACTIVE_STATUSES.has(run.status) ? (
+              <Alert>
+                <AlertDescription>取消请求已发送，正在等待 Worker 安全停止。</AlertDescription>
               </Alert>
             ) : null}
 
@@ -287,9 +295,14 @@ export function AutomationRunDetailDialog({
 
         <DialogFooter className="border-t px-6 py-4">
           {run && ACTIVE_STATUSES.has(run.status) ? (
-            <Button type="button" variant="destructive" onClick={handleCancel} disabled={isCancelling}>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleCancel}
+              disabled={isCancelling || cancelRequested}
+            >
               {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-              取消本次运行
+              {cancelRequested ? "正在停止" : "取消本次运行"}
             </Button>
           ) : run?.status === "succeeded" ? (
             <span className="flex items-center gap-2 text-sm text-emerald-600">

@@ -378,6 +378,8 @@ test("loads full run audit and supports permission fallback and cancellation", (
   assert.match(runDetailSource, /system_prompt_snapshot/)
   assert.match(runDetailSource, /request_payload_sanitized/)
   assert.match(runDetailSource, /cancelAutomationRun\(run\.id\)/)
+  assert.match(runDetailSource, /取消请求已发送，正在等待 Worker 安全停止。/)
+  assert.match(runDetailSource, /disabled=\{isCancelling \|\| cancelRequested\}/)
 })
 
 test("uses readable Chinese labels for project outcomes", () => {

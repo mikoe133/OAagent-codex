@@ -141,6 +141,8 @@ Compose 只向宿主机发布 web 端口,agent 仅在内部网络暴露。`agent
 
 如果 OA 在另一台机器,把 `OA_DOCKER_API_BASE_URL` 改为 OA 的 HTTPS API 地址。生产环境应在 web 前配置 HTTPS 反向代理,因为登录 cookie 在 production 模式带 `Secure` 属性;直接通过服务器 IP 的 HTTP 地址访问会导致登录态不可用。
 
+自动任务系统已集成进现有 `agent` 服务：前端和 `project-progress-worker` 的 `AUTOMATION_API_BASE_URL` 指向 `http://agent:3000`，`PROJECT_SYNC_API_BASE_URL` 仍指向保留项目/GitHub 总结接口的原 OA。任务数据存入独立 MySQL，迁移命令、Secret 和切流步骤见 [docs/automation-node-migration.md](docs/automation-node-migration.md)。
+
 ## GitHub Actions CI/CD
 
 仓库提供 `.github/workflows/ci-cd.yml`:Pull Request 自动运行测试、构建并验证两个 Docker 镜像;合并到 `test` 后部署测试环境,合并到 `main` 后部署生产环境。两个环境都使用各自提交的 SHA 镜像,部署失败会自动恢复上一版镜像和运行配置。

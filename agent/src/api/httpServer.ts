@@ -1,4 +1,9 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type {
   AgentService,
@@ -19,6 +24,7 @@ import {
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
 import type { SessionStore } from "../infrastructure/persistence/sessionStore.js";
+import type { AutomationHttpApplication } from "../automation/http/automationHttpApplication.js";
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -28,8 +34,14 @@ export function startHttpServer(
   config: AppConfig,
   agentService: AgentService,
   sessionStore: SessionStore,
-): void {
-  const server = createAgentHttpServer(config, agentService, sessionStore);
+  automationHttp?: AutomationHttpApplication,
+): Server {
+  const server = createAgentHttpServer(
+    config,
+    agentService,
+    sessionStore,
+    automationHttp,
+  );
 
   server.listen(config.serverPort, config.serverHost, () => {
     console.error(
@@ -47,16 +59,25 @@ export function startHttpServer(
     }
     throw error;
   });
+  return server;
 }
 
 export function createAgentHttpServer(
   config: AppConfig,
   agentService: AgentService,
   sessionStore: SessionStore,
+  automationHttp?: AutomationHttpApplication,
 ) {
   return createServer(async (request, response) => {
     try {
-      await routeRequest(config, agentService, sessionStore, request, response);
+      await routeRequest(
+        config,
+        agentService,
+        sessionStore,
+        request,
+        response,
+        automationHttp,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       writeJson(response, 500, { error: message });
@@ -70,6 +91,7 @@ async function routeRequest(
   sessionStore: SessionStore,
   request: IncomingMessage,
   response: ServerResponse,
+  automationHttp?: AutomationHttpApplication,
 ): Promise<void> {
   const method = request.method || "GET";
   const url = new URL(request.url || "/", "http://localhost");
@@ -110,6 +132,10 @@ async function routeRequest(
       200,
       await callOaApiTool(config, body, sessionOaApiToken),
     );
+    return;
+  }
+
+  if (automationHttp && (await automationHttp.handle(request, response, url))) {
     return;
   }
 

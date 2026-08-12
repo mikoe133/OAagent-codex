@@ -44,6 +44,7 @@ async function main(): Promise<void> {
   const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
   const githubRequestExecutor = new GitHubRequestExecutor({
     requestLimiter: githubRequestLimiter,
+    maxConcurrentRequestsPerRepository: config.concurrency.github,
     maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
     maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
   });

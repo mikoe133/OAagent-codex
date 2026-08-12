@@ -156,7 +156,8 @@ export async function runProjectProgressAutomation(input: {
     leaseSeconds: input.leaseSeconds,
     intervalSeconds: input.heartbeatSeconds,
   });
-  heartbeat.start();
+  await heartbeat.start();
+  heartbeat.assertLease();
   let terminalUpdateStarted = false;
 
   try {
@@ -614,7 +615,11 @@ class HeartbeatController {
     intervalSeconds: number;
   }) {}
 
-  start(): void {
+  async start(): Promise<void> {
+    await this.send();
+    if (this.shouldStop()) {
+      return;
+    }
     this.timer = setInterval(() => {
       if (!this.inFlight) {
         this.inFlight = this.send().finally(() => {

@@ -2,7 +2,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth"
 import { readServerEnvValue } from "@/lib/server/server-env"
 
 const MAX_REQUEST_BODY_BYTES = 256 * 1024
-const OA_REQUEST_TIMEOUT_MS = 20_000
+const AUTOMATION_REQUEST_TIMEOUT_MS = 20_000
 
 type RouteContext = {
   params: Promise<{ segments: string[] }>
@@ -45,9 +45,9 @@ async function proxyAutomationRequest(
     return jsonResponse({ error: "Automation API route not found" }, 404)
   }
 
-  const baseUrl = getOaApiBaseUrl()
+  const baseUrl = getAutomationApiBaseUrl()
   if (!baseUrl) {
-    return jsonResponse({ error: "OA API service is not configured" }, 500)
+    return jsonResponse({ error: "Automation API service is not configured" }, 500)
   }
 
   const incomingUrl = new URL(request.url)
@@ -86,7 +86,7 @@ async function proxyAutomationRequest(
       cache: "no-store",
       signal: AbortSignal.any([
         request.signal,
-        AbortSignal.timeout(OA_REQUEST_TIMEOUT_MS),
+        AbortSignal.timeout(AUTOMATION_REQUEST_TIMEOUT_MS),
       ]),
     })
     const responseBody = await response.text()
@@ -103,7 +103,7 @@ async function proxyAutomationRequest(
       {
         error: error instanceof Error
           ? error.message
-          : "OA automation service is unavailable",
+          : "Automation API service is unavailable",
       },
       502,
     )
@@ -157,8 +157,10 @@ function resolveUpstreamPath(segments: string[], method: HttpMethod): string | n
   return null
 }
 
-function getOaApiBaseUrl(): string | null {
+function getAutomationApiBaseUrl(): string | null {
   return (
+    readServerEnvValue("AUTOMATION_API_BASE_URL") ||
+    readServerEnvValue("NEXT_PUBLIC_AUTOMATION_API_BASE_URL") ||
     readServerEnvValue("OA_API_BASE_URL") ||
     readServerEnvValue("AUTH_API_BASE_URL") ||
     readServerEnvValue("NEXT_PUBLIC_OA_API_BASE_URL") ||

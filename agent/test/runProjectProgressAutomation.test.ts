@@ -285,7 +285,7 @@ describe("runProjectProgressAutomation", () => {
     assert.deepEqual(
       traceEvents.filter((event) => event.eventKey === "upload_run_audit")
         .map((event) => event.status),
-      ["succeeded"],
+      ["running", "succeeded"],
     );
     assert.equal(traceEvents.at(-1)?.status, "succeeded");
   });
@@ -354,6 +354,30 @@ describe("runProjectProgressAutomation", () => {
 
     assert.equal(result.status, "succeeded");
     assert.equal(traceCalls, 1);
+  });
+
+  it("checks for cancellation before starting the business execution", async () => {
+    let heartbeatCalls = 0;
+    const client = fakeClient({
+      heartbeat: async () => {
+        heartbeatCalls += 1;
+        return heartbeatResult(true);
+      },
+    });
+
+    const result = await runProjectProgressAutomation({
+      automationClient: client,
+      workerInstance: "worker-01",
+      leaseSeconds: 300,
+      heartbeatSeconds: 60,
+      resolveExecution: async () => async (shouldCancel) => {
+        assert.equal(shouldCancel(), true);
+        return report({ cancelled: true });
+      },
+    });
+
+    assert.equal(heartbeatCalls, 1);
+    assert.equal(result.status, "cancelled");
   });
 
   it("stops at a safe checkpoint when heartbeat requests cancellation", async () => {

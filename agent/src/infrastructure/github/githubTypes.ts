@@ -10,10 +10,21 @@ export type GitHubRepositorySnapshot = {
   commits: ProjectProgressCommit[];
 };
 
+export type GitHubRepositoryReadProgress = {
+  branchesCompleted: number;
+  branchesTotal: number | null;
+  commitsRead: number;
+};
+
+export type GitHubRepositoryReadProgressSink = (
+  progress: GitHubRepositoryReadProgress,
+) => void | Promise<void>;
+
 export interface ProjectProgressGitHubReader {
   readRepository(
     repository: GitHubRepositoryIdentity,
     observedAt: Date,
     signal?: AbortSignal,
+    onProgress?: GitHubRepositoryReadProgressSink,
   ): Promise<GitHubRepositorySnapshot>;
 }

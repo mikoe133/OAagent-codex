@@ -334,6 +334,8 @@ error_code = automation_prompt_snapshot_mismatch
 
 ## 10. 数据库迁移
 
+Node 自动任务库的 `scripts/sql/001_automation_schema_baseline.up.sql` 和 `002_automation_defaults_seed.up.sql` 已包含提示词表和默认提示词；不要在 Node 库上重复执行旧 OA 的 `004/005`。
+
 如果现有环境已经执行到软删除迁移 `003`，按顺序执行：
 
 ```bash

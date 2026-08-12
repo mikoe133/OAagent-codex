@@ -21,13 +21,19 @@
     "run:project-progress-worker": "tsx src/runtime/projectProgressWorker.ts",
     "benchmark:project-progress": "tsx src/benchmark/projectProgressBaseline.ts",
     "start:project-progress-worker": "node dist/runtime/projectProgressWorker.js",
+    "migrate:automation": "tsx src/runtime/automationMigrate.ts",
+    "start:migrate:automation": "node dist/runtime/automationMigrate.js",
     "test": "tsx --test test/*.test.ts",
+    "test:automation:integration": "tsx --test test/automationMysql.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/codex-sdk": "^0.142.5",
+    "cron-parser": "^5.8.1",
     "dotenv": "^16.4.5",
+    "kysely": "^0.29.5",
+    "mysql2": "^3.23.3",
     "zod": "^3.25.76"
   },
   "devDependencies": {

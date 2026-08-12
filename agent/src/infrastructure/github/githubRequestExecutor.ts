@@ -6,6 +6,7 @@ const DEFAULT_BASE_BACKOFF_MS = 250;
 const DEFAULT_MAX_BACKOFF_MS = 5_000;
 const DEFAULT_MAX_REQUESTS_PER_RUN = 20_000;
 const DEFAULT_MAX_REQUESTS_PER_REPOSITORY = 2_000;
+const DEFAULT_MAX_CONCURRENT_REQUESTS_PER_REPOSITORY = 1;
 const SECONDARY_RATE_LIMIT_BACKOFF_MS = 30_000;
 
 export class GitHubRequestError extends Error {
@@ -56,6 +57,7 @@ export type GitHubRequestExecutorConfig = {
   maxBackoffMs?: number;
   maxRequestsPerRun?: number;
   maxRequestsPerRepository?: number;
+  maxConcurrentRequestsPerRepository?: number;
   random?: () => number;
   now?: () => number;
   sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -74,6 +76,7 @@ type ResolvedConfig = {
   maxBackoffMs: number;
   maxRequestsPerRun: number;
   maxRequestsPerRepository: number;
+  maxConcurrentRequestsPerRepository: number;
   random: () => number;
   now: () => number;
   sleep: NonNullable<GitHubRequestExecutorConfig["sleep"]>;
@@ -193,7 +196,9 @@ export class GitHubRequestExecutor {
     if (existing) {
       return existing;
     }
-    const limiter = new AsyncSemaphore(1);
+    const limiter = new AsyncSemaphore(
+      this.config.maxConcurrentRequestsPerRepository,
+    );
     this.repositoryLimiters.set(repository, limiter);
     return limiter;
   }
@@ -326,6 +331,11 @@ function resolveConfig(config: GitHubRequestExecutorConfig): ResolvedConfig {
     maxRequestsPerRepository: positiveInteger(
       config.maxRequestsPerRepository ?? DEFAULT_MAX_REQUESTS_PER_REPOSITORY,
       "maxRequestsPerRepository",
+    ),
+    maxConcurrentRequestsPerRepository: positiveInteger(
+      config.maxConcurrentRequestsPerRepository ??
+        DEFAULT_MAX_CONCURRENT_REQUESTS_PER_REPOSITORY,
+      "maxConcurrentRequestsPerRepository",
     ),
     random: config.random ?? Math.random,
     now: config.now ?? Date.now,
