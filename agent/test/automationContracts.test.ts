@@ -13,11 +13,25 @@ test("accepts the existing project-progress worker claim contract", () => {
     worker_instance: "worker-01",
     supported_job_types: ["github_project_progress_sync"],
     lease_seconds: 300,
+    claim_request_id: "019fd15d-32c6-7fb2-9afb-68be0996b80f",
   });
 
   assert.deepEqual(result.supported_job_types, [
     "github_project_progress_sync",
   ]);
+  assert.equal(
+    result.claim_request_id,
+    "019fd15d-32c6-7fb2-9afb-68be0996b80f",
+  );
+  assert.equal(
+    automationClaimSchema.safeParse({
+      worker_instance: "worker-01",
+      supported_job_types: ["github_project_progress_sync"],
+      lease_seconds: 300,
+      claim_request_id: "not-a-uuid",
+    }).success,
+    false,
+  );
 });
 
 test("keeps no_commits compatible with the existing worker", () => {

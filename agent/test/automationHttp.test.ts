@@ -87,6 +87,7 @@ test("routes worker claim requests only with OA_AGENT_AUTOMATION_TOKEN", async (
     worker_instance: "worker-01",
     supported_job_types: ["github_project_progress_sync"],
     lease_seconds: 300,
+    claim_request_id: "019fd15d-32c6-7fb2-9afb-68be0996b80f",
   };
 
   try {

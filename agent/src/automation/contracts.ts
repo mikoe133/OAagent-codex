@@ -134,6 +134,7 @@ export const automationClaimSchema = z
     worker_instance: workerInstance,
     supported_job_types: z.array(supportedJobType).min(1).max(20),
     lease_seconds: z.number().int().min(60).max(600).default(300),
+    claim_request_id: z.string().uuid().optional(),
   })
   .strict()
   .transform((value) => ({
