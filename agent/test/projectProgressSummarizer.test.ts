@@ -196,4 +196,23 @@ describe("ResponsesProjectProgressSummarizer", () => {
     assert.match(result.summary, /修复登录跳转/);
     assert.deepEqual(result.limitations, ["模型总结失败，已使用确定性兜底"]);
   });
+
+  it("falls back when the model returns punctuation instead of a summary", async () => {
+    const summarizer = new ResponsesProjectProgressSummarizer(
+      {
+        apiBaseUrl: "https://model.example.test/v1",
+        apiKey: "secret",
+        model: "summary-model",
+      },
+      async () => Response.json({ output: [{ content: [{
+        type: "output_text",
+        text: JSON.stringify({ summary: "...", limitations: [] }),
+      }] }] }),
+    );
+
+    const result = await summarizer.summarize(input);
+
+    assert.match(result.summary, /修复登录跳转/);
+    assert.deepEqual(result.limitations, ["模型总结失败，已使用确定性兜底"]);
+  });
 });
