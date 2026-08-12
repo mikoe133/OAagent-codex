@@ -75,7 +75,7 @@ describe("CodexProjectProgressSummarizer", () => {
     const result = await summarizer.summarize(input);
 
     assert.equal(result.summary, "完成登录链路与权限校验更新。");
-    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v3");
+    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v4");
     assert.equal(result.interaction?.inputTokens, 120);
     assert.equal(result.interaction?.outputTokens, 30);
     assert.equal(result.interaction?.responsePayloadSanitized.execution_mode, "codex_sdk_agent");
@@ -372,7 +372,7 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.match(result.summary, /update/);
     assert.deepEqual(result.limitations, ["Agent 总结失败，已使用确定性兜底"]);
     assert.equal(result.interaction?.fallbackUsed, true);
-    assert.match(result.interaction?.errorSummary ?? "", /分析步骤/);
+    assert.match(result.interaction?.errorSummary ?? "", /最终项目总结/);
   });
 
   it("falls back when a later sentence describes the Agent's next step", async () => {
@@ -391,7 +391,26 @@ describe("CodexProjectProgressSummarizer", () => {
 
     assert.match(result.summary, /update/);
     assert.equal(result.interaction?.fallbackUsed, true);
-    assert.match(result.interaction?.errorSummary ?? "", /分析步骤/);
+    assert.match(result.interaction?.errorSummary ?? "", /最终项目总结/);
+  });
+
+  it("falls back when Agent refuses to summarize available commits", async () => {
+    const runner: ProjectProgressAgentRunner = async () => ({
+      finalResponse: JSON.stringify({
+        summary: "无可用候选提交，无法生成总结",
+        limitations: [],
+      }),
+      usage: null,
+      upstreamRequestId: "thread-refusal-summary",
+      prohibitedToolUseCount: 0,
+    });
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.match(result.summary, /update/);
+    assert.equal(result.interaction?.fallbackUsed, true);
+    assert.match(result.interaction?.errorSummary ?? "", /最终项目总结/);
   });
 
   it("ignores a cached process step and replaces it with a final summary", async () => {

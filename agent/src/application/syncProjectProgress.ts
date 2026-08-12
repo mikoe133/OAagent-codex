@@ -36,7 +36,7 @@ import type {
 } from "./projectProgressSummarizer.js";
 import {
   DeterministicProjectProgressSummarizer,
-  isLikelyProjectProgressProcessSummary,
+  isInvalidProjectProgressSummary,
 } from "./projectProgressSummarizer.js";
 
 export type ProjectProgressConcurrency = {
@@ -572,7 +572,7 @@ async function executeProjectProgressSync(
           group.summaryDate,
         );
         const cached = existing?.sourceDigest === group.sourceDigest &&
-          !isLikelyProjectProgressProcessSummary(existing.summary)
+          !isInvalidProjectProgressSummary(existing.summary)
           ? {
             summaryDate: group.summaryDate,
             commitCount: group.commits.length,
@@ -666,8 +666,8 @@ async function executeProjectProgressSync(
                 ...(input.cancellationSignal ? { signal: input.cancellationSignal } : {}),
               }),
             );
-            if (isLikelyProjectProgressProcessSummary(generated.summary)) {
-              throw new Error("总结器输出了分析步骤而非最终项目总结");
+            if (isInvalidProjectProgressSummary(generated.summary)) {
+              throw new Error("总结器输出的内容不是最终项目总结");
             }
             return {
               key: task.key,

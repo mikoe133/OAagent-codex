@@ -90,8 +90,8 @@ export class ResponsesProjectProgressSummarizer implements ProjectProgressSummar
       }
       const payload = await response.json();
       const output = decodeModelOutput(payload);
-      if (isLikelyProjectProgressProcessSummary(output.summary)) {
-        throw new Error("模型输出了分析步骤而非最终项目总结。");
+      if (isInvalidProjectProgressSummary(output.summary)) {
+        throw new Error("模型输出的内容不是最终项目总结。");
       }
       return {
         ...output,
@@ -179,6 +179,15 @@ export function isLikelyProjectProgressProcessSummary(summary: string): boolean 
     /(?:^|[。！？!?；;\n])\s*(?:我)?(?:先|将|会|准备|计划|开始|继续|接下来|下一步|随后|之后).{0,100}(?:分析|读取|查看|检查|梳理|调用)/u,
     /我(?:将|会|准备|计划)(?:先|继续|接下来)?.{0,100}(?:查看|读取|分析|检查|梳理).{0,100}(?:总结|概括|归纳|确认)/u,
     /(?:^|[.!?;\n])\s*I(?:'ll| will| plan to| am going to).{0,100}(?:inspect|review|read|analy[sz]e|check)/iu,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export function isInvalidProjectProgressSummary(summary: string): boolean {
+  const normalized = summary.replace(/\s+/gu, " ").trim();
+  return isLikelyProjectProgressProcessSummary(normalized) || [
+    /^(?:没有|无)(?:可用的?)?(?:候选)?(?:commits?|提交)[，,:：\s]*(?:因此)?(?:无法|不能).{0,30}(?:生成|形成|提供)?(?:项目)?(?:进展)?总结[。！!]?$/iu,
+    /^(?:未找到|没有发现).{0,30}(?:commits?|提交).{0,30}(?:无法|不能).{0,30}(?:总结|生成)[。！!]?$/iu,
+    /^(?:无法|不能)(?:根据|基于).{0,50}(?:commits?|提交).{0,30}(?:生成|形成|提供).{0,20}(?:进展)?总结[。！!]?$/iu,
   ].some((pattern) => pattern.test(normalized));
 }
 
