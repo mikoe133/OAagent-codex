@@ -90,6 +90,9 @@ export class ResponsesProjectProgressSummarizer implements ProjectProgressSummar
       }
       const payload = await response.json();
       const output = decodeModelOutput(payload);
+      if (isLikelyProjectProgressProcessSummary(output.summary)) {
+        throw new Error("模型输出了分析步骤而非最终项目总结。");
+      }
       return {
         ...output,
         ...this.buildInteraction(input, output, {
@@ -166,6 +169,17 @@ export class DeterministicProjectProgressSummarizer implements ProjectProgressSu
       limitations: ["模型总结未启用，当前使用确定性兜底"],
     };
   }
+}
+
+export function isLikelyProjectProgressProcessSummary(summary: string): boolean {
+  const normalized = summary.replace(/\s+/gu, " ").trim();
+  return [
+    /分析候选\s+(?:commits?|提交)/iu,
+    /选择性读取.*(?:关键.*)?(?:commits?|提交).*(?:详情|信息)/iu,
+    /(?:^|[。！？!?；;\n])\s*(?:我)?(?:先|将|会|准备|计划|开始|继续|接下来|下一步|随后|之后).{0,100}(?:分析|读取|查看|检查|梳理|调用)/u,
+    /我(?:将|会|准备|计划)(?:先|继续|接下来)?.{0,100}(?:查看|读取|分析|检查|梳理).{0,100}(?:总结|概括|归纳|确认)/u,
+    /(?:^|[.!?;\n])\s*I(?:'ll| will| plan to| am going to).{0,100}(?:inspect|review|read|analy[sz]e|check)/iu,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 function buildModelRequest(

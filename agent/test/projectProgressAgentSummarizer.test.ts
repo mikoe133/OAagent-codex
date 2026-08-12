@@ -375,6 +375,73 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.match(result.interaction?.errorSummary ?? "", /分析步骤/);
   });
 
+  it("falls back when a later sentence describes the Agent's next step", async () => {
+    const runner: ProjectProgressAgentRunner = async () => ({
+      finalResponse: JSON.stringify({
+        summary: "候选人提交包含两项非合并提交：新建任务后端服务及修复幂等自动化领取请求。我将查看两者的详情以总结进展。",
+        limitations: [],
+      }),
+      usage: null,
+      upstreamRequestId: "thread-late-process-summary",
+      prohibitedToolUseCount: 0,
+    });
+    const summarizer = new CodexProjectProgressSummarizer(config, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.match(result.summary, /update/);
+    assert.equal(result.interaction?.fallbackUsed, true);
+    assert.match(result.interaction?.errorSummary ?? "", /分析步骤/);
+  });
+
+  it("ignores a cached process step and replaces it with a final summary", async () => {
+    const entries = new Map<string, { summary: string; limitations: string[] }>();
+    const cache = {
+      getRepositorySummaryCache: (identityDigest: string) =>
+        entries.get(identityDigest) ?? null,
+      putRepositorySummaryCache: (entry: {
+        identityDigest: string;
+        summary: string;
+        limitations: string[];
+      }) => {
+        entries.set(entry.identityDigest, {
+          summary: entry.summary,
+          limitations: entry.limitations,
+        });
+      },
+    };
+    let runs = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      runs += 1;
+      return {
+        finalResponse: JSON.stringify({
+          summary: "完成任务后端服务并修复自动化领取幂等性。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-cache-repair",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const summarizer = new CodexProjectProgressSummarizer({
+      ...config,
+      repositorySummaryCache: cache,
+    }, runner);
+
+    await summarizer.summarize(input);
+    const identityDigest = entries.keys().next().value as string;
+    entries.set(identityDigest, {
+      summary: "候选提交已找到。我将查看详情以总结进展。",
+      limitations: [],
+    });
+    const repaired = await summarizer.summarize(input);
+
+    assert.equal(runs, 2);
+    assert.equal(repaired.summary, "完成任务后端服务并修复自动化领取幂等性。");
+    assert.equal(repaired.interaction?.responsePayloadSanitized.cache_hit, false);
+    assert.equal(entries.get(identityDigest)?.summary, repaired.summary);
+  });
+
   it("uses and cleans an isolated workspace for each repository Thread", async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "project-progress-agent-"));
     const workspaceRoot = path.join(temporaryRoot, "workspaces");

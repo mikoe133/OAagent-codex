@@ -642,6 +642,15 @@ describe("syncProjectProgress", () => {
     assert.equal(summaries, 1);
     assert.equal(cachedResult.metrics.repositoriesWithCommits, 1);
     assert.equal(cachedResult.metrics.repositoryTasksTotal, 0);
+
+    draft = {
+      ...draft!,
+      summary: "候选人提交包含两项更新。我将查看详情以总结进展。",
+    };
+    const repairedResult = await syncProjectProgress(dependencies);
+
+    assert.equal(summaries, 2);
+    assert.equal(repairedResult.metrics.repositoryTasksTotal, 1);
   });
 
   it("applies status and summary writes only in explicit single-project test mode", async () => {
