@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { AutomationService } from "../src/automation/application/automationService.js";
@@ -87,6 +88,7 @@ test(
             worker_instance: `worker-${index}`,
             supported_job_types: ["github_project_progress_sync"],
             lease_seconds: 300,
+            claim_request_id: randomUUID(),
           }),
         ),
       );
