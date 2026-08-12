@@ -2,6 +2,7 @@ import { runCodexAgent } from "../application/runCodexAgent.js";
 import { loadConfig } from "../config/config.js";
 import { startModelRelay } from "../infrastructure/codex/modelRelay.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
+import { selectOpenApiCandidates } from "../infrastructure/oa/openApiIndex.js";
 
 async function main(): Promise<void> {
   const userTask = process.argv.slice(2).join(" ").trim();
@@ -36,6 +37,9 @@ async function main(): Promise<void> {
     result = await runCodexAgent(
       { ...config, openapiPath: openapi.path },
       userTask,
+      {
+        openApiCandidates: selectOpenApiCandidates(openapi.index, userTask),
+      },
     );
   } finally {
     await modelRelay.close();

@@ -104,7 +104,8 @@ browser -> web:3000 -> agent:3000 (Docker 内部网络)
 
 ```bash
 cp .env.example .env
-# 必填:NEXTTOKEN_API_KEY、OPENROUTER_API_KEY
+# 必填:NEXTTOKEN_API_KEY、OPENROUTER_API_KEY、OA_AGENT_SSO_SHARED_SECRET
+# 按 OA 服务端配置填写 OA_AGENT_SSO_TTL_SECONDS
 ```
 
 同机部署 OA 时保留:
@@ -113,6 +114,8 @@ cp .env.example .env
 OA_DOCKER_API_BASE_URL=http://host.docker.internal:8010
 OA_API_TOKEN_HEADER=Cookie
 OA_API_TOKEN_PREFIX=sessionid=
+OA_AGENT_SSO_SHARED_SECRET=<与 OA 服务端一致的随机密钥>
+OA_AGENT_SSO_TTL_SECONDS=300
 WEB_BIND_ADDRESS=0.0.0.0
 WEB_PORT=3000
 ```
@@ -138,8 +141,12 @@ Compose 只向宿主机发布 web 端口,agent 仅在内部网络暴露。`agent
 
 如果 OA 在另一台机器,把 `OA_DOCKER_API_BASE_URL` 改为 OA 的 HTTPS API 地址。生产环境应在 web 前配置 HTTPS 反向代理,因为登录 cookie 在 production 模式带 `Secure` 属性;直接通过服务器 IP 的 HTTP 地址访问会导致登录态不可用。
 
+自动任务系统已集成进现有 `agent` 服务：前端和 `project-progress-worker` 的 `AUTOMATION_API_BASE_URL` 指向 `http://agent:3000`，`PROJECT_SYNC_API_BASE_URL` 仍指向保留项目/GitHub 总结接口的原 OA。任务数据存入独立 MySQL，迁移命令、Secret 和切流步骤见 [docs/automation-node-migration.md](docs/automation-node-migration.md)。
+
 ## GitHub Actions CI/CD
 
 仓库提供 `.github/workflows/ci-cd.yml`:Pull Request 自动运行测试、构建并验证两个 Docker 镜像;合并到 `test` 后部署测试环境,合并到 `main` 后部署生产环境。两个环境都使用各自提交的 SHA 镜像,部署失败会自动恢复上一版镜像和运行配置。
 
 最简服务器准备、Secret/Variable 配置和双环境发布步骤见 [docs/dual-environment-deployment.md](docs/dual-environment-deployment.md);CI/CD 内部流程和回滚说明见 [docs/cicd.md](docs/cicd.md)。
+
+GitHub Actions 暂时不可用或 Artifact 配额耗尽时,使用 [手动受限构建部署](docs/manual-server-deployment.md)。该流程由本地上传源码,在服务器通过受限 BuildKit 顺序构建并保留自动回滚。

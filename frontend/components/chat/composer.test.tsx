@@ -101,3 +101,10 @@ test("shows the selected OpenRouter GLM model in the composer", async () => {
 
   assert.match(html, /GLM-5\.2/)
 })
+
+test("shows disabled models in gray with a hover hint", () => {
+  assert.match(composerSource, /disabled=\{modelDisabled\}/)
+  assert.match(composerSource, /title=\{modelDisabled \? "暂不支持" : undefined\}/)
+  assert.match(composerSource, /data-\[disabled\]:pointer-events-auto/)
+  assert.doesNotMatch(composerSource, />暂不可用</)
+})

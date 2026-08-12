@@ -28,7 +28,10 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     AGENT_SESSION_STORE=/app/.context/agent-sessions.json
-RUN mkdir -p /app/.context /home/node/.codex \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/.context /home/node/.codex \
     && chown -R node:node /app /home/node/.codex
 COPY --from=agent-production-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=agent-build --chown=node:node /app/agent/dist ./agent/dist
@@ -36,6 +39,7 @@ COPY --chown=node:node agent/package.json ./agent/package.json
 COPY --chown=node:node agent/openapi ./agent/openapi
 COPY --chown=node:node agent/prompts ./agent/prompts
 COPY --chown=node:node agent/scripts ./agent/scripts
+COPY --chown=node:node scripts/sql ./scripts/sql
 USER node
 EXPOSE 3000
 CMD ["node", "agent/dist/runtime/server.js"]

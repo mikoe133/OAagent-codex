@@ -15,6 +15,48 @@ function validate_image() {
   fi
 }
 
+function read_runtime_env_value() {
+  local env_file="$1"
+  local name="$2"
+  local line
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "$name="* ]]; then
+      printf '%s\n' "${line#*=}"
+      return 0
+    fi
+  done < "$env_file"
+
+  return 1
+}
+
+function validate_runtime_ports() {
+  local env_file="$1"
+  local agent_port
+  local web_port
+
+  if ! agent_port="$(read_runtime_env_value "$env_file" "AGENT_PORT")"; then
+    echo "[deploy] missing AGENT_PORT in runtime environment: $env_file" >&2
+    return 1
+  fi
+  if ! web_port="$(read_runtime_env_value "$env_file" "WEB_PORT")"; then
+    echo "[deploy] missing WEB_PORT in runtime environment: $env_file" >&2
+    return 1
+  fi
+  if [[ ! "$agent_port" =~ ^[0-9]+$ ]] || (( 10#$agent_port < 1 || 10#$agent_port > 65535 )); then
+    echo "[deploy] AGENT_PORT must be between 1 and 65535" >&2
+    return 1
+  fi
+  if [[ ! "$web_port" =~ ^[0-9]+$ ]] || (( 10#$web_port < 1 || 10#$web_port > 65535 )); then
+    echo "[deploy] WEB_PORT must be between 1 and 65535" >&2
+    return 1
+  fi
+  if [[ "$agent_port" == "$web_port" ]]; then
+    echo "[deploy] AGENT_PORT and WEB_PORT must use different host ports" >&2
+    return 1
+  fi
+}
+
 function write_deployment_env() {
   local next_agent_image="$1"
   local next_web_image="$2"
@@ -45,6 +87,34 @@ function pull_images() {
   compose pull agent web
 }
 
+function compose_up_once() {
+  : > "$compose_up_log_file"
+  compose up -d --no-build --remove-orphans --wait --wait-timeout 180 \
+    2>&1 | tee "$compose_up_log_file"
+}
+
+function start_release() {
+  local phase="$1"
+
+  if compose_up_once; then
+    return 0
+  fi
+
+  if ! grep -Eiq \
+    'failed to bind host port|port is already allocated|address already in use' \
+    "$compose_up_log_file"; then
+    return 1
+  fi
+
+  echo "[deploy] $phase port binding failed; resetting this Compose project before one retry" >&2
+  if ! compose down --remove-orphans --timeout 30; then
+    echo "[deploy] failed to reset this Compose project" >&2
+    return 1
+  fi
+
+  compose_up_once
+}
+
 function rollback() {
   restore_runtime_env
 
@@ -56,9 +126,15 @@ function rollback() {
 
   cp "$previous_env_file" "$deployment_env_file"
   chmod 600 "$deployment_env_file"
+
+  if [[ ! -f "$runtime_env_file" ]] || ! validate_runtime_ports "$runtime_env_file"; then
+    echo "[deploy] rollback runtime environment is invalid; manual intervention is required" >&2
+    return
+  fi
+
   echo "[deploy] rolling back with $previous_env_file" >&2
   pull_images || echo "[deploy] rollback image pull failed" >&2
-  compose up -d --no-build --remove-orphans --wait --wait-timeout 180 \
+  start_release "rollback" \
     || echo "[deploy] rollback failed; manual intervention is required" >&2
 }
 
@@ -108,6 +184,9 @@ readonly staged_runtime_env_file=".env.next"
 readonly previous_runtime_env_file=".env.previous"
 readonly deployment_env_file=".deploy.env"
 readonly previous_env_file=".deploy.env.previous"
+readonly compose_up_log_file="$(mktemp "${TMPDIR:-/tmp}/oa-agent-compose-up.XXXXXX")"
+
+trap 'rm -f "$compose_up_log_file"' EXIT
 
 [[ -f "$compose_file" ]] || fail "missing $deploy_dir/$compose_file"
 command -v docker >/dev/null || fail "docker is not installed"
@@ -115,8 +194,14 @@ docker compose version >/dev/null
 
 had_previous_runtime=0
 runtime_env_changed=0
+if [[ -f "$staged_runtime_env_file" ]]; then
+  validate_runtime_ports "$staged_runtime_env_file" \
+    || fail "invalid staged runtime environment"
+fi
 promote_runtime_env
 [[ -f "$runtime_env_file" ]] || fail "missing $deploy_dir/$runtime_env_file"
+validate_runtime_ports "$runtime_env_file" \
+  || fail "invalid runtime environment"
 
 had_previous=0
 if [[ -f "$deployment_env_file" ]]; then
@@ -135,7 +220,7 @@ if ! pull_images; then
   exit 1
 fi
 
-if ! compose up -d --no-build --remove-orphans --wait --wait-timeout 180; then
+if ! start_release "release"; then
   echo "[deploy] health check failed; restoring the previous release" >&2
   rollback
   exit 1

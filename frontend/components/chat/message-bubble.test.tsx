@@ -10,6 +10,11 @@ import {
   truncateTraceSummaryText,
 } from "./message-bubble"
 import type { Message } from "./chat-shell"
+import {
+  calculateResponseDurationMs,
+  formatResponseDuration,
+  normalizeResponseDuration,
+} from "@/lib/response-duration"
 
 const OA_NAVIGATION_URL = "https://rwkv-oa.vercel.app/"
 
@@ -76,6 +81,33 @@ test("assistant replies render without a visible agent header or animated avatar
   assert.doesNotMatch(html, />OA Agent<\/span>/)
   assert.doesNotMatch(html, />Working<\/span>/)
   assert.doesNotMatch(html, /orb-circle-/)
+})
+
+test("completed assistant replies show their processed duration instead of a clock time", () => {
+  const message = {
+    id: "assistant-with-duration",
+    role: "assistant",
+    content: "Assistant content",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    durationMs: 12_340,
+    status: "completed",
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, /已处理: 12\.3 秒/)
+})
+
+test("response durations under one second are shown in milliseconds", () => {
+  assert.equal(formatResponseDuration(850), "850 毫秒")
+})
+
+test("response duration calculation uses monotonic elapsed milliseconds", () => {
+  assert.equal(calculateResponseDurationMs(100.2, 1_334.7), 1_235)
+})
+
+test("invalid persisted response durations are ignored", () => {
+  assert.equal(normalizeResponseDuration(-1), undefined)
 })
 
 test("trace summaries prefer the last non-empty text message", () => {
@@ -222,7 +254,7 @@ test("streaming agent messages render as separate subdued trace steps in event o
 
   assert.equal(traceMessages.length, 2)
   assert.match(html, />Now I will summarize the result\.<\/span>/)
-  assert.match(html, /flex-1 truncate text-\[13px\] font-normal/)
+  assert.match(html, /flex-1 truncate text-\[(?:13px|0\.8125rem)\] font-normal/)
   assert.match(html, /text-stone-500/)
   assert.ok(firstMessageIndex < toolIndex)
   assert.ok(toolIndex < secondMessageIndex)
@@ -255,6 +287,30 @@ test("streaming agent messages render as separate subdued trace steps in event o
   assert.doesNotMatch(html, /data-slot="trace-tool-icon"[^>]*\bborder(?:-|\b)/)
   assert.match(html, /data-slot="trace-tool-status"[^>]*text-\[#00619a\]/)
   assert.match(html, /lucide-circle-check[^>]*text-\[#00BFFF\]/)
+})
+
+test("completed assistant replies keep a trace entry when no tool was called", () => {
+  const message = {
+    id: "assistant-completed-trace-message",
+    role: "assistant",
+    content: "The project summary is ready.",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    durationMs: 3_452_600,
+    status: "completed",
+    traceMessages: [
+      {
+        id: "message-1",
+        content: "Inspecting the project records.",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, /data-slot="agent-trace"/)
+  assert.match(html, /data-slot="agent-trace-trigger"/)
+  assert.match(html, /data-state="closed"/)
+  assert.match(html, />Completed<\/span>/)
 })
 
 test("running trace nodes use the mint icon color", () => {
@@ -311,4 +367,30 @@ test("completed assistant traces show a completed status", () => {
   assert.doesNotMatch(html, /data-slot="trace-summary-orb"/)
   assert.doesNotMatch(html, /npm run build/)
   assert.doesNotMatch(html, /Build complete/)
+})
+
+test("completed assistant traces report warnings when an intermediate command fails", () => {
+  const message = {
+    id: "assistant-completed-with-warning",
+    role: "assistant",
+    content: "The requested result was still produced.",
+    createdAt: new Date("2026-07-10T10:01:00.000Z"),
+    status: "completed",
+    toolSteps: [
+      {
+        id: "command-failed",
+        type: "command_execution",
+        status: "failed",
+        title: "Command",
+        description: "python3 is unavailable",
+        input: "python3 inspect.py",
+        output: "python3: command not found",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, />Completed with warnings<\/span>/)
+  assert.match(html, /data-trace-state="warning"/)
 })

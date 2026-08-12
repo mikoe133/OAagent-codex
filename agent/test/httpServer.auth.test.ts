@@ -88,6 +88,105 @@ test("protects public agent routes with a validated OA token", async () => {
   }
 });
 
+test("protects the OA automation model catalog with a dedicated token", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-automation-auth-"));
+  const config = {
+    automationApiToken: "automation-secret",
+    modelProvider: "nexttoken",
+    model: "gpt-5.6-terra",
+    modelProviders: {
+      nexttoken: { name: "Nexttoken" },
+      openrouter: { name: "OpenRouter" },
+    },
+  } as AppConfig;
+  const server = createAgentHttpServer(
+    config,
+    {} as AgentService,
+    new SessionStore(path.join(directory, "sessions.json")),
+  );
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const missing = await requestAutomationJson(
+      address.port,
+      "GET",
+      "/internal/v1/models",
+    );
+    assert.equal(missing.status, 401);
+
+    const catalog = await requestAutomationJson(
+      address.port,
+      "GET",
+      "/internal/v1/models",
+      "automation-secret",
+    );
+    assert.equal(catalog.status, 200);
+    assert.doesNotMatch(JSON.stringify(catalog.body), /apiKey|secret/);
+    assert.equal(
+      typeof (catalog.body as { data?: { catalog_version?: unknown } }).data
+        ?.catalog_version,
+      "string",
+    );
+    assert.ok(
+      Array.isArray(
+        (catalog.body as { data?: { providers?: unknown } }).data?.providers,
+      ),
+    );
+
+    const valid = await requestAutomationJson(
+      address.port,
+      "POST",
+      "/internal/v1/models/validate",
+      "automation-secret",
+      {
+        provider: "openrouter",
+        model_id: "moonshotai/kimi-k3",
+      },
+    );
+    assert.equal(valid.status, 200);
+    assert.equal(
+      (valid.body as { data?: { valid?: unknown } }).data?.valid,
+      true,
+    );
+    assert.equal(
+      typeof (valid.body as { data?: { catalog_version?: unknown } }).data
+        ?.catalog_version,
+      "string",
+    );
+
+    const invalid = await requestAutomationJson(
+      address.port,
+      "POST",
+      "/internal/v1/models/validate",
+      "automation-secret",
+      {
+        provider: "openrouter",
+        model_id: "gpt-5.6-terra",
+      },
+    );
+    assert.equal(invalid.status, 200);
+    assert.equal(
+      (invalid.body as { data?: { valid?: unknown } }).data?.valid,
+      false,
+    );
+
+    const wrongContentType = await requestAutomationJson(
+      address.port,
+      "POST",
+      "/internal/v1/models/validate",
+      "automation-secret",
+    );
+    assert.equal(wrongContentType.status, 415);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function requestJson(
   port: number,
   pathname: string,
@@ -115,6 +214,45 @@ function requestJson(
       },
     );
     request.on("error", reject);
+    request.end();
+  });
+}
+
+function requestAutomationJson(
+  port: number,
+  method: "GET" | "POST",
+  pathname: string,
+  token?: string,
+  body?: Record<string, unknown>,
+): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        path: pathname,
+        method,
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({
+            status: response.statusCode ?? 0,
+            body: text ? JSON.parse(text) : null,
+          });
+        });
+      },
+    );
+    request.on("error", reject);
+    if (body) {
+      request.write(JSON.stringify(body));
+    }
     request.end();
   });
 }

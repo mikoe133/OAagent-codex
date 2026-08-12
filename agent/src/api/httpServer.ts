@@ -1,5 +1,10 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type {
   AgentService,
   AgentStreamEvent,
@@ -8,7 +13,10 @@ import type {
 import type { AppConfig } from "../config/config.js";
 import {
   MODEL_CATALOG,
+  MODEL_CATALOG_VERSION,
   getDefaultModel,
+  getModelDisplayName,
+  resolveAutomationModelSelection,
   resolveRequestedModel,
   resolveRequestedProvider,
   type ModelProviderId,
@@ -16,6 +24,7 @@ import {
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
 import type { SessionStore } from "../infrastructure/persistence/sessionStore.js";
+import type { AutomationHttpApplication } from "../automation/http/automationHttpApplication.js";
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -25,8 +34,14 @@ export function startHttpServer(
   config: AppConfig,
   agentService: AgentService,
   sessionStore: SessionStore,
-): void {
-  const server = createAgentHttpServer(config, agentService, sessionStore);
+  automationHttp?: AutomationHttpApplication,
+): Server {
+  const server = createAgentHttpServer(
+    config,
+    agentService,
+    sessionStore,
+    automationHttp,
+  );
 
   server.listen(config.serverPort, config.serverHost, () => {
     console.error(
@@ -44,16 +59,25 @@ export function startHttpServer(
     }
     throw error;
   });
+  return server;
 }
 
 export function createAgentHttpServer(
   config: AppConfig,
   agentService: AgentService,
   sessionStore: SessionStore,
+  automationHttp?: AutomationHttpApplication,
 ) {
   return createServer(async (request, response) => {
     try {
-      await routeRequest(config, agentService, sessionStore, request, response);
+      await routeRequest(
+        config,
+        agentService,
+        sessionStore,
+        request,
+        response,
+        automationHttp,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       writeJson(response, 500, { error: message });
@@ -67,6 +91,7 @@ async function routeRequest(
   sessionStore: SessionStore,
   request: IncomingMessage,
   response: ServerResponse,
+  automationHttp?: AutomationHttpApplication,
 ): Promise<void> {
   const method = request.method || "GET";
   const url = new URL(request.url || "/", "http://localhost");
@@ -107,6 +132,18 @@ async function routeRequest(
       200,
       await callOaApiTool(config, body, sessionOaApiToken),
     );
+    return;
+  }
+
+  if (automationHttp && (await automationHttp.handle(request, response, url))) {
+    return;
+  }
+
+  if (
+    url.pathname.startsWith("/internal/v1/models") ||
+    url.pathname.startsWith("/v1/automation/")
+  ) {
+    await handleAutomationApi(config, request, response, method, url.pathname);
     return;
   }
 
@@ -255,6 +292,135 @@ async function routeRequest(
   }
 
   writeJson(response, 404, { error: "not found" });
+}
+
+async function handleAutomationApi(
+  config: AppConfig,
+  request: IncomingMessage,
+  response: ServerResponse,
+  method: string,
+  pathname: string,
+): Promise<void> {
+  if (!config.automationApiToken) {
+    writeJson(response, 503, { error: "automation API is not configured" });
+    return;
+  }
+  if (!hasAutomationAuthorization(request, config.automationApiToken)) {
+    writeJson(response, 401, { error: "unauthorized" });
+    return;
+  }
+
+  if (
+    method === "GET" &&
+    (pathname === "/internal/v1/models" || pathname === "/v1/automation/models")
+  ) {
+    writeJson(response, 200, {
+      data: {
+        catalog_version: MODEL_CATALOG_VERSION,
+        providers: Object.entries(MODEL_CATALOG).map(([provider, models]) => ({
+          provider,
+          display_name: config.modelProviders[provider as ModelProviderId].name,
+          models: models.map((model) => ({
+            model_id: model,
+            display_name: getModelDisplayName(model),
+            enabled: true,
+            supports_structured_output: true,
+            is_default: model === getDefaultModel(provider as ModelProviderId),
+          })),
+        })),
+      },
+    });
+    return;
+  }
+
+  if (
+    method === "POST" &&
+    (
+      pathname === "/internal/v1/models/validate" ||
+      pathname === "/v1/automation/models/validate"
+    )
+  ) {
+    if (!isJsonRequest(request)) {
+      writeJson(response, 415, {
+        code: "invalid_request",
+        error: "Content-Type 必须是 application/json",
+      });
+      return;
+    }
+    let body: JsonObject;
+    try {
+      body = await readJsonBody(request);
+    } catch {
+      writeJson(response, 400, {
+        code: "invalid_request",
+        error: "请求体必须是合法 JSON object",
+      });
+      return;
+    }
+    const modelProvider = stringField(body, "provider") ||
+      stringField(body, "model_provider");
+    const modelId = stringField(body, "model_id");
+    if (!modelProvider || !modelId) {
+      writeJson(response, 422, {
+        data: {
+          valid: false,
+          catalog_version: MODEL_CATALOG_VERSION,
+        },
+      });
+      return;
+    }
+    try {
+      resolveAutomationModelSelection(
+        {
+          modelProvider,
+          modelId,
+          modelParameters: {},
+        },
+        {
+          modelProvider: config.modelProvider,
+          modelId: config.model,
+        },
+      );
+      writeJson(response, 200, {
+        data: {
+          valid: true,
+          catalog_version: MODEL_CATALOG_VERSION,
+        },
+      });
+    } catch {
+      writeJson(response, 200, {
+        data: {
+          valid: false,
+          catalog_version: MODEL_CATALOG_VERSION,
+        },
+      });
+    }
+    return;
+  }
+
+  writeJson(response, 404, { error: "not found" });
+}
+
+function isJsonRequest(request: IncomingMessage): boolean {
+  const contentType = headerValue(request, "content-type");
+  return contentType?.split(";", 1)[0]?.trim().toLowerCase() === "application/json";
+}
+
+function hasAutomationAuthorization(
+  request: IncomingMessage,
+  expectedToken: string,
+): boolean {
+  const authorization = headerValue(request, "authorization");
+  if (!authorization?.startsWith("Bearer ")) {
+    return false;
+  }
+  const receivedToken = authorization.slice("Bearer ".length).trim();
+  if (!receivedToken) {
+    return false;
+  }
+  const received = Buffer.from(receivedToken);
+  const expected = Buffer.from(expectedToken);
+  return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
 function readOaApiTokenFromRequest(

@@ -34,6 +34,16 @@ describe("resolveOpenApiContract", () => {
       JSON.parse(await readFile(resolved.path, "utf8")),
       remoteContract,
     );
+    assert.equal(resolved.index.operations[0]?.operationId, "remote_operation");
+    assert.equal(
+      JSON.parse(
+        await readFile(
+          path.join(fixture.config.projectRoot, ".context", "openapi-index.json"),
+          "utf8",
+        ),
+      ).documentHash,
+      resolved.index.documentHash,
+    );
   });
 
   it("uses the local contract when the remote request fails", async () => {
@@ -86,7 +96,7 @@ describe("resolveOpenApiContract", () => {
 });
 
 describe("buildRuntimeContext", () => {
-  it("points the agent at the resolved OpenAPI snapshot", () => {
+  it("provides compact candidates and permits at most one exact schema read", () => {
     const config = {
       projectRoot: "/tmp/agent",
       openapiPath: "/tmp/agent/.context/openapi/remote.json",
@@ -95,10 +105,79 @@ describe("buildRuntimeContext", () => {
       oaApiBaseUrl: null,
     } as AppConfig;
 
-    assert.match(
-      buildRuntimeContext(config),
-      /接口文档: \.\/\.context\/openapi\/remote\.json/,
-    );
+    const runtimeContext = buildRuntimeContext(config, {
+      openApiCandidates: [
+        {
+          operationId: "user_info_user_user_list_get",
+          method: "GET",
+          path: "/user/user-list",
+          summary: "User Info",
+          tags: ["user"],
+          permissionLevel: "user",
+          parameters: [
+            { name: "is_active", in: "query", required: false, type: "boolean" },
+          ],
+          requestBodyFields: [],
+          mainResponseFields: ["data[].full_name"],
+        },
+      ],
+    });
+
+    assert.match(runtimeContext, /候选接口索引/);
+    assert.match(runtimeContext, /user_info_user_user_list_get/);
+    assert.match(runtimeContext, /读取完整 schema/);
+    assert.match(runtimeContext, /候选接口.*未包含.*用户意图/);
+    assert.match(runtimeContext, /候选以外的完整 OpenAPI/);
+    assert.match(runtimeContext, /不得因候选接口未命中就直接断言接口不存在/);
+    assert.doesNotMatch(runtimeContext, /先用 .*确认 operationId/);
+    assert.doesNotMatch(runtimeContext, /grep|sed/);
+  });
+
+  it("describes dynamic single-step upgrades without restricting complex turns", () => {
+    const config = {
+      projectRoot: "/tmp/agent",
+      openapiPath: "/tmp/agent/.context/openapi/remote.json",
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+      oaApiBaseUrl: null,
+    } as AppConfig;
+
+    const singleStep = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "single_step", exactPersonName: "薛屹阳" },
+    });
+    const multiStep = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "multi_step", exactPersonName: null },
+    });
+    const unknown = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "unknown", exactPersonName: null },
+    });
+
+    assert.match(singleStep, /目标数据完整时最多调用一次 OA API/);
+    assert.match(singleStep, /最多读取一次选定 operation 的精确 schema/);
+    assert.match(singleStep, /自动把本 turn 升级为多步/);
+    assert.match(multiStep, /保留自主多步能力/);
+    assert.match(multiStep, /每个 operation 最多读取一次/);
+    assert.match(unknown, /不设置单次调用硬限制/);
+  });
+
+  it("reinjects batch recovery guidance when resuming an existing conversation", () => {
+    const config = {
+      projectRoot: "/tmp/agent",
+      openapiPath: "/tmp/agent/.context/openapi/remote.json",
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+      oaApiBaseUrl: "https://oa.example.test",
+      oaAuthAlias: "default",
+    } as AppConfig;
+
+    const runtimeContext = buildRuntimeContext(config, {
+      oaQueryPolicy: { mode: "multi_step", exactPersonName: null },
+      hasSessionOaApiToken: true,
+    });
+
+    assert.match(runtimeContext, /批量写操作.*单条失败.*继续处理其余/);
+    assert.match(runtimeContext, /历史或归档.*不是.*不可更新/);
+    assert.match(runtimeContext, /GitHub.*github_urls.*项目更新接口/);
   });
 });
 

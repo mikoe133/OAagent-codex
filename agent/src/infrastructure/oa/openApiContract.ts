@@ -2,11 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../../config/config.js";
+import {
+  resolveOpenApiIndex,
+  type OpenApiOperationIndex,
+} from "./openApiIndex.js";
 
 const OPENAPI_FETCH_TIMEOUT_MS = 5_000;
 
 export type ResolvedOpenApiContract = {
   document: unknown;
+  index: OpenApiOperationIndex;
   path: string;
   source: "remote" | "local";
   fallbackReason?: string;
@@ -23,9 +28,14 @@ export async function resolveOpenApiContract(
 ): Promise<ResolvedOpenApiContract> {
   try {
     const document = await fetchRemoteContract(config.openapiUrl, fetchImpl);
+    const [contractPath, index] = await Promise.all([
+      materializeRemoteContract(config.projectRoot, document),
+      resolveOpenApiIndex(config.projectRoot, document),
+    ]);
     return {
       document,
-      path: await materializeRemoteContract(config.projectRoot, document),
+      index,
+      path: contractPath,
       source: "remote",
     };
   } catch (error) {
@@ -35,6 +45,7 @@ export async function resolveOpenApiContract(
     );
     return {
       document,
+      index: await resolveOpenApiIndex(config.projectRoot, document),
       path: config.openapiPath,
       source: "local",
       fallbackReason: error instanceof Error ? error.message : String(error),

@@ -12,3 +12,11 @@ test("renders provider choices in a right-side hover submenu", () => {
   assert.match(providerSubmenu, /<DropdownMenuSubTrigger[\s\S]*模型提供商[\s\S]*<\/DropdownMenuSubTrigger>/)
   assert.match(providerSubmenu, /<DropdownMenuSubContent\s+sideOffset=\{8\}[\s\S]*MODEL_PROVIDERS\.map/)
 })
+
+test("centers the user-menu expand icon inside its trigger", () => {
+  const userMenuTrigger = siderSource.match(/<DropdownMenuTrigger[\s\S]*?aria-label="Open user menu"[\s\S]*?<\/DropdownMenuTrigger>/)?.[0]
+
+  assert.ok(userMenuTrigger, "expected the user-menu trigger")
+  assert.match(userMenuTrigger, /className="[^"]*inline-flex[^"]*items-center[^"]*justify-center[^"]*"/)
+  assert.match(userMenuTrigger, /<ChevronsUpDown className="h-4 w-4"/)
+})

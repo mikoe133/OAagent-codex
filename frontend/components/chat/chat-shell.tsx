@@ -5,6 +5,7 @@ import { PanelLeftClose, PanelLeftOpen, SquarePen } from "lucide-react"
 import { gsap } from "gsap"
 import { MessageList } from "./message-list"
 import { Composer } from "./composer"
+import { AutomatedTasksView } from "./automated-tasks-view"
 import { Button } from "@/components/ui/button"
 import Sider, {
   type ChatSessionListItem,
@@ -18,11 +19,13 @@ import {
   type AIModel,
   type ModelProvider,
 } from "@/lib/model-catalog"
+import { calculateResponseDurationMs, normalizeResponseDuration } from "@/lib/response-duration"
 import {
   drainChatSseBuffer,
   isToolTimelineEvent,
   mergeMessageTraceDelta,
   mergeToolTimelineEvent,
+  withTraceMessages,
   type ChatStreamEvent,
   type TraceMessage,
   type ToolStep,
@@ -39,6 +42,7 @@ export interface Message {
   role: "user" | "assistant"
   content: string
   createdAt: Date
+  durationMs?: number
   imageData?: string
   toolSteps?: ToolStep[]
   traceMessages?: TraceMessage[]
@@ -76,8 +80,10 @@ type StoredMessage = {
   role?: unknown
   content?: unknown
   createdAt?: unknown
+  durationMs?: unknown
   imageData?: unknown
   toolSteps?: unknown
+  traceMessages?: unknown
   status?: unknown
   error?: unknown
   feedback?: unknown
@@ -96,6 +102,8 @@ type SessionIndicatorTimers = {
   pause?: ReturnType<typeof setTimeout>
   dismiss?: ReturnType<typeof setTimeout>
 }
+
+type WorkspaceView = "conversation" | "automated-tasks"
 
 // Generates a unique ID for messages
 function generateId(): string {
@@ -306,14 +314,19 @@ function normalizeStoredMessage(value: unknown): Message | null {
   const status = normalizeStoredMessageStatus(message.status, message.role)
   const feedback = message.feedback === "like" || message.feedback === "dislike" ? message.feedback : null
   const messageError = stringValue(message.error)
+  const durationMs = normalizeResponseDuration(message.durationMs)
 
   return {
     id: typeof message.id === "string" && message.id ? message.id : generateId(),
     role: message.role,
     content: message.content,
     createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
+    ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof message.imageData === "string" ? { imageData: message.imageData } : {}),
     ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
+    ...(Array.isArray(message.traceMessages)
+      ? { traceMessages: normalizeStoredTraceMessages(message.traceMessages) }
+      : {}),
     ...(status ? { status } : {}),
     ...(messageError ? { error: messageError } : {}),
     ...(feedback ? { feedback } : {}),
@@ -335,6 +348,30 @@ function normalizeStoredMessageStatus(value: unknown, role: "user" | "assistant"
 
 function normalizeStoredToolSteps(value: unknown[]): ToolStep[] {
   return value.map(normalizeStoredToolStep).filter((step): step is ToolStep => Boolean(step))
+}
+
+function normalizeStoredTraceMessages(value: unknown[]): TraceMessage[] {
+  return value.map(normalizeStoredTraceMessage).filter((message): message is TraceMessage => Boolean(message))
+}
+
+function normalizeStoredTraceMessage(value: unknown): TraceMessage | null {
+  const message = toRecord(value)
+  if (!message) {
+    return null
+  }
+
+  const id = stringValue(message.id)
+  const content = stringValue(message.content)
+  const afterStepId = stringValue(message.afterStepId)
+  if (!id || !content) {
+    return null
+  }
+
+  return {
+    id,
+    content,
+    ...(afterStepId ? { afterStepId } : {}),
+  }
 }
 
 function normalizeStoredToolStep(value: unknown): ToolStep | null {
@@ -391,6 +428,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [sessionListFocusKey, setSessionListFocusKey] = useState(0)
   const [isSiderCollapsed, setIsSiderCollapsed] = useState(false)
   const [isMobileSiderOpen, setIsMobileSiderOpen] = useState(false)
+  const [activeWorkspaceView, setActiveWorkspaceView] = useState<WorkspaceView>("conversation")
   const [isLoaded, setIsLoaded] = useState(false)
   const siderRef = useRef<HTMLElement | null>(null)
   const sidebarControlsRef = useRef<HTMLDivElement | null>(null)
@@ -553,7 +591,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   useLayoutEffect(() => {
     animateSiderLayout(hasAppliedSiderLayoutRef.current)
     hasAppliedSiderLayoutRef.current = true
-  }, [animateSiderLayout])
+  }, [activeWorkspaceView, animateSiderLayout])
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -720,6 +758,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
 
       setError(null)
+      const responseStartedAt = performance.now()
       const conversationMessages = messagesRef.current
 
       const userMessage: Message = {
@@ -1024,6 +1063,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           appendAssistantContent(decoder.decode())
         }
 
+        const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
         await waitForTypewriterFlush()
         cancelTypewriter()
         currentToolSteps = currentToolSteps.map((step) =>
@@ -1033,12 +1073,16 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         const completedMessages: Message[] = [
           ...conversationMessages,
           userMessage,
-          {
-            ...assistantMessage,
-            content: accumulatedContent,
-            status: "completed",
-            ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
-          },
+          withTraceMessages(
+            {
+              ...assistantMessage,
+              content: accumulatedContent,
+              status: "completed",
+              durationMs,
+              ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
+            },
+            currentTraceMessages,
+          ),
         ]
 
         publishSessionMessages(completedMessages)
@@ -1049,6 +1093,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
         const wasStopped = e instanceof Error && e.name === "AbortError"
         const errorMessage = e instanceof Error ? e.message : "An error occurred"
+        const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
         currentToolSteps = currentToolSteps.map((step) =>
           step.status === "running"
             ? { ...step, status: wasStopped ? ("info" as const) : ("failed" as const) }
@@ -1058,13 +1103,17 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         const terminalMessages: Message[] = [
           ...conversationMessages,
           userMessage,
-          {
-            ...assistantMessage,
-            content: accumulatedContent || visibleContent,
-            status: wasStopped ? "stopped" : "failed",
-            ...(!wasStopped ? { error: errorMessage } : {}),
-            ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
-          },
+          withTraceMessages(
+            {
+              ...assistantMessage,
+              content: accumulatedContent || visibleContent,
+              status: wasStopped ? "stopped" : "failed",
+              durationMs,
+              ...(!wasStopped ? { error: errorMessage } : {}),
+              ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
+            },
+            currentTraceMessages,
+          ),
         ]
 
         publishSessionMessages(terminalMessages)
@@ -1136,6 +1185,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   )
 
   const startNewSession = useCallback(() => {
+    setActiveWorkspaceView("conversation")
     setSessionListFocusKey((value) => value + 1)
 
     if (!isStreaming && messagesRef.current.length === 0) {
@@ -1219,6 +1269,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
   const handleSelectSession = useCallback(
     async (session: ChatSessionListItem) => {
+      setActiveWorkspaceView("conversation")
       let selectedSessionId = session.sessionId
       const cachedMessages = sessionMessagesRef.current.get(session.sessionId)
       setError(null)
@@ -1296,6 +1347,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     [closeMobileSider, handleSelectSession],
   )
 
+  const handleOpenAutomatedTasks = useCallback(() => {
+    closeMobileSider()
+    setActiveWorkspaceView("automated-tasks")
+  }, [closeMobileSider])
+
   const SiderToggleIcon = isSiderCollapsed ? PanelLeftOpen : PanelLeftClose
 
   return (
@@ -1331,15 +1387,17 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       >
         <PanelLeftOpen className="h-5 w-5" />
       </Button>
-      <Button
-        onClick={startNewSession}
-        variant="ghost"
-        size="icon"
-        className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-20 z-20 sm:hidden`}
-        aria-label="New chat"
-      >
-        <SquarePen className="h-5 w-5" />
-      </Button>
+      {activeWorkspaceView === "conversation" ? (
+        <Button
+          onClick={startNewSession}
+          variant="ghost"
+          size="icon"
+          className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-20 z-20 sm:hidden`}
+          aria-label="New chat"
+        >
+          <SquarePen className="h-5 w-5" />
+        </Button>
+      ) : null}
       {isMobileSiderOpen && (
         <button
           data-slot="mobile-sider-backdrop"
@@ -1358,6 +1416,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         focusSessionKey={sessionListFocusKey}
         onMobileClose={closeMobileSider}
         onNewSession={handleMobileNewSession}
+        onOpenAutomatedTasks={handleOpenAutomatedTasks}
         onSelectSession={handleMobileSelectSession}
         onDeleteSession={handleDeleteSession}
         refreshKey={sessionListRefreshKey}
@@ -1410,26 +1469,32 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       */}
 
       <div ref={messageLayoutRef} className="absolute inset-0 sm:left-80">
-        <MessageList
-          messages={messages}
-          isStreaming={isStreaming}
-          error={error}
-          onRetry={retry}
-          onFeedback={handleMessageFeedback}
-          isLoaded={isLoaded}
-          oaNavigationUrl={oaNavigationUrl}
-        />
+        {activeWorkspaceView === "automated-tasks" ? (
+          <AutomatedTasksView oaNavigationUrl={oaNavigationUrl} />
+        ) : (
+          <MessageList
+            messages={messages}
+            isStreaming={isStreaming}
+            error={error}
+            onRetry={retry}
+            onFeedback={handleMessageFeedback}
+            isLoaded={isLoaded}
+            oaNavigationUrl={oaNavigationUrl}
+          />
+        )}
       </div>
 
-      <Composer
-        layoutRef={composerLayoutRef}
-        onSend={sendMessage}
-        onStop={stopStreaming}
-        isStreaming={isStreaming}
-        selectedProvider={selectedProvider}
-        selectedModel={selectedModel}
-        onModelChange={handleModelChange}
-      />
+      {activeWorkspaceView === "conversation" ? (
+        <Composer
+          layoutRef={composerLayoutRef}
+          onSend={sendMessage}
+          onStop={stopStreaming}
+          isStreaming={isStreaming}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          onModelChange={handleModelChange}
+        />
+      ) : null}
     </div>
   )
 }

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "OA agent backend service.",
   "engines": {
-    "node": ">=18"
+    "node": ">=22.17.0"
   },
   "scripts": {
     "dev": "tsx src/runtime/cli.ts",
@@ -13,15 +13,31 @@
     "build": "tsc",
     "start": "node dist/runtime/cli.js",
     "start:server": "node dist/runtime/server.js",
+    "sync:project-progress": "tsx src/runtime/projectProgressSync.ts --dry-run",
+    "sync:project-progress:test-write": "tsx src/runtime/projectProgressSync.ts --apply-test",
+    "sync:project-progress:apply": "tsx src/runtime/projectProgressSync.ts --apply",
+    "start:project-progress": "node dist/runtime/projectProgressSync.js --dry-run",
+    "start:project-progress:apply": "node dist/runtime/projectProgressSync.js --apply",
+    "run:project-progress-worker": "tsx src/runtime/projectProgressWorker.ts",
+    "benchmark:project-progress": "tsx src/benchmark/projectProgressBaseline.ts",
+    "start:project-progress-worker": "node dist/runtime/projectProgressWorker.js",
+    "migrate:automation": "tsx src/runtime/automationMigrate.ts",
+    "start:migrate:automation": "node dist/runtime/automationMigrate.js",
     "test": "tsx --test test/*.test.ts",
+    "test:automation:integration": "tsx --test test/automationMysql.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/codex-sdk": "^0.142.5",
-    "dotenv": "^16.4.5"
+    "cron-parser": "^5.8.1",
+    "dotenv": "^16.4.5",
+    "kysely": "^0.29.5",
+    "mysql2": "^3.23.3",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^20.19.18",
+    "@types/node": "^22.20.1",
     "tsx": "^4.19.2",
     "typescript": "^5.9.2"
   }

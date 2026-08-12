@@ -31,15 +31,29 @@ test("keeps provider model lists isolated", () => {
     [
       "z-ai/glm-5.2",
       "moonshotai/kimi-k3",
-      "openai/gpt-5.5",
-      "openai/gpt-5.4",
+      "openai/gpt-5.6",
     ],
   )
   assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.2"), true)
   assert.equal(isModelForProvider("openrouter", "moonshotai/kimi-k3"), true)
+  assert.equal(isModelForProvider("openrouter", "openai/gpt-5.5"), false)
+  assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4-mini"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4-nano"), false)
   assert.equal(isModelForProvider("nexttoken", "z-ai/glm-5.2"), false)
+})
+
+test("marks OpenRouter GPT-5.6 as temporarily unavailable", () => {
+  const gptModel = getModelsForProvider("openrouter").find(
+    (model) => model.id === "openai/gpt-5.6",
+  )
+
+  assert.deepEqual(gptModel, {
+    id: "openai/gpt-5.6",
+    name: "GPT-5.6",
+    icon: "/images/gpt.png",
+    disabled: true,
+  })
 })
 
 test("labels Kimi K3 in the OpenRouter model list", () => {

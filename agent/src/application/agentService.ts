@@ -22,6 +22,13 @@ import type {
   SessionStore,
 } from "../infrastructure/persistence/sessionStore.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
+import { selectOpenApiCandidates } from "../infrastructure/oa/openApiIndex.js";
+import {
+  beginOaTurn,
+  finishOaTurn,
+  resolveOaQueryPolicy,
+} from "../infrastructure/oa/oaQueryPolicy.js";
+import { resolveTaskReasoningEffort } from "./taskReasoningPolicy.js";
 
 export type SendMessageInput = {
   sessionId: string;
@@ -149,18 +156,41 @@ export class AgentService {
   }
 
   private async runMessage(input: SendMessageInput): Promise<SendMessageResult> {
-    const runConfig = await resolveRunConfig(this.config, input.provider, input.model);
+    const resolvedRun = await resolveRunConfig(
+      this.config,
+      input.provider,
+      input.model,
+      input.message,
+    );
+    const runConfig = resolvedRun.config;
     const session = await this.prepareSession(input);
-    const runtimeContext = this.getRuntimeContext(input.sessionId);
+    const runtimeContext = {
+      ...this.getRuntimeContext(input.sessionId),
+      openApiCandidates: resolvedRun.openApiCandidates,
+      oaQueryPolicy: resolvedRun.oaQueryPolicy,
+    };
     const codex = createCodexClient(runConfig, input.sessionId);
-    const thread = startOrResumeThread(codex, runConfig, session.threadId);
+    const thread = startOrResumeThread(
+      codex,
+      runConfig,
+      session.threadId,
+      runConfig.model,
+      resolvedRun.reasoningEffort,
+    );
     const prompt = buildPromptForSession(
       runConfig,
       session,
       input.message,
       runtimeContext,
     );
-    const turn = await thread.run(prompt);
+    beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
+    const turn = await (async () => {
+      try {
+        return await thread.run(prompt);
+      } finally {
+        finishOaTurn(input.sessionId);
+      }
+    })();
 
     if (!turn.finalResponse.trim()) {
       const itemTypes = turn.items.map((item) => item.type).join(", ") || "无";
@@ -199,18 +229,33 @@ export class AgentService {
     throwIfAborted(signal);
     await emit({ type: "run.started", sessionId: input.sessionId });
 
-    const runConfig = await resolveRunConfig(this.config, input.provider, input.model);
+    const resolvedRun = await resolveRunConfig(
+      this.config,
+      input.provider,
+      input.model,
+      input.message,
+    );
+    const runConfig = resolvedRun.config;
     const session = await this.prepareSession(input);
-    const runtimeContext = this.getRuntimeContext(input.sessionId);
+    const runtimeContext = {
+      ...this.getRuntimeContext(input.sessionId),
+      openApiCandidates: resolvedRun.openApiCandidates,
+      oaQueryPolicy: resolvedRun.oaQueryPolicy,
+    };
     const codex = createCodexClient(runConfig, input.sessionId);
-    const thread = startOrResumeThread(codex, runConfig, session.threadId);
+    const thread = startOrResumeThread(
+      codex,
+      runConfig,
+      session.threadId,
+      runConfig.model,
+      resolvedRun.reasoningEffort,
+    );
     const prompt = buildPromptForSession(
       runConfig,
       session,
       input.message,
       runtimeContext,
     );
-    const { events } = await thread.runStreamed(prompt, { signal });
     const state = createStreamState();
     const secrets = this.getSecrets(runtimeContext.sessionOaApiToken);
     const recoverStream = async (): Promise<boolean> => {
@@ -237,15 +282,21 @@ export class AgentService {
       return true;
     };
 
+    beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
     try {
-      for await (const event of events) {
-        throwIfAborted(signal);
-        await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+      const { events } = await thread.runStreamed(prompt, { signal });
+      try {
+        for await (const event of events) {
+          throwIfAborted(signal);
+          await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+        }
+      } catch (error) {
+        if (!(await recoverStream())) {
+          throw resolveStreamFailure(error, state.turnFailure, secrets);
+        }
       }
-    } catch (error) {
-      if (!(await recoverStream())) {
-        throw resolveStreamFailure(error, state.turnFailure, secrets);
-      }
+    } finally {
+      finishOaTurn(input.sessionId);
     }
 
     if (state.turnFailure) {
@@ -598,13 +649,19 @@ async function resolveRunConfig(
   config: AppConfig,
   requestedProvider: string | null | undefined,
   requestedModel: string | null | undefined,
-): Promise<AppConfig> {
+  task: string,
+) {
   const modelProvider = resolveRequestedProvider(requestedProvider, config.modelProvider);
   const fallbackModel =
     modelProvider === config.modelProvider ? config.model : getDefaultModel(modelProvider);
   const model = resolveRequestedModel(modelProvider, requestedModel, fallbackModel);
   const openapi = await resolveOpenApiContract(config);
-  return { ...config, modelProvider, model, openapiPath: openapi.path };
+  return {
+    config: { ...config, modelProvider, model, openapiPath: openapi.path },
+    openApiCandidates: selectOpenApiCandidates(openapi.index, task),
+    reasoningEffort: resolveTaskReasoningEffort(task),
+    oaQueryPolicy: resolveOaQueryPolicy(task),
+  };
 }
 
 function buildNextSummary(
@@ -728,18 +785,12 @@ function extractJson(value: string): string | null {
 }
 
 function formatOaApiFallbackResponse(result: ParsedOaApiToolResult): string {
-  const operationId = stringValue(result.operationId) ?? "unknown_operation";
-  const method = (stringValue(result.method) ?? "UNKNOWN").toUpperCase();
-  const path = stringValue(result.path) ?? "unknown path";
   const payload = toRecord(result.data);
   const data = toRecord(payload?.data);
   const facts = summarizeOaApiData(data);
   return [
     "已成功执行修改操作。",
     facts ? `结果:${facts}` : null,
-    "",
-    "接口依据:",
-    `- ${operationId}, ${method} ${path}`,
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");

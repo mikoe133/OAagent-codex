@@ -26,6 +26,7 @@ import {
 import { Accordion, AccordionContent, AccordionItem } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { formatResponseDuration } from "@/lib/response-duration"
 import { cn } from "@/lib/utils"
 import type { Message } from "./chat-shell"
 import type { ToolStep, ToolStepStatus, TraceMessage } from "./chat-stream"
@@ -35,6 +36,7 @@ import { AnimatedOrb } from "./animated-orb"
 interface MessageBubbleProps {
   message: Message
   isStreaming?: boolean
+  showActions?: boolean
   onFeedback?: (messageId: string, feedback: Message["feedback"]) => void
   oaNavigationUrl: string
 }
@@ -50,25 +52,29 @@ const MESSAGE_ACTION_CONTROLS_CLASS =
   "flex items-center transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none pointer-fine:pointer-events-none pointer-fine:translate-y-0.5 pointer-fine:opacity-0 pointer-fine:group-hover/message:pointer-events-auto pointer-fine:group-hover/message:translate-y-0 pointer-fine:group-hover/message:opacity-100 pointer-fine:group-focus-within/message:pointer-events-auto pointer-fine:group-focus-within/message:translate-y-0 pointer-fine:group-focus-within/message:opacity-100"
 const TRACE_SUMMARY_MAX_CHARS = 48
 
-export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavigationUrl }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  isStreaming = false,
+  showActions = true,
+  onFeedback,
+  oaNavigationUrl,
+}: MessageBubbleProps) {
   const isUser = message.role === "user"
   const assistantIsStreaming = !isUser && (isStreaming || message.status === "streaming")
   const toolSteps = message.toolSteps ?? []
   const hasAssistantText = message.content.trim().length > 0
   const latestToolStepId = toolSteps[toolSteps.length - 1]?.id
-  const streamingMessages = assistantIsStreaming
-    ? message.traceMessages?.length
-      ? message.traceMessages
-      : hasAssistantText
-        ? [
-            {
-              id: "message-current",
-              content: message.content,
-              ...(latestToolStepId ? { afterStepId: latestToolStepId } : {}),
-            },
-          ]
-        : []
-    : []
+  const traceMessages = message.traceMessages?.length
+    ? message.traceMessages
+    : assistantIsStreaming && hasAssistantText
+      ? [
+          {
+            id: "message-current",
+            content: message.content,
+            ...(latestToolStepId ? { afterStepId: latestToolStepId } : {}),
+          },
+        ]
+      : []
 
   return (
     <article
@@ -98,16 +104,16 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
                   />
                 </div>
               )}
-              <p className="whitespace-pre-wrap break-words text-[15px] leading-6">{message.content}</p>
+              <p className="whitespace-pre-wrap break-words text-[0.9375rem] leading-6">{message.content}</p>
             </div>
           </div>
         ) : (
           <div className="min-w-0 max-w-full">
-            {(toolSteps.length > 0 || streamingMessages.length > 0) && (
+            {(toolSteps.length > 0 || traceMessages.length > 0) && (
               <ToolTimeline
                 steps={toolSteps}
                 isStreaming={assistantIsStreaming}
-                streamingMessages={streamingMessages}
+                traceMessages={traceMessages}
                 fallbackText={message.content}
                 status={message.status}
               />
@@ -137,16 +143,18 @@ export function MessageBubble({ message, isStreaming = false, onFeedback, oaNavi
           </div>
         )}
 
-        {isUser ? (
-          <UserActions message={message} />
-        ) : (
-          <AssistantActions
-            message={message}
-            isStreaming={assistantIsStreaming}
-            onFeedback={onFeedback}
-            oaNavigationUrl={oaNavigationUrl}
-          />
-        )}
+        {showActions ? (
+          isUser ? (
+            <UserActions message={message} />
+          ) : (
+            <AssistantActions
+              message={message}
+              isStreaming={assistantIsStreaming}
+              onFeedback={onFeedback}
+              oaNavigationUrl={oaNavigationUrl}
+            />
+          )
+        ) : null}
       </div>
     </article>
   )
@@ -156,7 +164,7 @@ function UserActions({ message }: { message: Message }) {
   const showCopy = message.content.trim().length > 0
 
   return (
-    <div className="mt-1.5 flex min-h-7 items-center justify-end gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
+            <div className="mt-1.5 flex min-h-7 items-center justify-end gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
       <span>{formatTime(message.createdAt)}</span>
       {showCopy && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
@@ -179,6 +187,7 @@ function AssistantActions({
   onFeedback?: MessageBubbleProps["onFeedback"]
   oaNavigationUrl: string
 }) {
+  const responseDuration = formatResponseDuration(message.durationMs)
   const showActions =
     !isStreaming &&
     message.content.trim().length > 0 &&
@@ -189,8 +198,8 @@ function AssistantActions({
   }
 
   return (
-    <div className="mt-2 flex min-h-7 items-center gap-1 text-[11px] text-stone-400 theme-dark:text-zinc-500">
-      <span>{formatTime(message.createdAt)}</span>
+            <div className="mt-2 flex min-h-7 items-center gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
+      {responseDuration && <span>{`已处理: ${responseDuration}`}</span>}
       {showActions && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
           <span className="mx-1 h-3 w-px bg-stone-200 theme-dark:bg-zinc-700" aria-hidden="true" />
@@ -320,21 +329,28 @@ export function resolveTraceOpenState(
 function ToolTimeline({
   steps,
   isStreaming,
-  streamingMessages,
+  traceMessages,
   fallbackText,
   status,
 }: {
   steps: ToolStep[]
   isStreaming: boolean
-  streamingMessages: TraceMessage[]
+  traceMessages: TraceMessage[]
   fallbackText: string
   status: Message["status"]
 }) {
   const hasRunningStep = steps.some((step) => step.status === "running")
   const failedCount = steps.filter((step) => step.status === "failed").length
-  const timelineItems = buildTraceTimelineItems(steps, streamingMessages)
-  const activeMessageId = streamingMessages[streamingMessages.length - 1]?.id
+  const timelineItems = buildTraceTimelineItems(steps, traceMessages)
+  const activeMessageId = traceMessages[traceMessages.length - 1]?.id
   const isTraceActive = isStreaming || hasRunningStep
+  const traceState = isTraceActive
+    ? "active"
+    : status === "failed"
+      ? "failed"
+      : failedCount > 0
+        ? "warning"
+        : "idle"
   const wasTraceActiveRef = useRef(isTraceActive)
   const [isOpen, setIsOpen] = useState(isTraceActive)
 
@@ -345,12 +361,14 @@ function ToolTimeline({
   }, [isTraceActive])
 
   const summaryText = isTraceActive
-    ? resolveTraceSummaryText(streamingMessages, fallbackText, steps)
-    : status === "failed" || failedCount > 0
+    ? resolveTraceSummaryText(traceMessages, fallbackText, steps)
+    : status === "failed"
       ? "Failed"
       : status === "stopped"
         ? "Stopped"
-        : "Completed"
+        : failedCount > 0
+          ? "Completed with warnings"
+          : "Completed"
 
   return (
     <Accordion
@@ -371,14 +389,16 @@ function ToolTimeline({
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <div
                 data-slot="trace-summary-icon"
-                data-trace-state={isTraceActive ? "active" : failedCount ? "failed" : "idle"}
+                data-trace-state={traceState}
                 className={cn(
                   "relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full",
-                  isTraceActive
+                  traceState === "active"
                     ? ""
-                    : failedCount
+                    : traceState === "failed"
                       ? "bg-rose-50 text-rose-700 theme-dark:bg-rose-950/50 theme-dark:text-rose-300"
-                      : "bg-stone-100 text-stone-600 theme-dark:bg-zinc-800 theme-dark:text-zinc-300",
+                      : traceState === "warning"
+                        ? "bg-amber-50 text-amber-700 theme-dark:bg-amber-950/50 theme-dark:text-amber-300"
+                        : "bg-stone-100 text-stone-600 theme-dark:bg-zinc-800 theme-dark:text-zinc-300",
                 )}
                 aria-hidden="true"
               >
@@ -389,7 +409,7 @@ function ToolTimeline({
                 )}
                 {!isTraceActive && <GitCompareArrows className="h-4 w-4" />}
               </div>
-              <span className="block min-w-0 flex-1 truncate text-[13px] font-normal leading-5 text-stone-500 theme-dark:text-zinc-400">
+              <span className="block min-w-0 flex-1 truncate text-[0.8125rem] font-normal leading-5 text-stone-500 theme-dark:text-zinc-400">
                 {summaryText}
               </span>
             </div>
@@ -542,7 +562,7 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
           <span className="text-xs font-semibold text-stone-800 theme-dark:text-zinc-200">{step.title}</span>
           <span
             data-slot="trace-tool-status"
-            className={cn("text-[10px] font-medium uppercase", statusClass(step.status))}
+            className={cn("text-[0.625rem] font-medium uppercase", statusClass(step.status))}
           >
             {statusLabel(step.status)}
           </span>
@@ -550,7 +570,7 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
         <p className="mt-0.5 break-words text-xs leading-5 text-stone-500 theme-dark:text-zinc-400">{step.description}</p>
         {hasDetails && (
           <details className="group mt-1.5" open={step.status === "running"}>
-            <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-stone-500 transition-colors hover:text-stone-800 theme-dark:text-zinc-400 theme-dark:hover:text-zinc-200">
+            <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[0.6875rem] font-medium text-stone-500 transition-colors hover:text-stone-800 theme-dark:text-zinc-400 theme-dark:hover:text-zinc-200">
               <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" aria-hidden="true" />
               Details
             </summary>
@@ -568,8 +588,8 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
 function ToolDetail({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="mb-1 text-[10px] font-semibold uppercase text-stone-400 theme-dark:text-zinc-500">{label}</div>
-      <pre className="max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-stone-950 px-3 py-2 font-mono text-[11px] leading-5 text-stone-100">
+          <div className="mb-1 text-[0.625rem] font-semibold uppercase text-stone-400 theme-dark:text-zinc-500">{label}</div>
+          <pre className="max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-stone-950 px-3 py-2 font-mono text-[0.6875rem] leading-5 text-stone-100">
         {value}
       </pre>
     </div>
