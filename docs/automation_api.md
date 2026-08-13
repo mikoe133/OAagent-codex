@@ -1,5 +1,8 @@
 # 自动化任务与执行审计 API
 
+OA 页面调用指定项目 Commit 总结的完整字段、枚举、响应与错误码说明见
+[OA 指定项目 Commit 总结接口](oa_targeted_project_summary_api.md)。
+
 OAagent 开发和联调请优先阅读 [OAagent 与 OA 自动化联调 API](oaagent_integration_api.md)，其中包含双向模型接口、Worker payload、项目同步 payload、cURL、状态机和错误处理约定。
 
 ## 边界
