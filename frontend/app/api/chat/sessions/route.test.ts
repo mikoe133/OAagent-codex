@@ -156,6 +156,13 @@ test("PATCH persists the immutable creation time from generated session ids", as
       content: "Done",
       createdAt,
       durationMs: 12_340,
+      traceMessages: [
+        {
+          id: "trace-message-1",
+          content: "Inspecting the project records.",
+          afterStepId: "tool-1",
+        },
+      ],
       status: "completed",
     },
   ]

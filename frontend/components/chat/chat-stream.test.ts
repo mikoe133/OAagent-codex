@@ -5,10 +5,26 @@ import {
   drainChatSseBuffer,
   mergeMessageTraceDelta,
   mergeToolTimelineEvent,
+  withTraceMessages,
   type ChatStreamEvent,
   type TraceMessage,
   type ToolStep,
 } from "./chat-stream"
+
+test("withTraceMessages retains collected trace messages when a turn finishes", () => {
+  const traceMessages: TraceMessage[] = [
+    { id: "message-1", content: "Inspecting the project records." },
+  ]
+
+  assert.deepEqual(
+    withTraceMessages({ status: "completed", durationMs: 3_452_600 }, traceMessages),
+    {
+      status: "completed",
+      durationMs: 3_452_600,
+      traceMessages,
+    },
+  )
+})
 
 test("drainChatSseBuffer preserves partial events between chunks", () => {
   const events: ChatStreamEvent[] = []
