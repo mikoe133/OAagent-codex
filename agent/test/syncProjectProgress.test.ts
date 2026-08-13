@@ -949,6 +949,52 @@ describe("syncProjectProgress", () => {
     );
   });
 
+  it("fails clearly when a targeted OA project is not visible", async () => {
+    const traceEvents: ProjectProgressTraceEvent[] = [];
+
+    await assert.rejects(
+      syncProjectProgress({
+        observedAt: new Date("2026-07-24T12:00:00.000Z"),
+        projectId: 999,
+        summaryScope: "today",
+        oaClient: {
+          listProjects: async () => [{
+            id: 12,
+            projectName: "visible-project",
+            status: "updating",
+            githubUrls: [],
+          }],
+          getProject: async () => {
+            throw new Error("must not read project details");
+          },
+        },
+        githubReader: {
+          readRepository: async () => {
+            throw new Error("must not read GitHub");
+          },
+        },
+        summarizer: {
+          summarize: async () => {
+            throw new Error("must not summarize");
+          },
+        },
+        trace: (event) => {
+          traceEvents.push(event);
+        },
+      }),
+      /OA 项目 999 不存在或不可见/,
+    );
+    assert.deepEqual(traceEvents.at(-1), {
+      eventKey: "load_projects",
+      sequence: 100,
+      phase: "load_projects",
+      status: "failed",
+      title: "读取 OA 项目列表",
+      message: "OA 项目 999 不存在或不可见",
+      metadataSanitized: { summary_scope: "today", project_id: 999 },
+    });
+  });
+
   it("cancels test writes when the project becomes archived before mutation", async () => {
     let detailReads = 0;
     let mutations = 0;
