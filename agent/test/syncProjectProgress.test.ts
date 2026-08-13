@@ -484,6 +484,171 @@ describe("syncProjectProgress", () => {
     assert.deepEqual(result.projects[0]?.summaries, []);
   });
 
+  it("summarizes the latest historical commit for updating projects and records the scope in trace", async () => {
+    const summarizedShas: string[] = [];
+    const created: Array<{ projectId: number; summaryDate: string }> = [];
+    const traceEvents: ProjectProgressTraceEvent[] = [];
+    const updating = {
+      id: 72,
+      projectName: "historical-latest",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/example/historical-latest"],
+    };
+    const maintenance = {
+      id: 73,
+      projectName: "maintenance-project",
+      status: "maintenance" as const,
+      githubUrls: ["https://github.com/example/maintenance-project"],
+    };
+
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      summaryScope: "latest_commit_of_updating_projects",
+      writeMode: "production",
+      trace: (event) => {
+        traceEvents.push(event);
+      },
+      oaClient: {
+        listProjects: async () => [updating, maintenance],
+        getProject: async (projectId) => projectId === updating.id ? updating : maintenance,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => {
+          created.push({ projectId: input.projectId, summaryDate: input.summaryDate });
+          return { id: 720, ...input };
+        },
+        updateCommitSummary: async () => {
+          throw new Error("must not update");
+        },
+        getCommitSummary: async () => {
+          throw new Error("must not read");
+        },
+      },
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: 72,
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-07-20T01:00:00.000Z",
+          commits: [
+            commit(72, repository.fullName, "older", "2026-07-10T01:00:00.000Z"),
+            commit(72, repository.fullName, "latest", "2026-07-20T01:00:00.000Z"),
+          ],
+        }),
+      },
+      summarizer: {
+        summarize: async (input) => {
+          summarizedShas.push(...input.commits.map((item) => item.sha));
+          return { summary: "历史最新提交总结", limitations: [] };
+        },
+      },
+      store: createWritableStore(),
+    });
+
+    assert.deepEqual(summarizedShas, ["latest"]);
+    assert.deepEqual(created, [{ projectId: 72, summaryDate: "2026-07-20" }]);
+    assert.deepEqual(result.projects.map((project) => project.projectId), [72]);
+    assert.equal(result.projects[0]?.summaries[0]?.commitCount, 1);
+    assert.equal(
+      traceEvents.findLast((event) => event.eventKey === "load_projects")
+        ?.metadataSanitized?.summary_scope,
+      "latest_commit_of_updating_projects",
+    );
+  });
+
+  it("reports no commits in latest-commit scope without starting the summarizer", async () => {
+    let summariesStarted = 0;
+    const project = {
+      id: 74,
+      projectName: "empty-project",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/example/empty-project"],
+    };
+
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      summaryScope: "latest_commit_of_updating_projects",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+      },
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: 74,
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: null,
+          commits: [],
+        }),
+      },
+      summarizer: {
+        summarize: async () => {
+          summariesStarted += 1;
+          return { summary: "unused", limitations: [] };
+        },
+      },
+    });
+
+    assert.equal(summariesStarted, 0);
+    assert.equal(result.projects[0]?.outcome, "no_commits");
+    assert.equal(result.metrics.repositoryTasksTotal, 0);
+  });
+
+  it("selects one latest commit across all repositories in latest-commit scope", async () => {
+    const summarizedRepositories: string[] = [];
+    const project = {
+      id: 75,
+      projectName: "multi-repository-latest",
+      status: "updating" as const,
+      githubUrls: [
+        "https://github.com/example/older-repository",
+        "https://github.com/example/latest-repository",
+      ],
+    };
+
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      summaryScope: "latest_commit_of_updating_projects",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+      },
+      githubReader: {
+        readRepository: async (repository) => {
+          const latest = repository.repository === "latest-repository";
+          return {
+            repositoryId: latest ? 2 : 1,
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: latest
+              ? "2026-07-20T01:00:00.000Z"
+              : "2026-07-10T01:00:00.000Z",
+            commits: [commit(
+              latest ? 2 : 1,
+              repository.fullName,
+              latest ? "latest" : "older",
+              latest ? "2026-07-20T01:00:00.000Z" : "2026-07-10T01:00:00.000Z",
+            )],
+          };
+        },
+      },
+      summarizer: {
+        summarize: async (input) => {
+          summarizedRepositories.push(input.repositoryFullName);
+          assert.deepEqual(input.commits.map((item) => item.sha), ["latest"]);
+          return { summary: "跨仓库最新提交总结", limitations: [] };
+        },
+      },
+    });
+
+    assert.deepEqual(summarizedRepositories, ["example/latest-repository"]);
+    assert.equal(result.projects[0]?.summaries[0]?.commitCount, 1);
+    assert.equal(result.metrics.repositoriesWithCommits, 1);
+  });
+
   it("aggregates a multi-repository day and proposes maintenance recovery", async () => {
     const snapshots = new Map<string, GitHubRepositorySnapshot>([
       [
@@ -1098,6 +1263,7 @@ describe("syncProjectProgress", () => {
     }));
     const result = await syncProjectProgress({
       observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      summaryScope: "today",
       writeMode: "production",
       oaClient: {
         listProjects: async () => projects,

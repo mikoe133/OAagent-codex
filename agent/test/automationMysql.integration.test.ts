@@ -375,3 +375,93 @@ test(
     }
   },
 );
+
+test(
+  "inherits the summary scope snapshot when retrying a failed run",
+  { skip: !databaseUrl, timeout: 30_000 },
+  async () => {
+    const url = new URL(databaseUrl!);
+    assert.match(url.pathname, /_automation_test$/);
+    await runAutomationMigrations(url, new URL("../..", import.meta.url).pathname);
+    const database = createAutomationDatabase(url);
+    const service = new AutomationService(database, {
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+      modelProviders: {
+        nexttoken: {
+          name: "Nexttoken",
+          apiKey: "test",
+          baseUrl: "https://example.test/v1",
+          envKey: "NEXTTOKEN_API_KEY",
+        },
+      },
+      scheduleGraceSeconds: 120,
+      manualTriggerLimit: 3,
+      manualTriggerWindowSeconds: 300,
+    });
+    const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+
+    try {
+      const job = (await service.createJob({
+        job_key: `retry-scope-${suffix}`,
+        job_type: "github_project_progress_sync",
+        name: "Retry scope job",
+        description: "",
+        enabled: true,
+        timezone: "Asia/Shanghai",
+        schedule_type: "cron",
+        cron_expression: "0 20 * * 1-5",
+        catch_up_policy: "latest",
+        overlap_policy: "forbid",
+        model_provider: "nexttoken",
+        model_id: "gpt-5.6-terra",
+        model_parameters: {
+          summary_scope: "latest_commit_of_updating_projects",
+        },
+        retry_max_attempts: 2,
+        retry_interval_seconds: 0,
+        timeout_seconds: 600,
+        retention_days: 90,
+        tag_ids: [],
+      }, 42)) as { id: number; version: number };
+      const triggered = (await service.triggerJob(job.id, 42)) as { run_id: string };
+      const firstClaim = (await service.claimRun({
+        worker_instance: "retry-scope-worker-1",
+        supported_job_types: ["github_project_progress_sync"],
+        lease_seconds: 300,
+        claim_request_id: randomUUID(),
+      })) as { lease_token: string; model_parameters: Record<string, unknown> };
+      assert.equal(
+        firstClaim.model_parameters.summary_scope,
+        "latest_commit_of_updating_projects",
+      );
+
+      await service.patchJob(job.id, {
+        version: job.version,
+        model_parameters: { summary_scope: "today" },
+      }, 42);
+      await service.updateRun(triggered.run_id, {
+        worker_instance: "retry-scope-worker-1",
+        lease_token: firstClaim.lease_token,
+        status: "failed",
+        error_code: "summary_failed",
+        error_summary: "summary failed",
+        retry_recommended: true,
+      });
+
+      const retryClaim = (await service.claimRun({
+        worker_instance: "retry-scope-worker-2",
+        supported_job_types: ["github_project_progress_sync"],
+        lease_seconds: 300,
+        claim_request_id: randomUUID(),
+      })) as { trigger_source: string; model_parameters: Record<string, unknown> };
+      assert.equal(retryClaim.trigger_source, "retry");
+      assert.equal(
+        retryClaim.model_parameters.summary_scope,
+        "latest_commit_of_updating_projects",
+      );
+    } finally {
+      await database.close();
+    }
+  },
+);
