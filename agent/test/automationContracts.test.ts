@@ -26,6 +26,8 @@ test("accepts only supported project-progress summary scopes", () => {
     model_id: "gpt-5.6-terra",
     model_parameters: {
       summary_scope: "latest_commit_of_updating_projects",
+      reasoning_effort: "high" as const,
+      max_output_tokens: 2048,
     },
     retry_max_attempts: 3,
     retry_interval_seconds: 300,
@@ -36,7 +38,11 @@ test("accepts only supported project-progress summary scopes", () => {
 
   assert.deepEqual(
     automationJobCreateSchema.parse(baseJob).model_parameters,
-    { summary_scope: "latest_commit_of_updating_projects" },
+    {
+      summary_scope: "latest_commit_of_updating_projects",
+      reasoning_effort: "high",
+      max_output_tokens: 2048,
+    },
   );
   assert.deepEqual(
     automationJobCreateSchema.parse({

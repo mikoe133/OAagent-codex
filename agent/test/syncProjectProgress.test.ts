@@ -497,20 +497,24 @@ describe("syncProjectProgress", () => {
     const maintenance = {
       id: 73,
       projectName: "maintenance-project",
-      status: "maintenance" as const,
+      status: "updating" as const,
       githubUrls: ["https://github.com/example/maintenance-project"],
     };
+    let maintenanceRepositoryReads = 0;
 
     const result = await syncProjectProgress({
       observedAt: new Date("2026-07-24T12:00:00.000Z"),
       summaryScope: "latest_commit_of_updating_projects",
       writeMode: "production",
+      projectDetailCompatibilityMode: true,
       trace: (event) => {
         traceEvents.push(event);
       },
       oaClient: {
         listProjects: async () => [updating, maintenance],
-        getProject: async (projectId) => projectId === updating.id ? updating : maintenance,
+        getProject: async (projectId) => projectId === updating.id
+          ? updating
+          : { ...maintenance, status: "maintenance" as const },
         updateProjectStatus: async () => undefined,
         listCommitSummaries: async () => [],
         createCommitSummary: async (input) => {
@@ -525,17 +529,22 @@ describe("syncProjectProgress", () => {
         },
       },
       githubReader: {
-        readRepository: async (repository) => ({
-          repositoryId: 72,
-          fullName: repository.fullName,
-          canonicalUrl: repository.canonicalUrl,
-          complete: true,
-          lastActivityAt: "2026-07-20T01:00:00.000Z",
-          commits: [
-            commit(72, repository.fullName, "older", "2026-07-10T01:00:00.000Z"),
-            commit(72, repository.fullName, "latest", "2026-07-20T01:00:00.000Z"),
-          ],
-        }),
+        readRepository: async (repository) => {
+          if (repository.repository === "maintenance-project") {
+            maintenanceRepositoryReads += 1;
+          }
+          return {
+            repositoryId: 72,
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: "2026-07-20T01:00:00.000Z",
+            commits: [
+              commit(72, repository.fullName, "older", "2026-07-10T01:00:00.000Z"),
+              commit(72, repository.fullName, "latest", "2026-07-20T01:00:00.000Z"),
+            ],
+          };
+        },
       },
       summarizer: {
         summarize: async (input) => {
@@ -547,6 +556,7 @@ describe("syncProjectProgress", () => {
     });
 
     assert.deepEqual(summarizedShas, ["latest"]);
+    assert.equal(maintenanceRepositoryReads, 0);
     assert.deepEqual(created, [{ projectId: 72, summaryDate: "2026-07-20" }]);
     assert.deepEqual(result.projects.map((project) => project.projectId), [72]);
     assert.equal(result.projects[0]?.summaries[0]?.commitCount, 1);

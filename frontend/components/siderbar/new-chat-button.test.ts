@@ -236,6 +236,8 @@ test("opens the task form dialog from each bento card action", () => {
   assert.match(taskDialogSource, /value="today">当天提交/)
   assert.match(taskDialogSource, /value="latest_commit_of_updating_projects">更新中项目的最新提交/)
   assert.match(taskDialogSource, /summary_scope: form\.summaryScope/)
+  assert.match(taskDialogSource, /modelParameters: task\.model_parameters \?\? \{\}/)
+  assert.match(taskDialogSource, /\.\.\.form\.modelParameters,[\s\S]*?summary_scope: form\.summaryScope/)
   assert.match(taskDialogSource, /buildAutomationCronExpression\(/)
   assert.match(taskDialogSource, /timezone: form\.timezone\.trim\(\)/)
   assert.match(taskDialogSource, /catch_up_policy: form\.catchUpPolicy/)

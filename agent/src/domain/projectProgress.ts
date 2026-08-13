@@ -4,6 +4,14 @@ export const PROJECT_MAINTENANCE_AFTER_HOURS = 240;
 export const ALLOWED_COMMIT_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 export const PROJECT_PROGRESS_TIME_ZONE = "Asia/Shanghai";
 
+export const PROJECT_PROGRESS_SUMMARY_SCOPES = [
+  "today",
+  "latest_commit_of_updating_projects",
+] as const;
+
+export type ProjectProgressSummaryScope =
+  (typeof PROJECT_PROGRESS_SUMMARY_SCOPES)[number];
+
 export type ProjectStatus = "updating" | "maintenance" | "archived";
 
 export type ProjectProgressCommit = {

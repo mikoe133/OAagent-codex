@@ -63,7 +63,7 @@ NEXTTOKEN_API_KEY=<模型密钥>
 OPENROUTER_API_KEY=<模型密钥>
 ```
 
-当前 OA 契约只下发空的 `model_parameters={}`；OAagent 会严格校验 provider 和 model 是否在目录中。
+自动任务通过 `model_parameters.summary_scope` 下发总结范围，允许值为 `today` 和 `latest_commit_of_updating_projects`；旧任务缺少该字段时按 `today` 执行。Worker 会在加载模型配置前移除该业务字段，OAagent 仍会严格校验 provider、model 和剩余模型参数。
 
 ## 本地联调
 

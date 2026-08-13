@@ -72,6 +72,16 @@ export type AutomationRecentRun = {
   error_summary: string | null
 }
 
+export type AutomationSummaryScope =
+  | "today"
+  | "latest_commit_of_updating_projects"
+
+export type AutomationJobParameters = {
+  summary_scope?: AutomationSummaryScope
+  reasoning_effort?: "low" | "medium" | "high" | "xhigh"
+  max_output_tokens?: number
+}
+
 export type AutomationJob = {
   id: number
   job_key: string
@@ -92,7 +102,7 @@ export type AutomationJob = {
   overlap_policy: "forbid"
   model_provider: string
   model_id: string
-  model_parameters?: Record<string, never>
+  model_parameters?: AutomationJobParameters
   model_catalog_version?: string | null
   configuration_status: AutomationConfigurationStatus
   configuration_error: string | null
@@ -122,7 +132,7 @@ export type AutomationJobCreateInput = {
   overlap_policy: "forbid"
   model_provider: string
   model_id: string
-  model_parameters: Record<string, never>
+  model_parameters: AutomationJobParameters
   retry_max_attempts: number
   retry_interval_seconds: number
   timeout_seconds: number

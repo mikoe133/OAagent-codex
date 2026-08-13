@@ -306,6 +306,17 @@ test(
     assert.match(url.pathname, /_automation_test$/);
     await runAutomationMigrations(url, new URL("../..", import.meta.url).pathname);
     const database = createAutomationDatabase(url);
+    await database.db
+      .updateTable("automation_job_runs")
+      .set({
+        status: "cancelled",
+        finished_at: new Date(),
+        lease_token_digest: null,
+        lease_expires_at: null,
+        updated_at: new Date(),
+      })
+      .where("status", "in", ["pending", "claimed", "running"])
+      .execute();
     const service = new AutomationService(database, {
       modelProvider: "nexttoken",
       model: "gpt-5.6-terra",
@@ -384,6 +395,17 @@ test(
     assert.match(url.pathname, /_automation_test$/);
     await runAutomationMigrations(url, new URL("../..", import.meta.url).pathname);
     const database = createAutomationDatabase(url);
+    await database.db
+      .updateTable("automation_job_runs")
+      .set({
+        status: "cancelled",
+        finished_at: new Date(),
+        lease_token_digest: null,
+        lease_expires_at: null,
+        updated_at: new Date(),
+      })
+      .where("status", "in", ["pending", "claimed", "running"])
+      .execute();
     const service = new AutomationService(database, {
       modelProvider: "nexttoken",
       model: "gpt-5.6-terra",

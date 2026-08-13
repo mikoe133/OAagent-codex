@@ -6,6 +6,7 @@ import {
   PROJECT_PROGRESS_TIME_ZONE,
   type NormalizedProjectProgressCommit,
   type ProjectDailyCommitGroup,
+  type ProjectProgressSummaryScope,
   type ProjectStatus,
 } from "../domain/projectProgress.js";
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
@@ -241,6 +242,7 @@ export type ProjectProgressSyncInput = {
   trace?: ProjectProgressTraceSink;
   forceRegenerateSummaries?: boolean;
   summaryWritePolicy?: "managed-only" | "manual-overwrite";
+  summaryScope?: ProjectProgressSummaryScope;
 };
 
 export function projectProgressExecutionPolicy(triggerSource: string): Pick<
@@ -288,6 +290,7 @@ async function executeProjectProgressSync(
   },
 ): Promise<ProjectProgressSyncReport> {
   const writeMode = input.writeMode ?? "dry-run";
+  const summaryScope = input.summaryScope ?? "today";
   const concurrency = resolveConcurrency(input.concurrency);
   if (writeMode === "unsafe-test" && input.projectId === undefined) {
     throw new Error("unsafe-test 写入必须指定单个 projectId。");
@@ -304,11 +307,15 @@ async function executeProjectProgressSync(
     phase: "load_projects",
     status: "running",
     title: "读取 OA 项目列表",
+    metadataSanitized: { summary_scope: summaryScope },
   });
   const listedProjects = await input.oaClient.listProjects(input.cancellationSignal);
-  const projects = input.projectId === undefined
+  const selectedProjects = input.projectId === undefined
     ? listedProjects
     : listedProjects.filter((project) => project.id === input.projectId);
+  const projects = summaryScope === "latest_commit_of_updating_projects"
+    ? selectedProjects.filter((project) => project.status === "updating")
+    : selectedProjects;
   await emitTrace(input.trace, {
     eventKey: "load_projects",
     sequence: 100,
@@ -318,6 +325,7 @@ async function executeProjectProgressSync(
     message: `已读取 ${projects.length} 个候选项目`,
     progressCurrent: projects.length,
     progressTotal: projects.length,
+    metadataSanitized: { summary_scope: summaryScope },
   });
   const githubLimiter = new AsyncSemaphore(concurrency.github);
   const agentLimiter = new AsyncSemaphore(concurrency.agent);
@@ -365,6 +373,12 @@ async function executeProjectProgressSync(
       continue;
     }
     const project = discovery.project;
+    if (
+      summaryScope === "latest_commit_of_updating_projects" &&
+      project.status !== "updating"
+    ) {
+      continue;
+    }
     if (project.status === "archived") {
       entries.push({ kind: "report", report: archivedReport(project) });
       continue;
@@ -588,9 +602,13 @@ async function executeProjectProgressSync(
         snapshots.flatMap((snapshot) => snapshot.commits),
         input.observedAt,
       );
-      const selectedGroups = writeMode === "production"
-        ? allGroups.filter((group) => group.summaryDate === currentBusinessDate)
-        : allGroups;
+      const selectedGroups = selectSummaryGroups(
+        allGroups,
+        summaryScope,
+        writeMode,
+        currentBusinessDate,
+        input.observedAt,
+      );
       for (const group of selectedGroups) {
         const existing = input.store?.getDailySummaryDraft?.(
           project.id,
@@ -641,10 +659,11 @@ async function executeProjectProgressSync(
     sequence: 400,
     phase: "prepare_repository_tasks",
     status: cancelled ? "cancelled" : "succeeded",
-    title: "生成当天仓库总结任务",
-    message: `${repositoryTasks.size} 个仓库当天有 Commit，需要运行 Agent`,
+    title: "生成仓库总结任务",
+    message: `${repositoryTasks.size} 个仓库符合当前总结范围，需要运行 Agent`,
     progressCurrent: repositoryTasks.size,
     progressTotal: repositoriesByKey.size,
+    metadataSanitized: { summary_scope: summaryScope },
   });
 
   const deterministicFallback = new DeterministicProjectProgressSummarizer();
@@ -658,7 +677,7 @@ async function executeProjectProgressSync(
     title: "并发生成仓库 Commit 总结",
     message: repositoryTasks.size > 0
       ? `最多同时运行 ${concurrency.agent} 个 Codex Thread`
-      : "当天没有需要调用 AI 的仓库",
+      : "当前总结范围内没有需要调用 AI 的仓库",
     progressCurrent: 0,
     progressTotal: repositoryTasks.size,
   });
@@ -1006,15 +1025,23 @@ async function executeProjectProgressSync(
     metadataSanitized: { mutations_applied: mutationsApplied },
   });
 
-  const repositoriesWithCommits = new Set(
-    [...repositorySnapshots.entries()]
-      .filter(([, result]) => result.snapshot?.complete &&
-        buildProjectDailyCommitGroups(
-          result.snapshot.commits,
-          input.observedAt,
-        ).some((group) => group.summaryDate === currentBusinessDate))
-      .map(([repositoryKey]) => repositoryKey),
-  );
+  const repositoriesWithCommits = summaryScope === "today"
+    ? new Set(
+      [...repositorySnapshots.entries()]
+        .filter(([, result]) => result.snapshot?.complete &&
+          buildProjectDailyCommitGroups(
+            result.snapshot.commits,
+            input.observedAt,
+          ).some((group) => group.summaryDate === currentBusinessDate))
+        .map(([repositoryKey]) => repositoryKey),
+    )
+    : new Set(
+      [...evaluations.values()].flatMap((evaluation) =>
+        evaluation.groups.flatMap((plan) =>
+          plan.group.commits.map((commit) => commit.repositoryFullName.toLowerCase())
+        )
+      ),
+    );
 
   return {
     mode: writeMode === "production"
@@ -1047,6 +1074,37 @@ async function executeProjectProgressSync(
     operationMetrics: input.operationMetrics.snapshot(),
     projects: reports,
   };
+}
+
+function selectSummaryGroups(
+  allGroups: ProjectDailyCommitGroup[],
+  summaryScope: ProjectProgressSummaryScope,
+  writeMode: "dry-run" | "unsafe-test" | "production",
+  currentBusinessDate: string,
+  observedAt: Date,
+): ProjectDailyCommitGroup[] {
+  if (summaryScope === "today") {
+    return writeMode === "production"
+      ? allGroups.filter((group) => group.summaryDate === currentBusinessDate)
+      : allGroups;
+  }
+
+  const latestCommit = allGroups
+    .flatMap((group) => group.commits)
+    .sort(compareLatestCommit)[0];
+  return latestCommit
+    ? buildProjectDailyCommitGroups([latestCommit], observedAt)
+    : [];
+}
+
+function compareLatestCommit(
+  left: NormalizedProjectProgressCommit,
+  right: NormalizedProjectProgressCommit,
+): number {
+  return right.activityAt.localeCompare(left.activityAt) ||
+    right.committedAt.localeCompare(left.committedAt) ||
+    left.repositoryFullName.localeCompare(right.repositoryFullName) ||
+    left.sha.localeCompare(right.sha);
 }
 
 type ProjectDiscovery = {
