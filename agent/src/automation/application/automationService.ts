@@ -21,6 +21,7 @@ import {
   automationHeartbeatSchema,
   automationJobCreateSchema,
   automationJobPatchSchema,
+  automationManualRunCreateSchema,
   automationPromptProfilePatchSchema,
   automationRunPatchSchema,
   automationRunProjectUpsertSchema,
@@ -672,7 +673,17 @@ export class AutomationService implements AutomationOperations {
     );
   }
 
-  async triggerJob(jobId: number, userId: number): Promise<unknown> {
+  async triggerJob(jobId: number, userId: number): Promise<unknown>;
+  async triggerJob(jobId: number, body: unknown, userId: number): Promise<unknown>;
+  async triggerJob(
+    jobId: number,
+    bodyOrUserId: unknown,
+    explicitUserId?: number,
+  ): Promise<unknown> {
+    const userId = explicitUserId ?? Number(bodyOrUserId);
+    const input = automationManualRunCreateSchema.parse(
+      explicitUserId === undefined ? {} : bodyOrUserId,
+    );
     try {
       return await this.database.db.transaction().execute(async (tx) => {
         const job = await tx
@@ -699,7 +710,16 @@ export class AutomationService implements AutomationOperations {
           throw conflict("job_already_running", "任务已有未结束运行");
         }
         const now = new Date();
-        const runId = await this.insertRootRun(tx, job, "manual", now, now, now);
+        const runId = await this.insertRootRun(
+          tx,
+          job,
+          "manual",
+          now,
+          now,
+          now,
+          undefined,
+          input,
+        );
         await tx
           .updateTable("automation_jobs")
           .set({ model_catalog_version: MODEL_CATALOG_VERSION, updated_at: now })
@@ -1221,6 +1241,7 @@ export class AutomationService implements AutomationOperations {
     availableAt: Date,
     triggeredAt: Date,
     terminal?: { status: "skipped" | "configuration_error"; code: string; summary: string },
+    executionParameters: Record<string, unknown> = {},
   ): Promise<string> {
     const tags = await this.tagsByJobIds([job.id], executor);
     const profile = await executor
@@ -1260,6 +1281,7 @@ export class AutomationService implements AutomationOperations {
         model_provider_snapshot: job.model_provider,
         model_id_snapshot: job.model_id,
         model_parameters_snapshot: JSON.stringify(parseJson(job.model_parameters, {})),
+        execution_parameters_snapshot: JSON.stringify(executionParameters),
         model_catalog_version_snapshot: job.model_catalog_version,
         prompt_version_snapshot: profile?.prompt_version ?? null,
         system_prompt_snapshot: profile?.system_prompt ?? null,
@@ -1516,7 +1538,7 @@ export class AutomationService implements AutomationOperations {
                job_name_snapshot, job_type_snapshot, description_snapshot,
                tags_snapshot, trigger_source, scheduled_at, available_at,
                triggered_at, status, attempt, model_provider_snapshot,
-               model_id_snapshot, model_parameters_snapshot,
+               model_id_snapshot, model_parameters_snapshot, execution_parameters_snapshot,
                model_catalog_version_snapshot, prompt_version_snapshot,
                system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
                retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
@@ -1527,6 +1549,7 @@ export class AutomationService implements AutomationOperations {
                       job_name_snapshot, job_type_snapshot, description_snapshot,
                       tags_snapshot, 'retry', scheduled_at, ?, ?, 'pending', attempt + 1,
                       model_provider_snapshot, model_id_snapshot, model_parameters_snapshot,
+                      execution_parameters_snapshot,
                       model_catalog_version_snapshot, prompt_version_snapshot,
                       system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
                       retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
@@ -1988,6 +2011,7 @@ function claimResponse(run: RunRow, rawLeaseToken: string): Record<string, unkno
     model_provider: run.model_provider_snapshot,
     model_id: run.model_id_snapshot,
     model_parameters: parseJson(run.model_parameters_snapshot, {}),
+    execution_parameters: parseJson(run.execution_parameters_snapshot, {}),
     model_catalog_version: run.model_catalog_version_snapshot,
     prompt_profile:
       run.prompt_version_snapshot && run.system_prompt_snapshot
@@ -2133,6 +2157,7 @@ function serializeRun(run: RunRow, jobDeleted: boolean): Record<string, unknown>
     model_provider: run.model_provider_snapshot,
     model_id: run.model_id_snapshot,
     model_parameters: parseJson(run.model_parameters_snapshot, {}),
+    execution_parameters: parseJson(run.execution_parameters_snapshot, {}),
     model_catalog_version: run.model_catalog_version_snapshot,
     cron_expression: run.cron_expression_snapshot,
     timezone: run.timezone_snapshot,

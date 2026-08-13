@@ -30,13 +30,28 @@ OA 保存任务、标签、cron、模型标识、运行快照和审计，负责 
 | GET/PATCH | `/automation-jobs/{job_id}` | read/write | 详情和带 `version` 的乐观锁修改；详情可传 `include_deleted=true` |
 | DELETE | `/automation-jobs/{job_id}?version={version}` | write | 软删除；有未结束运行时返回 409 |
 | POST | `/automation-jobs/{job_id}/validate` | write | 实时校验 OAagent 模型配置 |
-| POST | `/automation-jobs/{job_id}/runs` | trigger | 手动触发，返回 202 |
+| POST | `/automation-jobs/{job_id}/runs` | trigger | 手动触发；可指定单个项目，返回 202 |
 | GET | `/automation-job-runs` | read | 分页、状态、模型、标签和时间过滤 |
 | GET | `/automation-job-runs/{run_id}` | read/audit | `include=projects,ai_interactions,attempts` |
 | GET | `/automation-job-runs/{run_id}/trace-events` | read | 查询脱敏运行阶段与实时进度 |
 | POST | `/automation-job-runs/{run_id}/cancel` | write | pending 直接取消；claimed/running 发出取消请求 |
 
 错误保持统一 envelope：
+
+浏览器继续使用 OA `sessionid`。原有空请求保持整项任务行为；若只总结某个 OA
+项目的当天动态，请提交：
+
+```json
+{
+  "project_id": 51,
+  "summary_scope": "today"
+}
+```
+
+`project_id` 必须为正整数。传入 `project_id` 但省略 `summary_scope` 时默认
+`today`；也可显式传 `latest_commit_of_updating_projects`。这两个字段保存到本次
+运行的 `execution_parameters` 快照并由重试继承，不会进入模型参数或暴露 GitHub
+token。空 body 和 `{}` 均兼容原有调用。
 
 ```json
 {

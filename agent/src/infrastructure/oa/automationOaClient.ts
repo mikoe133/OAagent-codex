@@ -13,6 +13,10 @@ import {
   type OaRequestExecutor,
   type OaRequestLane,
 } from "./oaRequestScheduler.js";
+import {
+  PROJECT_PROGRESS_SUMMARY_SCOPES,
+  type ProjectProgressSummaryScope,
+} from "../../domain/projectProgress.js";
 
 const OA_AUTOMATION_REQUEST_TIMEOUT_MS = 15_000;
 const OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS = 3_000;
@@ -50,6 +54,10 @@ export type AutomationJobClaim = {
   modelProvider: string;
   modelId: string;
   modelParameters: Record<string, unknown>;
+  executionParameters: {
+    projectId?: number;
+    summaryScope?: ProjectProgressSummaryScope;
+  };
   modelCatalogVersion: string | null;
   promptProfile: AutomationPromptProfileSnapshot | null;
   retryPolicy: {
@@ -491,6 +499,7 @@ function decodeClaim(value: unknown): AutomationJobClaim {
   const retryPolicy = value.retry_policy;
   const promptProfile = decodePromptProfile(value.prompt_profile);
   const mutationContext = decodeClaimMutationContext(value);
+  const executionParameters = decodeExecutionParameters(value.execution_parameters);
   if (
     !isNonEmptyString(value.run_id) ||
     !isNonEmptyString(value.lease_token) ||
@@ -530,6 +539,7 @@ function decodeClaim(value: unknown): AutomationJobClaim {
     modelProvider: value.model_provider,
     modelId: value.model_id,
     modelParameters: value.model_parameters,
+    executionParameters,
     modelCatalogVersion: value.model_catalog_version,
     promptProfile,
     retryPolicy: {
@@ -541,6 +551,36 @@ function decodeClaim(value: unknown): AutomationJobClaim {
     deadlineAt: new Date(value.deadline_at).toISOString(),
     leaseExpiresAt: new Date(value.lease_expires_at).toISOString(),
     cancelRequested: value.cancel_requested,
+  };
+}
+
+function decodeExecutionParameters(
+  value: unknown,
+): AutomationJobClaim["executionParameters"] {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw new AutomationOaContractError("OA claim execution_parameters 字段无效。");
+  }
+  const keys = Object.keys(value);
+  if (keys.some((key) => key !== "project_id" && key !== "summary_scope")) {
+    throw new AutomationOaContractError("OA claim execution_parameters 字段无效。");
+  }
+  if (value.project_id !== undefined && !isPositiveInteger(value.project_id)) {
+    throw new AutomationOaContractError("OA claim execution_parameters 字段无效。");
+  }
+  if (
+    value.summary_scope !== undefined &&
+    !PROJECT_PROGRESS_SUMMARY_SCOPES.some((scope) => scope === value.summary_scope)
+  ) {
+    throw new AutomationOaContractError("OA claim execution_parameters 字段无效。");
+  }
+  return {
+    ...(value.project_id === undefined ? {} : { projectId: value.project_id }),
+    ...(value.summary_scope === undefined
+      ? {}
+      : { summaryScope: value.summary_scope as ProjectProgressSummaryScope }),
   };
 }
 

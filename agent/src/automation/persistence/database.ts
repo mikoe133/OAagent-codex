@@ -90,6 +90,7 @@ export type AutomationDatabaseSchema = {
     model_provider_snapshot: string;
     model_id_snapshot: string;
     model_parameters_snapshot: JsonValue;
+    execution_parameters_snapshot: JsonValue;
     model_catalog_version_snapshot: string | null;
     prompt_version_snapshot: string | null;
     system_prompt_snapshot: string | null;
@@ -241,4 +242,3 @@ function decodeUrlComponent(value: string): string {
     return value;
   }
 }
-

@@ -117,6 +117,7 @@ CREATE TABLE automation_job_runs (
     model_provider_snapshot VARCHAR(100) NOT NULL,
     model_id_snapshot VARCHAR(150) NOT NULL,
     model_parameters_snapshot JSON NOT NULL,
+    execution_parameters_snapshot JSON NOT NULL,
     model_catalog_version_snapshot VARCHAR(100) NULL,
     prompt_version_snapshot VARCHAR(100) NULL,
     system_prompt_snapshot MEDIUMTEXT NULL,

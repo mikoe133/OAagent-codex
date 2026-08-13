@@ -20,7 +20,7 @@ export type AutomationOperations = {
   patchJob(jobId: number, body: unknown, userId: number): Promise<unknown>;
   deleteJob(jobId: number, version: number, userId: number): Promise<unknown>;
   validateJob(jobId: number, userId: number): Promise<unknown>;
-  triggerJob(jobId: number, userId: number): Promise<unknown>;
+  triggerJob(jobId: number, body: unknown, userId: number): Promise<unknown>;
   listRuns(query: URLSearchParams, userId: number): Promise<unknown>;
   getRun(runId: string, query: URLSearchParams, userId: number): Promise<unknown>;
   cancelRun(runId: string, userId: number): Promise<unknown>;
@@ -155,7 +155,7 @@ export class AutomationHttpApplication {
       const jobId = positiveInteger(jobActionMatch[1], "job_id");
       return jobActionMatch[2] === "validate"
         ? this.operations.validateJob(jobId, userId)
-        : this.operations.triggerJob(jobId, userId);
+        : this.operations.triggerJob(jobId, await readOptionalJsonBody(request), userId);
     }
     const jobMatch = path.match(/^\/automation-jobs\/(\d+)$/);
     if (jobMatch) {
@@ -293,14 +293,17 @@ function readSessionToken(request: IncomingMessage): string | null {
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const contentType = headerValue(request, "content-type");
-  if (contentType?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") {
-    throw new AutomationHttpError(
-      415,
-      "invalid_request",
-      "Content-Type 必须是 application/json",
-    );
-  }
+  return readJsonObject(request, false);
+}
+
+async function readOptionalJsonBody(request: IncomingMessage): Promise<unknown> {
+  return readJsonObject(request, true);
+}
+
+async function readJsonObject(
+  request: IncomingMessage,
+  allowEmpty: boolean,
+): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
@@ -310,6 +313,17 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
       throw new AutomationHttpError(413, "request_too_large", "请求体过大");
     }
     chunks.push(buffer);
+  }
+  if (allowEmpty && bytes === 0) {
+    return {};
+  }
+  const contentType = headerValue(request, "content-type");
+  if (contentType?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") {
+    throw new AutomationHttpError(
+      415,
+      "invalid_request",
+      "Content-Type 必须是 application/json",
+    );
   }
   try {
     const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;

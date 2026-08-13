@@ -886,6 +886,7 @@ describe("syncProjectProgress", () => {
 
   it("applies status and summary writes only in explicit single-project test mode", async () => {
     const mutations: string[] = [];
+    const traceEvents: ProjectProgressTraceEvent[] = [];
     const project = {
       id: 12,
       projectName: "write-test",
@@ -895,7 +896,11 @@ describe("syncProjectProgress", () => {
     const result = await syncProjectProgress({
       observedAt: new Date("2026-07-24T12:00:00.000Z"),
       projectId: 12,
+      summaryScope: "today",
       writeMode: "unsafe-test",
+      trace: (event) => {
+        traceEvents.push(event);
+      },
       oaClient: {
         listProjects: async () => [project],
         getProject: async () => project,
@@ -937,6 +942,11 @@ describe("syncProjectProgress", () => {
     assert.deepEqual(mutations, ["status", "summary"]);
     assert.equal(result.mode, "unsafe-test-write");
     assert.equal(result.mutationsApplied, 2);
+    assert.deepEqual(
+      traceEvents.findLast((event) => event.eventKey === "load_projects")
+        ?.metadataSanitized,
+      { summary_scope: "today", project_id: 12 },
+    );
   });
 
   it("cancels test writes when the project becomes archived before mutation", async () => {

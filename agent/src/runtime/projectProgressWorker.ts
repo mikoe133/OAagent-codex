@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { runProjectProgressAutomation } from "../application/runProjectProgressAutomation.js";
 import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
-import { splitProjectProgressAutomationParameters } from "../application/projectProgressAutomationParameters.js";
+import { resolveProjectProgressAutomationParameters } from "../application/projectProgressAutomationParameters.js";
 import {
   projectProgressExecutionPolicy,
   syncProjectProgress,
@@ -67,8 +67,9 @@ async function main(): Promise<void> {
         traceSpool: store,
         resolveExecution: async (claim) => {
           const executionPolicy = projectProgressExecutionPolicy(claim.triggerSource);
-          const automationParameters = splitProjectProgressAutomationParameters(
+          const automationParameters = resolveProjectProgressAutomationParameters(
             claim.modelParameters,
+            claim.executionParameters,
           );
           const config = loadProjectProgressConfig(process.env, repoRoot, {
             modelProvider: claim.modelProvider,
@@ -150,6 +151,9 @@ async function main(): Promise<void> {
               projectDetailCompatibilityMode: config.oa.projectDetailCompatibilityMode,
               shouldCancel,
               trace,
+              ...(automationParameters.projectId === undefined
+                ? {}
+                : { projectId: automationParameters.projectId }),
               summaryScope: automationParameters.summaryScope,
               ...executionPolicy,
             });

@@ -256,6 +256,10 @@ claim；同一 ID 携带不同 worker、任务类型或租约时长时返回
     "model_parameters": {
       "summary_scope": "today"
     },
+    "execution_parameters": {
+      "project_id": 51,
+      "summary_scope": "today"
+    },
     "model_catalog_version": "2026-07-30T08:00:00Z",
     "retry_policy": {
       "attempt": 1,
@@ -281,6 +285,10 @@ HTTP/1.1 204 No Content
 `run_mutation_token` 只能驻留当前运行内存，不得写 SQLite 或日志。OA 使用服务端
 HMAC 按 `run_id + worker_instance + concurrency_key + fencing_token + token_version`
 确定性派生 scoped token，因此相同 claim request 可以安全返回相同凭证。
+
+`execution_parameters` 是本次运行快照。字段可为空；`project_id` 存在时 Worker
+只处理该 OA 项目，`summary_scope` 优先于任务 `model_parameters.summary_scope`，
+重试必须继承原值。Worker 不得把这两个业务字段传给模型 provider。
 
 cURL：
 
