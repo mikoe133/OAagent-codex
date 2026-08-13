@@ -317,6 +317,19 @@ async function executeProjectProgressSync(
   const selectedProjects = input.projectId === undefined
     ? listedProjects
     : listedProjects.filter((project) => project.id === input.projectId);
+  if (input.projectId !== undefined && selectedProjects.length === 0) {
+    const message = `OA 项目 ${input.projectId} 不存在或不可见`;
+    await emitTrace(input.trace, {
+      eventKey: "load_projects",
+      sequence: 100,
+      phase: "load_projects",
+      status: "failed",
+      title: "读取 OA 项目列表",
+      message,
+      metadataSanitized: scopeTraceMetadata,
+    });
+    throw new Error(message);
+  }
   const projects = summaryScope === "latest_commit_of_updating_projects"
     ? selectedProjects.filter((project) => project.status === "updating")
     : selectedProjects;
