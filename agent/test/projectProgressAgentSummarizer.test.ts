@@ -90,7 +90,8 @@ describe("CodexProjectProgressSummarizer", () => {
             additions: 12,
             deletions: 3,
             changes: 15,
-            patch: "@@ -1 +1 @@\n-export function validateSession() {}\n+export function validateSession(token: string) {}",
+            patch: "@@ -1 +1 @@\n-export function validateSession() {}\n+export function validateSession(token: string) {}" +
+              "x".repeat(1_200),
           }],
         });
       },
@@ -115,6 +116,98 @@ describe("CodexProjectProgressSummarizer", () => {
       Number(result.interaction?.responsePayloadSanitized.patch_chars_returned) > 0,
     );
     assert.equal(result.interaction?.responsePayloadSanitized.quality_retries, 1);
+    assert.equal(
+      result.interaction?.responsePayloadSanitized.prefetched_detail_calls,
+      1,
+    );
+    assert.deepEqual(result.limitations, [
+      "Commit 详情已按文件或 Patch 预算裁剪",
+    ]);
+  });
+
+  it("does not prefetch commit details for a descriptive subject", async () => {
+    let githubRequests = 0;
+    const runner: ProjectProgressAgentRunner = async (runInput) => {
+      assert.doesNotMatch(runInput.prompt, /required_commit_details/);
+      return {
+        finalResponse: JSON.stringify({
+          summary: "修复登录鉴权流程。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-descriptive-subject",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const summarizer = new CodexProjectProgressSummarizer({
+      ...config,
+      githubFetchImpl: async () => {
+        githubRequests += 1;
+        return Response.json({});
+      },
+    }, runner);
+
+    const result = await summarizer.summarize(input);
+
+    assert.equal(githubRequests, 0);
+    assert.equal(result.interaction?.responsePayloadSanitized.detail_calls, 0);
+    assert.equal(result.interaction?.responsePayloadSanitized.quality_retries, 0);
+    assert.equal(
+      result.interaction?.responsePayloadSanitized.prefetched_detail_calls,
+      0,
+    );
+  });
+
+  it("records a failed mandatory detail lookup without claiming code evidence", async () => {
+    let runs = 0;
+    let cacheWrites = 0;
+    const runner: ProjectProgressAgentRunner = async (runInput) => {
+      runs += 1;
+      assert.match(runInput.prompt, /required_commit_details/);
+      assert.match(runInput.prompt, /GitHub 请求失败:HTTP 404/);
+      assert.doesNotMatch(runInput.prompt, /quality_retry/);
+      return {
+        finalResponse: JSON.stringify({
+          summary: "完成一条代码提交。",
+          limitations: ["Commit 详情读取失败，无法判断具体改动"],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-detail-unavailable",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const summarizer = new CodexProjectProgressSummarizer({
+      ...config,
+      githubFetchImpl: async () => new Response("not found", { status: 404 }),
+      repositorySummaryCache: {
+        getRepositorySummaryCache: () => null,
+        putRepositorySummaryCache: () => {
+          cacheWrites += 1;
+        },
+      },
+    }, runner);
+
+    const result = await summarizer.summarize({
+      ...input,
+      commits: input.commits.map((commit) => ({ ...commit, subject: "_" })),
+    });
+
+    assert.equal(runs, 1);
+    assert.equal(cacheWrites, 0);
+    assert.equal(result.interaction?.responsePayloadSanitized.detail_calls, 1);
+    assert.equal(result.interaction?.responsePayloadSanitized.github_detail_requests, 1);
+    assert.equal(result.interaction?.responsePayloadSanitized.files_returned, 0);
+    assert.equal(result.interaction?.responsePayloadSanitized.patch_chars_returned, 0);
+    assert.equal(result.interaction?.responsePayloadSanitized.quality_retries, 0);
+    assert.equal(
+      result.interaction?.fallbackUsed,
+      false,
+      result.interaction?.errorSummary ?? "unexpected fallback",
+    );
+    assert.deepEqual(result.limitations, [
+      "Commit 详情读取失败，无法判断具体改动",
+      "低信息标题的 Commit 详情读取失败，无法核验具体代码改动",
+    ]);
   });
 
   it("uses structured Agent output and records sanitized SDK audit data", async () => {
@@ -144,7 +237,7 @@ describe("CodexProjectProgressSummarizer", () => {
     const result = await summarizer.summarize(input);
 
     assert.equal(result.summary, "完成登录链路与权限校验更新。");
-    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v5");
+    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v6");
     assert.equal(result.interaction?.inputTokens, 120);
     assert.equal(result.interaction?.outputTokens, 30);
     assert.equal(result.interaction?.responsePayloadSanitized.execution_mode, "codex_sdk_agent");
