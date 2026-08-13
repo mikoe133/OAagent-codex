@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { splitProjectProgressAutomationParameters } from "../src/application/projectProgressAutomationParameters.js";
+import {
+  resolveProjectProgressAutomationParameters,
+  splitProjectProgressAutomationParameters,
+} from "../src/application/projectProgressAutomationParameters.js";
 
 test("separates summary scope from parameters passed to the model", () => {
   assert.deepEqual(
@@ -25,4 +28,21 @@ test("defaults legacy empty parameters to today's commits", () => {
     summaryScope: "today",
     modelParameters: {},
   });
+});
+
+test("uses the run snapshot to target one project without passing it to the model", () => {
+  assert.deepEqual(
+    resolveProjectProgressAutomationParameters(
+      {
+        summary_scope: "latest_commit_of_updating_projects",
+        reasoning_effort: "high",
+      },
+      { projectId: 51, summaryScope: "today" },
+    ),
+    {
+      projectId: 51,
+      summaryScope: "today",
+      modelParameters: { reasoning_effort: "high" },
+    },
+  );
 });

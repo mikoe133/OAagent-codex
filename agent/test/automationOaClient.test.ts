@@ -75,6 +75,10 @@ describe("AutomationOaClient", () => {
 
     assert.equal(claim?.runId, "run-01");
     assert.equal(claim?.modelProvider, "nexttoken");
+    assert.deepEqual(claim?.executionParameters, {
+      projectId: 51,
+      summaryScope: "today",
+    });
     assert.equal(claim?.runMutationToken, "run-mutation-secret");
     assert.equal(claim?.fencingToken, 7);
     assert.equal(claim?.concurrencyKey, "tenant-1:github_project_progress_sync:all_projects");
@@ -108,6 +112,16 @@ describe("AutomationOaClient", () => {
     assert.equal(claim?.runMutationToken, undefined);
     assert.equal(claim?.fencingToken, undefined);
     assert.equal(claim?.concurrencyKey, undefined);
+  });
+
+  it("keeps decoding a legacy claim without execution parameters", async () => {
+    const payload = claimPayload();
+    delete payload.execution_parameters;
+    const client = createClient(async () => Response.json({ data: payload }));
+
+    const claim = await client.claim("worker-legacy", 300);
+
+    assert.deepEqual(claim?.executionParameters, {});
   });
 
   it("rejects a partially upgraded claim contract", async () => {
@@ -435,6 +449,10 @@ function claimPayload(): Record<string, unknown> {
     model_provider: "nexttoken",
     model_id: "gpt-5.6-terra",
     model_parameters: {},
+    execution_parameters: {
+      project_id: 51,
+      summary_scope: "today",
+    },
     model_catalog_version: "catalog-v1",
     prompt_profile: {
       prompt_version: "sha256:oa-profile-v1",

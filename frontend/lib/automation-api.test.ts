@@ -14,10 +14,40 @@ import {
   listAutomationJobs,
   listAutomationRuns,
   listAutomationTags,
+  triggerAutomationJob,
   updateAutomationTag,
   updateAutomationJob,
   updateAutomationPromptProfile,
 } from "./automation-api"
+
+test("triggers today's summary for one OA project through the session BFF", async () => {
+  const originalFetch = globalThis.fetch
+  let request: { url: string; method: string; body: unknown } | null = null
+  globalThis.fetch = async (input, init) => {
+    request = {
+      url: String(input),
+      method: init?.method ?? "GET",
+      body: JSON.parse(String(init?.body ?? "{}")),
+    }
+    return Response.json({
+      code: 202,
+      message: "accepted",
+      data: { run_id: "run-51", status: "pending" },
+      success: true,
+    }, { status: 202 })
+  }
+
+  try {
+    await triggerAutomationJob(7, { project_id: 51, summary_scope: "today" })
+    assert.deepEqual(request, {
+      url: "/api/automation/jobs/7/runs",
+      method: "POST",
+      body: { project_id: 51, summary_scope: "today" },
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
 
 test("uses the automation BFF for list and audit requests", async () => {
   const originalFetch = globalThis.fetch

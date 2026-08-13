@@ -446,17 +446,28 @@ test(
         retention_days: 90,
         tag_ids: [],
       }, 42)) as { id: number; version: number };
-      const triggered = (await service.triggerJob(job.id, 42)) as { run_id: string };
+      const triggered = (await service.triggerJob(job.id, {
+        project_id: 72,
+        summary_scope: "today",
+      }, 42)) as { run_id: string };
       const firstClaim = (await service.claimRun({
         worker_instance: "retry-scope-worker-1",
         supported_job_types: ["github_project_progress_sync"],
         lease_seconds: 300,
         claim_request_id: randomUUID(),
-      })) as { lease_token: string; model_parameters: Record<string, unknown> };
+      })) as {
+        lease_token: string;
+        model_parameters: Record<string, unknown>;
+        execution_parameters: Record<string, unknown>;
+      };
       assert.equal(
         firstClaim.model_parameters.summary_scope,
         "latest_commit_of_updating_projects",
       );
+      assert.deepEqual(firstClaim.execution_parameters, {
+        project_id: 72,
+        summary_scope: "today",
+      });
 
       await service.patchJob(job.id, {
         version: job.version,
@@ -476,12 +487,20 @@ test(
         supported_job_types: ["github_project_progress_sync"],
         lease_seconds: 300,
         claim_request_id: randomUUID(),
-      })) as { trigger_source: string; model_parameters: Record<string, unknown> };
+      })) as {
+        trigger_source: string;
+        model_parameters: Record<string, unknown>;
+        execution_parameters: Record<string, unknown>;
+      };
       assert.equal(retryClaim.trigger_source, "retry");
       assert.equal(
         retryClaim.model_parameters.summary_scope,
         "latest_commit_of_updating_projects",
       );
+      assert.deepEqual(retryClaim.execution_parameters, {
+        project_id: 72,
+        summary_scope: "today",
+      });
     } finally {
       await database.close();
     }

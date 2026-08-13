@@ -68,6 +68,47 @@ test("routes OA user automation requests with the signed session user_id", async
   }
 });
 
+test("routes a targeted manual run with the signed session user_id", async () => {
+  const calls: unknown[] = [];
+  const operations = {
+    async triggerJob(jobId: number, input: unknown, userId: number) {
+      calls.push({ jobId, input, userId });
+      return { run_id: "run-51", status: "pending" };
+    },
+  } as unknown as AutomationOperations;
+  const application = new AutomationHttpApplication(
+    {
+      sessionSecret: "dummy",
+      sessionVerifyMaxAgeSeconds: 0,
+      internalToken: "internal-secret",
+    },
+    operations,
+  );
+  const fixture = await startFixture(application);
+
+  try {
+    const response = await requestJson(
+      fixture.port,
+      "POST",
+      "/automation-jobs/7/runs",
+      {
+        Cookie: `sessionid=${PYTHON_SIGNED_SESSION}`,
+        "Content-Type": "application/json",
+      },
+      { project_id: 51, summary_scope: "today" },
+    );
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(calls, [{
+      jobId: 7,
+      input: { project_id: 51, summary_scope: "today" },
+      userId: 42,
+    }]);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("routes worker claim requests only with OA_AGENT_AUTOMATION_TOKEN", async () => {
   const operations = {
     async claimRun(input: unknown) {
