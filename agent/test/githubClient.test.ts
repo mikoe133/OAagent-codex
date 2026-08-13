@@ -69,6 +69,44 @@ describe("GitHubRestProjectReader", () => {
     assert.deepEqual(snapshot.commits, []);
   });
 
+  it("reads only the newest page without a date cutoff for latest-commit selection", async () => {
+    const commitRequests: URL[] = [];
+    const reader = new GitHubRestProjectReader(
+      "token",
+      async (input) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/repos/example/historical") {
+          return Response.json({
+            id: 101,
+            full_name: "example/historical",
+            created_at: "2020-01-01T00:00:00Z",
+          });
+        }
+        if (url.pathname.endsWith("/branches")) {
+          return Response.json([{ name: "main" }]);
+        }
+        commitRequests.push(url);
+        return Response.json([githubCommit("latest", "2020-01-02T00:00:00Z")]);
+      },
+      "https://api.github.test",
+      undefined,
+      undefined,
+      undefined,
+      { commitSelection: "latest" },
+    );
+
+    const snapshot = await reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/historical"),
+      new Date("2026-07-24T12:00:00Z"),
+    );
+
+    assert.equal(commitRequests.length, 1);
+    assert.equal(commitRequests[0]?.searchParams.has("since"), false);
+    assert.equal(commitRequests[0]?.searchParams.get("per_page"), "1");
+    assert.equal(commitRequests[0]?.searchParams.get("page"), "1");
+    assert.deepEqual(snapshot.commits.map((commit) => commit.sha), ["latest"]);
+  });
+
   it("classifies GitHub rate-limit failures with a retry time", async () => {
     const reader = new GitHubRestProjectReader(
       "token",

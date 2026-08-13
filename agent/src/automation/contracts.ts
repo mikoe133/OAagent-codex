@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { MODEL_REASONING_EFFORTS } from "../config/modelCatalog.js";
+import { PROJECT_PROGRESS_SUMMARY_SCOPES } from "../domain/projectProgress.js";
 import { calculateNextRunAt, validateTimezone } from "./domain.js";
 
 const supportedJobType = z.literal("github_project_progress_sync");
@@ -40,10 +42,13 @@ const cronSchema = z.string().trim().min(1).max(100).superRefine((value, context
     });
   }
 });
-const emptyModelParameters = jsonObject.refine(
-  (value) => Object.keys(value).length === 0,
-  "unsupported_model_parameters",
-);
+const projectProgressJobParameters = z
+  .object({
+    summary_scope: z.enum(PROJECT_PROGRESS_SUMMARY_SCOPES).default("today"),
+    reasoning_effort: z.enum(MODEL_REASONING_EFFORTS).optional(),
+    max_output_tokens: z.number().int().min(256).max(4_096).optional(),
+  })
+  .strict();
 
 export const automationPromptProfilePatchSchema = z
   .object({
@@ -99,7 +104,7 @@ export const automationJobCreateSchema = z
     overlap_policy: z.literal("forbid").default("forbid"),
     model_provider: z.string().trim().min(1).max(100),
     model_id: z.string().trim().min(1).max(150),
-    model_parameters: emptyModelParameters.default({}),
+    model_parameters: projectProgressJobParameters.default({}),
     retry_max_attempts: z.number().int().min(1).max(10).default(3),
     retry_interval_seconds: z.number().int().min(0).max(86_400).default(300),
     timeout_seconds: z.number().int().min(60).max(86_400).default(2700),
@@ -120,7 +125,7 @@ export const automationJobPatchSchema = z
     catch_up_policy: z.enum(["skip", "latest"]).optional(),
     model_provider: z.string().trim().min(1).max(100).optional(),
     model_id: z.string().trim().min(1).max(150).optional(),
-    model_parameters: emptyModelParameters.optional(),
+    model_parameters: projectProgressJobParameters.optional(),
     retry_max_attempts: z.number().int().min(1).max(10).optional(),
     retry_interval_seconds: z.number().int().min(0).max(86_400).optional(),
     timeout_seconds: z.number().int().min(60).max(86_400).optional(),

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { runProjectProgressAutomation } from "../application/runProjectProgressAutomation.js";
 import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
+import { splitProjectProgressAutomationParameters } from "../application/projectProgressAutomationParameters.js";
 import {
   projectProgressExecutionPolicy,
   syncProjectProgress,
@@ -66,10 +67,13 @@ async function main(): Promise<void> {
         traceSpool: store,
         resolveExecution: async (claim) => {
           const executionPolicy = projectProgressExecutionPolicy(claim.triggerSource);
+          const automationParameters = splitProjectProgressAutomationParameters(
+            claim.modelParameters,
+          );
           const config = loadProjectProgressConfig(process.env, repoRoot, {
             modelProvider: claim.modelProvider,
             modelId: claim.modelId,
-            modelParameters: claim.modelParameters,
+            modelParameters: automationParameters.modelParameters,
           });
           if (config.stateDatabasePath !== baseConfig.stateDatabasePath) {
             throw new Error("运行期间 PROJECT_PROGRESS_STATE_DB 不允许变化。");
@@ -113,6 +117,10 @@ async function main(): Promise<void> {
                   maxBranches: config.githubLimits.maxBranches,
                   maxCommitPagesPerBranch:
                     config.githubLimits.maxCommitPagesPerBranch,
+                  commitSelection: automationParameters.summaryScope ===
+                      "latest_commit_of_updating_projects"
+                    ? "latest"
+                    : "lookback",
                 },
               ),
               summarizer: new CodexProjectProgressSummarizer({
@@ -142,6 +150,7 @@ async function main(): Promise<void> {
               projectDetailCompatibilityMode: config.oa.projectDetailCompatibilityMode,
               shouldCancel,
               trace,
+              summaryScope: automationParameters.summaryScope,
               ...executionPolicy,
             });
           };

@@ -253,7 +253,9 @@ claim；同一 ID 携带不同 worker、任务类型或租约时长时返回
     "timezone": "Asia/Shanghai",
     "model_provider": "nexttoken",
     "model_id": "gpt-5.6-terra",
-    "model_parameters": {},
+    "model_parameters": {
+      "summary_scope": "today"
+    },
     "model_catalog_version": "2026-07-30T08:00:00Z",
     "retry_policy": {
       "attempt": 1,

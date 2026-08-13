@@ -53,8 +53,10 @@ import {
   AutomationApiError,
   type AutomationJob,
   type AutomationJobCreateInput,
+  type AutomationJobParameters,
   type AutomationModelCatalog,
   type AutomationRun,
+  type AutomationSummaryScope,
   type AutomationTag,
   createAutomationJob,
   createAutomationTag,
@@ -103,6 +105,8 @@ type TaskFormState = {
   enabled: boolean
   modelProvider: string
   modelId: string
+  summaryScope: AutomationSummaryScope
+  modelParameters: AutomationJobParameters
   tagIds: number[]
   catchUpPolicy: "skip" | "latest"
   retryMaxAttempts: string
@@ -124,6 +128,8 @@ const DEFAULT_FORM: TaskFormState = {
   enabled: false,
   modelProvider: "",
   modelId: "",
+  summaryScope: "today",
+  modelParameters: {},
   tagIds: [],
   catchUpPolicy: "latest",
   retryMaxAttempts: "3",
@@ -191,6 +197,8 @@ export default function Dialog11({
         enabled: task.enabled,
         modelProvider: taskModel.provider,
         modelId: taskModel.modelId,
+        summaryScope: task.model_parameters?.summary_scope ?? "today",
+        modelParameters: task.model_parameters ?? {},
         tagIds: task.tags.map((tag) => tag.id),
         catchUpPolicy: task.catch_up_policy,
         retryMaxAttempts: String(task.retry_max_attempts ?? 3),
@@ -238,7 +246,7 @@ export default function Dialog11({
             catch_up_policy: payload.catch_up_policy,
             model_provider: payload.model_provider,
             model_id: payload.model_id,
-            model_parameters: {},
+            model_parameters: payload.model_parameters,
             retry_max_attempts: payload.retry_max_attempts,
             retry_interval_seconds: payload.retry_interval_seconds,
             timeout_seconds: payload.timeout_seconds,
@@ -414,6 +422,25 @@ export default function Dialog11({
                     maxLength={4000}
                     disabled={formDisabled}
                   />
+                </Field>
+
+                <Field label="总结范围" htmlFor="automated-task-summary-scope">
+                  <Select
+                    value={form.summaryScope}
+                    onValueChange={(scope) => updateForm(
+                      "summaryScope",
+                      scope as AutomationSummaryScope,
+                    )}
+                    disabled={formDisabled}
+                  >
+                    <SelectTrigger id="automated-task-summary-scope" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="today">当天提交</SelectItem>
+                      <SelectItem value="latest_commit_of_updating_projects">更新中项目的最新提交</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </Field>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -735,7 +762,10 @@ function buildCreateInput(form: TaskFormState): AutomationJobCreateInput {
     overlap_policy: "forbid",
     model_provider: form.modelProvider,
     model_id: form.modelId,
-    model_parameters: {},
+    model_parameters: {
+      ...form.modelParameters,
+      summary_scope: form.summaryScope,
+    },
     retry_max_attempts: Number(form.retryMaxAttempts),
     retry_interval_seconds: Number(form.retryIntervalSeconds),
     timeout_seconds: Number(form.timeoutSeconds),

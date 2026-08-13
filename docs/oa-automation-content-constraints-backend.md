@@ -16,7 +16,7 @@ github_project_progress_sync
 
 这样同类型的多个调度任务共享一致的内容政策，同时避免把提示词塞入模型参数。未来如果需要任务实例级覆盖，可增加 `job_id` 可空字段，并使用“任务实例配置优先、job_type 默认配置兜底”的规则。
 
-不建议把系统提示词写入 `model_parameters`。`model_parameters` 应继续只承载 `reasoning_effort`、`max_output_tokens` 等模型运行参数；提示词属于业务配置、版本管理和审计数据。
+不建议把系统提示词写入 `model_parameters`。该字段当前允许任务级业务参数 `summary_scope`，Worker 在调用模型前会将其剥离；提示词仍属于独立的业务配置、版本管理和审计数据。
 
 ## 3. 数据库
 

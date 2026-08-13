@@ -75,7 +75,7 @@ describe("CodexProjectProgressSummarizer", () => {
     const result = await summarizer.summarize(input);
 
     assert.equal(result.summary, "完成登录链路与权限校验更新。");
-    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v4");
+    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v5");
     assert.equal(result.interaction?.inputTokens, 120);
     assert.equal(result.interaction?.outputTokens, 30);
     assert.equal(result.interaction?.responsePayloadSanitized.execution_mode, "codex_sdk_agent");

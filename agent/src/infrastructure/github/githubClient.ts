@@ -36,6 +36,7 @@ export type GitHubRequestPolicy = Omit<GitHubRequestExecutorConfig, "requestLimi
   maxBranches?: number;
   maxCommitPagesPerBranch?: number;
   requestExecutor?: GitHubRequestExecutor;
+  commitSelection?: "lookback" | "latest";
 };
 
 export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
@@ -43,6 +44,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   private readonly maxBranches: number;
   private readonly maxCommitPagesPerBranch: number;
   private readonly requestExecutor: GitHubRequestExecutor;
+  private readonly commitSelection: "lookback" | "latest";
 
   constructor(
     private readonly token: string,
@@ -61,6 +63,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
       policy.maxCommitPagesPerBranch ?? DEFAULT_MAX_COMMIT_PAGES_PER_BRANCH,
       "maxCommitPagesPerBranch",
     );
+    this.commitSelection = policy.commitSelection ?? "lookback";
     this.requestExecutor = policy.requestExecutor ?? new GitHubRequestExecutor({
       ...(requestLimiter ? { requestLimiter } : {}),
       maxConcurrentRequestsPerRepository: BRANCH_READ_CONCURRENCY,
@@ -112,9 +115,11 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     );
     try {
       const branches = await this.listBranches(repository, signal);
-      const since = new Date(
-        observedAt.getTime() - this.lookbackHours * 60 * 60 * 1_000,
-      ).toISOString();
+      const since = this.commitSelection === "lookback"
+        ? new Date(
+          observedAt.getTime() - this.lookbackHours * 60 * 60 * 1_000,
+        ).toISOString()
+        : null;
       const commitsByKey = new Map<string, ProjectProgressCommit>();
       let branchesCompleted = 0;
       let commitsRead = 0;
@@ -135,7 +140,12 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
             PROJECT_PROGRESS_ENDPOINTS.githubCommitsList,
             repository.fullName,
             `/repos/${encode(repository.owner)}/${encode(repository.repository)}/commits`,
-            { sha: branch, since, per_page: PAGE_SIZE, page },
+            {
+              sha: branch,
+              ...(since ? { since } : {}),
+              per_page: this.commitSelection === "latest" ? 1 : PAGE_SIZE,
+              page,
+            },
             [409],
             signal,
           );
@@ -146,6 +156,9 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
           commitsRead += commits.length;
           for (const commit of commits) {
             commitsByKey.set(`${metadata.id}:${commit.sha}`, commit);
+          }
+          if (this.commitSelection === "latest") {
+            break;
           }
           if (commits.length < PAGE_SIZE) {
             break;
