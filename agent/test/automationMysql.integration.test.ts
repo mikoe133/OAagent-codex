@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { AutomationService } from "../src/automation/application/automationService.js";
+import { AutomationHttpError } from "../src/automation/http/automationHttpApplication.js";
 import { createAutomationDatabase } from "../src/automation/persistence/database.js";
 import { runAutomationMigrations } from "../src/automation/persistence/migrations.js";
 
@@ -591,20 +592,37 @@ test(
         run_id: string;
       };
 
-      const initialClaims = (await Promise.all(
-        [51, 52, 53].map((projectId) => service.claimRun({
-          worker_instance: `project-worker-${projectId}`,
-          supported_job_types: ["github_project_progress_sync"],
-          lease_seconds: 300,
-          claim_request_id: randomUUID(),
-        })),
-      )) as Array<{
-        run_id: string;
-        lease_token: string;
-        execution_parameters: { project_id: number; summary_scope: string };
+      const initialClaimResults = await Promise.all(
+        [51, 52, 53].map(async (workerId) => {
+          const workerInstance = `project-worker-${workerId}`;
+          return {
+            workerInstance,
+            claim: await service.claimRun({
+              worker_instance: workerInstance,
+              supported_job_types: ["github_project_progress_sync"],
+              lease_seconds: 300,
+              claim_request_id: randomUUID(),
+            }),
+          };
+        }),
+      );
+      assert.equal(
+        initialClaimResults.filter((result) => result.claim).length,
+        3,
+        JSON.stringify(initialClaimResults),
+      );
+      const initialClaims = initialClaimResults as Array<{
+        workerInstance: string;
+        claim: {
+          run_id: string;
+          lease_token: string;
+          execution_parameters: { project_id: number; summary_scope: string };
+        };
       }>;
       assert.deepEqual(
-        initialClaims.map((claim) => claim.execution_parameters.project_id).sort(),
+        initialClaims
+          .map(({ claim }) => claim.execution_parameters.project_id)
+          .sort(),
         [51, 52, 53],
       );
       assert.equal(await service.claimRun({
@@ -615,10 +633,15 @@ test(
       }), null);
 
       const initialByProject = new Map(
-        initialClaims.map((claim) => [claim.execution_parameters.project_id, claim]),
+        initialClaims.map((result) => [
+          result.claim.execution_parameters.project_id,
+          result,
+        ]),
       );
-      await finishClaim(service, initialByProject.get(52)!, "project-worker-52");
-      await finishClaim(service, initialByProject.get(53)!, "project-worker-53");
+      const project52Initial = initialByProject.get(52)!;
+      const project53Initial = initialByProject.get(53)!;
+      await finishClaim(service, project52Initial.claim, project52Initial.workerInstance);
+      await finishClaim(service, project53Initial.claim, project53Initial.workerInstance);
       assert.equal(await service.claimRun({
         worker_instance: "still-blocked-worker",
         supported_job_types: ["github_project_progress_sync"],
@@ -626,7 +649,8 @@ test(
         claim_request_id: randomUUID(),
       }), null);
 
-      await finishClaim(service, initialByProject.get(51)!, "project-worker-51");
+      const project51Initial = initialByProject.get(51)!;
+      await finishClaim(service, project51Initial.claim, project51Initial.workerInstance);
       const latestClaim = (await service.claimRun({
         worker_instance: "latest-worker",
         supported_job_types: ["github_project_progress_sync"],
@@ -739,6 +763,136 @@ test(
       })) as { run_id: string; lease_token: string };
       assert.equal(scheduledClaim.run_id, scheduledRuns.items[0]?.id);
       await finishClaim(service, scheduledClaim, "scheduled-worker");
+
+      const secondJob = (await service.createJob({
+        job_key: `second-concurrency-${suffix}`,
+        job_type: "github_project_progress_sync",
+        name: "Second concurrency job",
+        description: "",
+        enabled: true,
+        timezone: "Asia/Shanghai",
+        schedule_type: "cron",
+        cron_expression: "0 21 * * 1-5",
+        catch_up_policy: "latest",
+        overlap_policy: "forbid",
+        model_provider: "nexttoken",
+        model_id: "gpt-5.6-terra",
+        model_parameters: { summary_scope: "today" },
+        retry_max_attempts: 1,
+        retry_interval_seconds: 0,
+        timeout_seconds: 600,
+        retention_days: 90,
+        tag_ids: [],
+      }, 42)) as { id: number };
+      const [firstJobRun, secondJobRun] = await Promise.all([
+        service.triggerJob(job.id, { project_id: 61 }, 42),
+        service.triggerJob(secondJob.id, { project_id: 62 }, 42),
+      ]) as Array<{ run_id: string }>;
+      const crossJobResults = await Promise.all(
+        [1, 2].map(async (workerId) => {
+          const workerInstance = `cross-job-worker-${workerId}`;
+          return {
+            workerInstance,
+            claim: await service.claimRun({
+              worker_instance: workerInstance,
+              supported_job_types: ["github_project_progress_sync"],
+              lease_seconds: 300,
+              claim_request_id: randomUUID(),
+            }),
+          };
+        }),
+      ) as Array<{
+        workerInstance: string;
+        claim: { run_id: string; lease_token: string } | null;
+      }>;
+      assert.deepEqual(
+        crossJobResults.map((result) => result.claim?.run_id).sort(),
+        [firstJobRun.run_id, secondJobRun.run_id].sort(),
+      );
+      for (const result of crossJobResults) {
+        await finishClaim(service, result.claim!, result.workerInstance);
+      }
+
+      const strictRateLimitService = new AutomationService(database, {
+        modelProvider: "nexttoken",
+        model: "gpt-5.6-terra",
+        modelProviders: {
+          nexttoken: {
+            name: "Nexttoken",
+            apiKey: "test",
+            baseUrl: "https://example.test/v1",
+            envKey: "NEXTTOKEN_API_KEY",
+          },
+        },
+        scheduleGraceSeconds: 120,
+        manualTriggerLimit: 1,
+        manualTriggerWindowSeconds: 300,
+      });
+      const rateLimitJob = (await strictRateLimitService.createJob({
+        job_key: `project-rate-limit-${suffix}`,
+        job_type: "github_project_progress_sync",
+        name: "Project rate limit job",
+        description: "",
+        enabled: true,
+        timezone: "Asia/Shanghai",
+        schedule_type: "cron",
+        cron_expression: "0 22 * * 1-5",
+        catch_up_policy: "latest",
+        overlap_policy: "forbid",
+        model_provider: "nexttoken",
+        model_id: "gpt-5.6-terra",
+        model_parameters: { summary_scope: "today" },
+        retry_max_attempts: 1,
+        retry_interval_seconds: 0,
+        timeout_seconds: 600,
+        retention_days: 90,
+        tag_ids: [],
+      }, 42)) as { id: number };
+      const rateProject71 = (await strictRateLimitService.triggerJob(
+        rateLimitJob.id,
+        { project_id: 71 },
+        42,
+      )) as { run_id: string; reused: boolean };
+      const rateProject71Duplicate = (await strictRateLimitService.triggerJob(
+        rateLimitJob.id,
+        { project_id: 71 },
+        42,
+      )) as { run_id: string; reused: boolean };
+      assert.equal(rateProject71Duplicate.run_id, rateProject71.run_id);
+      assert.equal(rateProject71Duplicate.reused, true);
+      const rateProject72 = (await strictRateLimitService.triggerJob(
+        rateLimitJob.id,
+        { project_id: 72 },
+        42,
+      )) as { reused: boolean };
+      assert.equal(rateProject72.reused, false);
+      await assert.rejects(
+        () => strictRateLimitService.triggerJob(
+          rateLimitJob.id,
+          {
+            project_id: 71,
+            summary_scope: "latest_commit_of_updating_projects",
+          },
+          42,
+        ),
+        (error: unknown) =>
+          error instanceof AutomationHttpError &&
+          error.status === 429 &&
+          error.code === "rate_limit_exceeded",
+      );
+
+      await database.db
+        .updateTable("automation_job_runs")
+        .set({ deadline_at: new Date(Date.now() - 1_000) })
+        .where("id", "=", rateProject71.run_id)
+        .execute();
+      const replacementAfterDeadline = (await strictRateLimitService.triggerJob(
+        rateLimitJob.id,
+        { project_id: 71 },
+        43,
+      )) as { run_id: string; reused: boolean };
+      assert.notEqual(replacementAfterDeadline.run_id, rateProject71.run_id);
+      assert.equal(replacementAfterDeadline.reused, false);
     } finally {
       await database.close();
     }

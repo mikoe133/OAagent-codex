@@ -52,9 +52,15 @@ OA 保存任务、标签、cron、模型标识、运行快照和审计，负责 
 ```
 
 `project_id` 必须为正整数。传入 `project_id` 但省略 `summary_scope` 时默认
-`today`；也可显式传 `latest_commit_of_updating_projects`。这两个字段保存到本次
+`today`；也可显式传 `latest_commit_of_updating_projects`。响应包含 `reused`：
+`false` 表示创建了新 Run，`true` 表示同一项目、同一范围已有活动 Run，调用方应
+继续使用返回的同一个 `run_id`。这两个字段保存到本次
 运行的 `execution_parameters` 快照并由重试继承，不会进入模型参数或暴露 GitHub
 token。空 body 和 `{}` 均兼容原有调用。
+
+不同 `project_id` 可分别创建 Run；同一项目不同范围会创建 Run 后排队。全量 Run
+与所有单项目 Run 在 claim 阶段互斥，单项目 Run 之间仅同项目互斥。定时到期的
+全量 Run 也使用同一队列，不会因为单项目 Run 正在执行而记为 `skipped`。
 
 ```json
 {
@@ -83,7 +89,9 @@ token。空 body 和 `{}` 均兼容原有调用。
 
 推荐 `lease_seconds=300`，Worker 每约 60 秒 heartbeat。数据库只保存租约摘要；raw lease token 只在 claim 响应返回一次。所有后续写入同时校验 worker、摘要、租约过期时间、deadline 和运行状态。
 
-claim 优先级：deadline 超时处理 → 过期租约接管 → pending manual/retry → 到期 cron。到期任务使用 MySQL 8 `FOR UPDATE SKIP LOCKED`，同一事务内创建运行、写租约并推进 `next_run_at`。
+claim 优先级：deadline 超时处理 → 过期租约接管 → pending。到期任务使用 MySQL 8
+`FOR UPDATE SKIP LOCKED`；同一任务的 claim 决策由短暂的 MySQL 命名锁保护，不同
+项目可由多个 Worker 并行处理，全量与单项目、同一项目的多个 Run 不会重叠执行。
 
 ## 项目同步 API
 

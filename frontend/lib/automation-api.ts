@@ -394,7 +394,7 @@ export function validateAutomationJob(jobId: number): Promise<AutomationJob> {
 export function triggerAutomationJob(
   jobId: number,
   input?: AutomationManualRunInput,
-): Promise<{ run_id: string; status: AutomationRunStatus }> {
+): Promise<{ run_id: string; status: AutomationRunStatus; reused: boolean }> {
   return automationRequest(`/jobs/${jobId}/runs`, {
     method: "POST",
     ...(input ? { body: JSON.stringify(input) } : {}),

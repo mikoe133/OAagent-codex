@@ -126,7 +126,7 @@ const run = await triggerAutomationJob(7, {
   summary_scope: "today",
 })
 
-console.log(run.run_id, run.status)
+console.log(run.run_id, run.status, run.reused)
 ```
 
 直接使用 `fetch`：
@@ -161,13 +161,24 @@ Content-Type: application/json
   "message": "accepted",
   "data": {
     "run_id": "7f7dc11f-30b5-482f-a8bf-5ee72b667baf",
-    "status": "pending"
+    "status": "pending",
+    "reused": false
   },
   "success": true
 }
 ```
 
-HTTP `202` 只表示运行记录创建成功，不表示 GitHub 读取或 AI 总结已经完成。
+HTTP `202` 不表示 GitHub 读取或 AI 总结已经完成。`reused=false` 表示新建了 Run；
+`reused=true` 表示同项目、同范围已有活动 Run，响应会返回原 `run_id` 和它当前的
+`pending`、`claimed` 或 `running` 状态。调用方继续查询这个 `run_id`，不要重复创建。
+
+并发规则：
+
+- 不同项目分别创建 Run，可以由多个 Worker 并行处理；
+- 同一项目、同一范围的活动请求复用 Run；`today` 只复用同一业务日期的 Run；
+- 同一项目不同范围分别建 Run，但在 claim 阶段排队；
+- 全量 Run 与任意单项目 Run 互斥；等待期间保持 `pending`；
+- 定时自动运行属于全量 Run，和接口创建的 Run 共用上述队列。
 
 ## 4. 查询运行详情
 
@@ -368,14 +379,14 @@ await fetch(`/api/automation/runs/${encodeURIComponent(runId)}/cancel`, {
 
 ## 9. 错误响应
 
-统一结构：
+统一结构示例：
 
 ```json
 {
   "code": 409,
-  "message": "任务已有未结束运行",
+  "message": "任务未启用",
   "data": {
-    "error_code": "job_already_running",
+    "error_code": "job_disabled",
     "details": null
   },
   "success": false
@@ -391,11 +402,10 @@ await fetch(`/api/automation/runs/${encodeURIComponent(runId)}/cancel`, {
 | `404` | `automation_job_not_found` | 自动任务不存在或已软删除 |
 | `409` | `job_disabled` | 自动任务未启用 |
 | `409` | `job_configuration_invalid` | 任务模型配置无效 |
-| `409` | `job_already_running` | 同一任务已有 `pending`、`claimed` 或 `running` 运行 |
 | `413` | `request_too_large` | 请求体超过限制 |
 | `415` | `invalid_request` | 非空 body 未使用 `application/json` |
 | `422` | 校验消息 | `project_id`、`summary_scope` 或额外字段校验失败 |
-| `429` | `rate_limit_exceeded` | 当前用户对该任务手动触发过于频繁 |
+| `429` | `rate_limit_exceeded` | 当前用户对该任务和项目手动触发过于频繁；复用不计数 |
 | `500` | - | 自动任务服务内部错误 |
 
 字段校验错误的 `error_code` 当前取第一条校验消息，调用方不要把该文案视为长期稳定枚举；应以 HTTP `422`、`success=false` 和 `details` 判断。
@@ -457,4 +467,4 @@ retry_recommended
 - 使用内部 Worker Token 调用浏览器接口；
 - 把 HTTP `202` 当作总结成功；
 - 因暂时没有 Trace 事件就重复创建运行；
-- 在同一任务已有活动运行时绕过 `409 job_already_running`。
+- 因 `pending` 暂时没有 Trace 就重复创建不同范围的 Run。

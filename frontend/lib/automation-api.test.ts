@@ -32,13 +32,17 @@ test("triggers today's summary for one OA project through the session BFF", asyn
     return Response.json({
       code: 202,
       message: "accepted",
-      data: { run_id: "run-51", status: "pending" },
+      data: { run_id: "run-51", status: "pending", reused: false },
       success: true,
     }, { status: 202 })
   }
 
   try {
-    await triggerAutomationJob(7, { project_id: 51, summary_scope: "today" })
+    const result = await triggerAutomationJob(7, {
+      project_id: 51,
+      summary_scope: "today",
+    })
+    assert.equal(result.reused, false)
     assert.deepEqual(request, {
       url: "/api/automation/jobs/7/runs",
       method: "POST",
