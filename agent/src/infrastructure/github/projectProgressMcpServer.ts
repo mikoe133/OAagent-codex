@@ -16,7 +16,7 @@ const MAX_GITHUB_FILES_PAGE_SIZE = 100;
 const MCP_PATH = "/mcp";
 
 export const PROJECT_PROGRESS_COMMIT_DETAIL_TOOL_POLICY_VERSION =
-  "project-progress-commit-detail-v1";
+  "project-progress-commit-detail-v2";
 
 type GitHubFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 

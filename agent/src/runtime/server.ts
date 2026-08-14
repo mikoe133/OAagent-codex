@@ -34,7 +34,7 @@ async function main(): Promise<void> {
         config.repoRoot,
       );
       console.error(
-        `[automation-migrate] baseline=${migration.baselineApplied ? "applied" : "existing"} seed=applied`,
+        `[automation-migrate] baseline=${migration.baselineApplied ? "applied" : "existing"} execution_parameters=${migration.executionParametersApplied ? "applied" : "existing"} seed=applied`,
       );
     }
     automationDatabase = createAutomationDatabase(config.automation.databaseUrl);

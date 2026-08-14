@@ -301,18 +301,35 @@ async function executeProjectProgressSync(
   const writableStore = writeMode !== "dry-run"
     ? requireWritableStore(input.store)
     : null;
+  const scopeTraceMetadata = {
+    summary_scope: summaryScope,
+    ...(input.projectId === undefined ? {} : { project_id: input.projectId }),
+  };
   await emitTrace(input.trace, {
     eventKey: "load_projects",
     sequence: 100,
     phase: "load_projects",
     status: "running",
     title: "读取 OA 项目列表",
-    metadataSanitized: { summary_scope: summaryScope },
+    metadataSanitized: scopeTraceMetadata,
   });
   const listedProjects = await input.oaClient.listProjects(input.cancellationSignal);
   const selectedProjects = input.projectId === undefined
     ? listedProjects
     : listedProjects.filter((project) => project.id === input.projectId);
+  if (input.projectId !== undefined && selectedProjects.length === 0) {
+    const message = `OA 项目 ${input.projectId} 不存在或不可见`;
+    await emitTrace(input.trace, {
+      eventKey: "load_projects",
+      sequence: 100,
+      phase: "load_projects",
+      status: "failed",
+      title: "读取 OA 项目列表",
+      message,
+      metadataSanitized: scopeTraceMetadata,
+    });
+    throw new Error(message);
+  }
   const projects = summaryScope === "latest_commit_of_updating_projects"
     ? selectedProjects.filter((project) => project.status === "updating")
     : selectedProjects;
@@ -325,7 +342,7 @@ async function executeProjectProgressSync(
     message: `已读取 ${projects.length} 个候选项目`,
     progressCurrent: projects.length,
     progressTotal: projects.length,
-    metadataSanitized: { summary_scope: summaryScope },
+    metadataSanitized: scopeTraceMetadata,
   });
   const githubLimiter = new AsyncSemaphore(concurrency.github);
   const agentLimiter = new AsyncSemaphore(concurrency.agent);

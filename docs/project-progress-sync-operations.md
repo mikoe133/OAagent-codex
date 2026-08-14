@@ -11,7 +11,7 @@ OA 是调度事实来源：OA 按任务配置在工作日 20:00 创建运行，O
 5. 只为 `Asia/Shanghai` 当天实际有 Commit 的仓库创建 Codex Thread；每仓库一个，同时最多运行 2 个。
 6. 同一项目的仓库结果全部完成后再聚合，同一项目每天最多写入一条总结。
 7. 最近一次提交距计划执行时间达到 240 小时，状态改为 `maintenance`；维护中项目再次出现提交时改为 `updating`。
-8. Codex Agent 先阅读单仓库当天候选 Commit，再按需调用受限的 `read_commit_details` 工具；工具只允许本批次仓库与 SHA，返回裁剪后的文件名、增删统计和 Patch 片段。
+8. Codex Agent 先阅读单仓库当天候选 Commit。代码会为 `_`、`update`、`fix` 等低信息标题强制预读取受限 Commit 详情，并把文件名、增删统计和 Patch 片段作为必用证据注入总结；其他标题仍由 Agent 按需调用 `read_commit_details`。泛化总结会使用同一证据自动重试一次。
 9. 项目结果和每个仓库 Thread 的 AI interaction 使用稳定幂等键写入 OA；OA mutation 全局并发固定为 1。
 10. 收到取消请求或失去租约时，立即取消排队和在途 Thread，并停止后续业务写入。
 
@@ -51,6 +51,8 @@ PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS=12000
 GitHub PAT 只需目标仓库的 `Metadata: Read` 和 `Contents: Read`。两个 OA token 用途不同，不能互换，也不能使用用户 `sessionid`。
 
 GitHub PAT 只保留在 Worker 内存。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables，不需要新增 Secret。
+
+AI interaction 的 `response_payload_sanitized` 会记录 `prefetched_detail_calls`、`detail_calls`、`github_detail_requests`、`files_returned`、`patch_chars_returned` 和 `quality_retries`。判断模型是否真的看过代码证据，应以这些审计字段为准，不能依据模型生成的备注推断。详情失败或发生文件/Patch 裁剪时，Worker 会由代码追加对应 limitation。
 
 一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 token 级执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。OA 总结、状态和审计写入按顺序执行。容器建议至少分配 `2 CPU / 3GB`。
 

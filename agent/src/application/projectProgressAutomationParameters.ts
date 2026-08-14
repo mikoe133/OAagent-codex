@@ -26,3 +26,24 @@ export function splitProjectProgressAutomationParameters(
     modelParameters: decodeAutomationModelParameters(modelParameterValues),
   };
 }
+
+export function resolveProjectProgressAutomationParameters(
+  modelParameters: Record<string, unknown>,
+  executionParameters: {
+    projectId?: number;
+    summaryScope?: ProjectProgressSummaryScope;
+  },
+): {
+  projectId?: number;
+  summaryScope: ProjectProgressSummaryScope;
+  modelParameters: AutomationModelParameters;
+} {
+  const split = splitProjectProgressAutomationParameters(modelParameters);
+  return {
+    ...(executionParameters.projectId === undefined
+      ? {}
+      : { projectId: executionParameters.projectId }),
+    summaryScope: executionParameters.summaryScope ?? split.summaryScope,
+    modelParameters: split.modelParameters,
+  };
+}

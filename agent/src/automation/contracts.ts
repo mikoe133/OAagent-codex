@@ -134,6 +134,18 @@ export const automationJobPatchSchema = z
   .strict()
   .refine((value) => Object.keys(value).some((key) => key !== "version"), "no_changes");
 
+export const automationManualRunCreateSchema = z
+  .object({
+    project_id: z.number().int().positive().optional(),
+    summary_scope: z.enum(PROJECT_PROGRESS_SUMMARY_SCOPES).optional(),
+  })
+  .strict()
+  .transform((value) =>
+    value.project_id !== undefined && value.summary_scope === undefined
+      ? { ...value, summary_scope: "today" as const }
+      : value,
+  );
+
 export const automationClaimSchema = z
   .object({
     worker_instance: workerInstance,

@@ -1,5 +1,8 @@
 # 自动化任务与执行审计 API
 
+OA 页面调用指定项目 Commit 总结的完整字段、枚举、响应与错误码说明见
+[OA 指定项目 Commit 总结接口](oa_targeted_project_summary_api.md)。
+
 OAagent 开发和联调请优先阅读 [OAagent 与 OA 自动化联调 API](oaagent_integration_api.md)，其中包含双向模型接口、Worker payload、项目同步 payload、cURL、状态机和错误处理约定。
 
 ## 边界
@@ -30,13 +33,34 @@ OA 保存任务、标签、cron、模型标识、运行快照和审计，负责 
 | GET/PATCH | `/automation-jobs/{job_id}` | read/write | 详情和带 `version` 的乐观锁修改；详情可传 `include_deleted=true` |
 | DELETE | `/automation-jobs/{job_id}?version={version}` | write | 软删除；有未结束运行时返回 409 |
 | POST | `/automation-jobs/{job_id}/validate` | write | 实时校验 OAagent 模型配置 |
-| POST | `/automation-jobs/{job_id}/runs` | trigger | 手动触发，返回 202 |
+| POST | `/automation-jobs/{job_id}/runs` | trigger | 手动触发；可指定单个项目，返回 202 |
 | GET | `/automation-job-runs` | read | 分页、状态、模型、标签和时间过滤 |
 | GET | `/automation-job-runs/{run_id}` | read/audit | `include=projects,ai_interactions,attempts` |
 | GET | `/automation-job-runs/{run_id}/trace-events` | read | 查询脱敏运行阶段与实时进度 |
 | POST | `/automation-job-runs/{run_id}/cancel` | write | pending 直接取消；claimed/running 发出取消请求 |
 
 错误保持统一 envelope：
+
+浏览器继续使用 OA `sessionid`。原有空请求保持整项任务行为；若只总结某个 OA
+项目的当天动态，请提交：
+
+```json
+{
+  "project_id": 51,
+  "summary_scope": "today"
+}
+```
+
+`project_id` 必须为正整数。传入 `project_id` 但省略 `summary_scope` 时默认
+`today`；也可显式传 `latest_commit_of_updating_projects`。响应包含 `reused`：
+`false` 表示创建了新 Run，`true` 表示同一项目、同一范围已有活动 Run，调用方应
+继续使用返回的同一个 `run_id`。这两个字段保存到本次
+运行的 `execution_parameters` 快照并由重试继承，不会进入模型参数或暴露 GitHub
+token。空 body 和 `{}` 均兼容原有调用。
+
+不同 `project_id` 可分别创建 Run；同一项目不同范围会创建 Run 后排队。全量 Run
+与所有单项目 Run 在 claim 阶段互斥，单项目 Run 之间仅同项目互斥。定时到期的
+全量 Run 也使用同一队列，不会因为单项目 Run 正在执行而记为 `skipped`。
 
 ```json
 {
@@ -65,7 +89,9 @@ OA 保存任务、标签、cron、模型标识、运行快照和审计，负责 
 
 推荐 `lease_seconds=300`，Worker 每约 60 秒 heartbeat。数据库只保存租约摘要；raw lease token 只在 claim 响应返回一次。所有后续写入同时校验 worker、摘要、租约过期时间、deadline 和运行状态。
 
-claim 优先级：deadline 超时处理 → 过期租约接管 → pending manual/retry → 到期 cron。到期任务使用 MySQL 8 `FOR UPDATE SKIP LOCKED`，同一事务内创建运行、写租约并推进 `next_run_at`。
+claim 优先级：deadline 超时处理 → 过期租约接管 → pending。到期任务使用 MySQL 8
+`FOR UPDATE SKIP LOCKED`；同一任务的 claim 决策由短暂的 MySQL 命名锁保护，不同
+项目可由多个 Worker 并行处理，全量与单项目、同一项目的多个 Run 不会重叠执行。
 
 ## 项目同步 API
 

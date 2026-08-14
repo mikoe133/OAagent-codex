@@ -5,10 +5,38 @@ import {
   automationClaimSchema,
   automationJobCreateSchema,
   automationJobPatchSchema,
+  automationManualRunCreateSchema,
   automationRunPatchSchema,
   automationRunProjectUpsertSchema,
   automationTraceEventUpsertSchema,
 } from "../src/automation/contracts.js";
+
+test("accepts a session-triggered run for one OA project", () => {
+  assert.deepEqual(automationManualRunCreateSchema.parse({}), {});
+  assert.deepEqual(
+    automationManualRunCreateSchema.parse({ project_id: 51 }),
+    { project_id: 51, summary_scope: "today" },
+  );
+  assert.deepEqual(
+    automationManualRunCreateSchema.parse({
+      project_id: 51,
+      summary_scope: "latest_commit_of_updating_projects",
+    }),
+    {
+      project_id: 51,
+      summary_scope: "latest_commit_of_updating_projects",
+    },
+  );
+  assert.equal(
+    automationManualRunCreateSchema.safeParse({ project_id: 0 }).success,
+    false,
+  );
+  assert.equal(
+    automationManualRunCreateSchema.safeParse({ project_id: 51, github_token: "secret" })
+      .success,
+    false,
+  );
+});
 
 test("accepts only supported project-progress summary scopes", () => {
   const baseJob = {

@@ -181,8 +181,10 @@ test(
       assert.equal(activeDelete.status, 409)
       assert.equal((await envelope(activeDelete)).data.error_code, "job_has_active_run")
       const overlap = await call(POST, ["jobs", String(jobId), "runs"])
-      assert.equal(overlap.status, 409)
-      assert.equal((await envelope(overlap)).data.error_code, "job_already_running")
+      assert.equal(overlap.status, 202)
+      const overlapData = (await envelope(overlap)).data
+      assert.equal(overlapData.run_id, runId)
+      assert.equal(overlapData.reused, true)
       const claim = await internalCall(
         backendBaseUrl,
         "/internal/automation-job-runs/claim",

@@ -16,11 +16,16 @@ import {
 } from "../../config/modelCatalog.js";
 import type { ModelProviderConfig } from "../../config/config.js";
 import {
+  formatDateInTimeZone,
+  type ProjectProgressSummaryScope,
+} from "../../domain/projectProgress.js";
+import {
   automationAiInteractionCreateSchema,
   automationClaimSchema,
   automationHeartbeatSchema,
   automationJobCreateSchema,
   automationJobPatchSchema,
+  automationManualRunCreateSchema,
   automationPromptProfilePatchSchema,
   automationRunPatchSchema,
   automationRunProjectUpsertSchema,
@@ -672,7 +677,17 @@ export class AutomationService implements AutomationOperations {
     );
   }
 
-  async triggerJob(jobId: number, userId: number): Promise<unknown> {
+  async triggerJob(jobId: number, userId: number): Promise<unknown>;
+  async triggerJob(jobId: number, body: unknown, userId: number): Promise<unknown>;
+  async triggerJob(
+    jobId: number,
+    bodyOrUserId: unknown,
+    explicitUserId?: number,
+  ): Promise<unknown> {
+    const userId = explicitUserId ?? Number(bodyOrUserId);
+    const input = automationManualRunCreateSchema.parse(
+      explicitUserId === undefined ? {} : bodyOrUserId,
+    );
     try {
       return await this.database.db.transaction().execute(async (tx) => {
         const job = await tx
@@ -688,24 +703,54 @@ export class AutomationService implements AutomationOperations {
           throw conflict("job_configuration_invalid", "任务配置无效");
         }
         this.validateModel(job.model_provider, job.model_id);
-        this.enforceManualRateLimit(userId, jobId);
-        const active = await tx
+        const now = new Date();
+        const activeRuns = await tx
           .selectFrom("automation_job_runs")
-          .select(({ fn }) => fn.count<number>("id").as("count"))
+          .select([
+            "id",
+            "status",
+            "scheduled_at",
+            "timezone_snapshot",
+            "model_parameters_snapshot",
+            "execution_parameters_snapshot",
+          ])
           .where("job_id", "=", jobId)
           .where("status", "in", [...ACTIVE_RUN_STATUSES])
-          .executeTakeFirstOrThrow();
-        if (Number(active.count)) {
-          throw conflict("job_already_running", "任务已有未结束运行");
+          .where("deadline_at", ">", now)
+          .orderBy("created_at", "asc")
+          .execute();
+        const requestedScope = resolveRequestedRunScope(
+          input,
+          parseJson(job.model_parameters, {}),
+        );
+        const reusable = activeRuns.find((run) =>
+          isSameManualRunScope(requestedScope, run, now, job.timezone),
+        );
+        if (reusable) {
+          return {
+            run_id: reusable.id,
+            status: reusable.status,
+            reused: true,
+          };
         }
-        const now = new Date();
-        const runId = await this.insertRootRun(tx, job, "manual", now, now, now);
+        this.enforceManualRateLimit(userId, jobId, input.project_id ?? null);
+        const scheduledAt = await nextManualScheduledAt(tx, jobId, now);
+        const runId = await this.insertRootRun(
+          tx,
+          job,
+          "manual",
+          scheduledAt,
+          now,
+          now,
+          undefined,
+          input,
+        );
         await tx
           .updateTable("automation_jobs")
           .set({ model_catalog_version: MODEL_CATALOG_VERSION, updated_at: now })
           .where("id", "=", jobId)
           .execute();
-        return { run_id: runId, status: "pending" };
+        return { run_id: runId, status: "pending", reused: false };
       });
     } catch (error) {
       if (error instanceof AutomationHttpError && error.code === "invalid_model") {
@@ -979,13 +1024,7 @@ export class AutomationService implements AutomationOperations {
             .execute();
           return true;
         }
-        const active = await tx
-          .selectFrom("automation_job_runs")
-          .select(({ fn }) => fn.count<number>("id").as("count"))
-          .where("job_id", "=", job.id)
-          .where("status", "in", [...ACTIVE_RUN_STATUSES])
-          .executeTakeFirstOrThrow();
-        if (Number(active.count) > 0 || !shouldRun) {
+        if (!shouldRun) {
           await this.insertRootRun(
             tx,
             job,
@@ -995,8 +1034,8 @@ export class AutomationService implements AutomationOperations {
             now,
             {
               status: "skipped",
-              code: Number(active.count) > 0 ? "job_already_running" : "schedule_missed",
-              summary: Number(active.count) > 0 ? "任务禁止重叠执行" : "计划时间已错过",
+              code: "schedule_missed",
+              summary: "计划时间已错过",
             },
           );
         } else {
@@ -1014,9 +1053,7 @@ export class AutomationService implements AutomationOperations {
           .set({
             last_scheduled_at: scheduledAt,
             next_run_at: nextRunAt!,
-            ...(Number(active.count) > 0 || !shouldRun
-              ? { last_run_status: "skipped" }
-              : {}),
+            ...(!shouldRun ? { last_run_status: "skipped" } : {}),
             updated_at: now,
           })
           .where("id", "=", job.id)
@@ -1199,10 +1236,14 @@ export class AutomationService implements AutomationOperations {
     }
   }
 
-  private enforceManualRateLimit(userId: number, jobId: number): void {
+  private enforceManualRateLimit(
+    userId: number,
+    jobId: number,
+    projectId: number | null,
+  ): void {
     const now = Date.now();
     const threshold = now - this.config.manualTriggerWindowSeconds * 1000;
-    const key = `${userId}:${jobId}`;
+    const key = `${userId}:${jobId}:${projectId ?? "all"}`;
     const recent = (this.manualTriggerAttempts.get(key) ?? []).filter(
       (timestamp) => timestamp > threshold,
     );
@@ -1221,6 +1262,7 @@ export class AutomationService implements AutomationOperations {
     availableAt: Date,
     triggeredAt: Date,
     terminal?: { status: "skipped" | "configuration_error"; code: string; summary: string },
+    executionParameters: Record<string, unknown> = {},
   ): Promise<string> {
     const tags = await this.tagsByJobIds([job.id], executor);
     const profile = await executor
@@ -1260,6 +1302,7 @@ export class AutomationService implements AutomationOperations {
         model_provider_snapshot: job.model_provider,
         model_id_snapshot: job.model_id,
         model_parameters_snapshot: JSON.stringify(parseJson(job.model_parameters, {})),
+        execution_parameters_snapshot: JSON.stringify(executionParameters),
         model_catalog_version_snapshot: job.model_catalog_version,
         prompt_version_snapshot: profile?.prompt_version ?? null,
         system_prompt_snapshot: profile?.system_prompt ?? null,
@@ -1294,74 +1337,125 @@ export class AutomationService implements AutomationOperations {
   private async claimRunWithLease(body: unknown): Promise<unknown> {
     const input = automationClaimSchema.parse(body);
     const connection = await this.database.pool.promise().getConnection();
-    const now = new Date();
+    let claimLockName: string | null = null;
     try {
       await connection.beginTransaction();
-      await this.expireDeadlines(connection, now);
-      let run = await selectRunForClaim(
-        connection,
-        `status IN ('claimed', 'running')
-         AND lease_expires_at IS NOT NULL
-         AND lease_expires_at <= ?
-         AND deadline_at > ?
-         AND job_type_snapshot IN (?)`,
-        [now, now, input.supported_job_types],
-        "lease_expires_at ASC",
-      );
-      if (!run) {
-        run = await selectRunForClaim(
+      await this.expireDeadlines(connection, new Date());
+      await connection.commit();
+      for (let scan = 0; scan < 20; scan += 1) {
+        const now = new Date();
+        await connection.beginTransaction();
+        let candidateJobId = await selectJobForClaim(
           connection,
-          `status = 'pending'
-           AND available_at <= ?
-           AND deadline_at > ?
-           AND job_type_snapshot IN (?)`,
+          `candidate.status IN ('claimed', 'running')
+           AND candidate.lease_expires_at IS NOT NULL
+           AND candidate.lease_expires_at <= ?
+           AND candidate.deadline_at > ?
+           AND candidate.job_type_snapshot IN (?)`,
           [now, now, input.supported_job_types],
-          "available_at ASC, created_at ASC",
+          "candidate.lease_expires_at ASC",
+          now,
+        );
+        if (candidateJobId === null) {
+          candidateJobId = await selectJobForClaim(
+            connection,
+            `candidate.status = 'pending'
+             AND candidate.available_at <= ?
+             AND candidate.deadline_at > ?
+             AND candidate.job_type_snapshot IN (?)`,
+            [now, now, input.supported_job_types],
+            "candidate.available_at ASC, candidate.created_at ASC",
+            now,
+          );
+        }
+        if (candidateJobId === null) {
+          await connection.commit();
+          return null;
+        }
+        await connection.commit();
+        claimLockName = `automation-claim-job-${candidateJobId}`;
+        if (!(await acquireNamedLock(connection, claimLockName))) {
+          claimLockName = null;
+          return null;
+        }
+        await connection.beginTransaction();
+        let run = await selectRunForClaim(
+          connection,
+          `candidate.job_id = ?
+           AND candidate.status IN ('claimed', 'running')
+           AND candidate.lease_expires_at IS NOT NULL
+           AND candidate.lease_expires_at <= ?
+           AND candidate.deadline_at > ?
+           AND candidate.job_type_snapshot IN (?)`,
+          [candidateJobId, now, now, input.supported_job_types],
+          "candidate.lease_expires_at ASC",
+          now,
+        );
+        if (!run) {
+          run = await selectRunForClaim(
+            connection,
+            `candidate.job_id = ?
+             AND candidate.status = 'pending'
+             AND candidate.available_at <= ?
+             AND candidate.deadline_at > ?
+             AND candidate.job_type_snapshot IN (?)`,
+            [candidateJobId, now, now, input.supported_job_types],
+            "candidate.available_at ASC, candidate.created_at ASC",
+            now,
+          );
+        }
+        if (!run) {
+          await connection.commit();
+          await releaseNamedLock(connection, claimLockName);
+          claimLockName = null;
+          continue;
+        }
+        const rawToken = randomBytes(32).toString("base64url");
+        const leaseExpiresAt = new Date(
+          Math.min(
+            now.getTime() + input.lease_seconds * 1000,
+            asDate(run.deadline_at).getTime(),
+          ),
+        );
+        await connection.execute<ResultSetHeader>(
+          `UPDATE automation_job_runs
+              SET status = 'claimed', worker_instance = ?, lease_token_digest = ?,
+                  lease_duration_seconds = ?, lease_expires_at = ?, heartbeat_at = ?,
+                  updated_at = ?
+            WHERE id = ?`,
+          [
+            input.worker_instance,
+            digestLeaseToken(rawToken),
+            input.lease_seconds,
+            leaseExpiresAt,
+            now,
+            now,
+            run.id,
+          ],
+        );
+        await connection.commit();
+        await releaseNamedLock(connection, claimLockName);
+        claimLockName = null;
+        return claimResponse(
+          {
+            ...run,
+            status: "claimed",
+            worker_instance: input.worker_instance,
+            lease_duration_seconds: input.lease_seconds,
+            lease_expires_at: leaseExpiresAt,
+            heartbeat_at: now,
+          },
+          rawToken,
         );
       }
-      if (!run) {
-        await connection.commit();
-        return null;
-      }
-      const rawToken = randomBytes(32).toString("base64url");
-      const leaseExpiresAt = new Date(
-        Math.min(
-          now.getTime() + input.lease_seconds * 1000,
-          asDate(run.deadline_at).getTime(),
-        ),
-      );
-      await connection.execute<ResultSetHeader>(
-        `UPDATE automation_job_runs
-            SET status = 'claimed', worker_instance = ?, lease_token_digest = ?,
-                lease_duration_seconds = ?, lease_expires_at = ?, heartbeat_at = ?,
-                updated_at = ?
-          WHERE id = ?`,
-        [
-          input.worker_instance,
-          digestLeaseToken(rawToken),
-          input.lease_seconds,
-          leaseExpiresAt,
-          now,
-          now,
-          run.id,
-        ],
-      );
-      await connection.commit();
-      return claimResponse(
-        {
-          ...run,
-          status: "claimed",
-          worker_instance: input.worker_instance,
-          lease_duration_seconds: input.lease_seconds,
-          lease_expires_at: leaseExpiresAt,
-          heartbeat_at: now,
-        },
-        rawToken,
-      );
+      return null;
     } catch (error) {
       await connection.rollback();
       throw error;
     } finally {
+      if (claimLockName) {
+        await releaseNamedLock(connection, claimLockName);
+      }
       connection.release();
     }
   }
@@ -1516,7 +1610,7 @@ export class AutomationService implements AutomationOperations {
                job_name_snapshot, job_type_snapshot, description_snapshot,
                tags_snapshot, trigger_source, scheduled_at, available_at,
                triggered_at, status, attempt, model_provider_snapshot,
-               model_id_snapshot, model_parameters_snapshot,
+               model_id_snapshot, model_parameters_snapshot, execution_parameters_snapshot,
                model_catalog_version_snapshot, prompt_version_snapshot,
                system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
                retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
@@ -1527,6 +1621,7 @@ export class AutomationService implements AutomationOperations {
                       job_name_snapshot, job_type_snapshot, description_snapshot,
                       tags_snapshot, 'retry', scheduled_at, ?, ?, 'pending', attempt + 1,
                       model_provider_snapshot, model_id_snapshot, model_parameters_snapshot,
+                      execution_parameters_snapshot,
                       model_catalog_version_snapshot, prompt_version_snapshot,
                       system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
                       retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
@@ -1925,15 +2020,158 @@ async function selectRunForClaim(
   whereClause: string,
   parameters: unknown[],
   orderBy: string,
+  now: Date,
 ): Promise<RunRow | null> {
   const [rows] = await connection.query<(RowDataPacket & RunRow)[]>(
-    `SELECT * FROM automation_job_runs
+    `SELECT candidate.* FROM automation_job_runs AS candidate
       WHERE ${whereClause}
+        AND NOT EXISTS (
+          SELECT 1
+            FROM automation_job_runs AS active
+           WHERE active.job_id = candidate.job_id
+             AND active.id <> candidate.id
+             AND active.status IN ('claimed', 'running')
+             AND active.lease_expires_at IS NOT NULL
+             AND active.lease_expires_at > ?
+             AND active.deadline_at > ?
+             AND (
+               JSON_EXTRACT(candidate.execution_parameters_snapshot, '$.project_id') IS NULL
+               OR JSON_EXTRACT(active.execution_parameters_snapshot, '$.project_id') IS NULL
+               OR JSON_EXTRACT(active.execution_parameters_snapshot, '$.project_id') =
+                  JSON_EXTRACT(candidate.execution_parameters_snapshot, '$.project_id')
+             )
+        )
       ORDER BY ${orderBy}
       LIMIT 1 FOR UPDATE SKIP LOCKED`,
-    parameters,
+    [...parameters, now, now],
   );
   return (rows[0] as RunRow | undefined) ?? null;
+}
+
+async function acquireNamedLock(
+  connection: PoolConnection,
+  lockName: string,
+): Promise<boolean> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    "SELECT GET_LOCK(?, 5) AS acquired",
+    [lockName],
+  );
+  return Number(rows[0]?.acquired) === 1;
+}
+
+async function releaseNamedLock(
+  connection: PoolConnection,
+  lockName: string,
+): Promise<void> {
+  await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
+}
+
+async function selectJobForClaim(
+  connection: PoolConnection,
+  whereClause: string,
+  parameters: unknown[],
+  orderBy: string,
+  now: Date,
+): Promise<number | null> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT candidate.job_id
+       FROM automation_job_runs AS candidate
+      WHERE ${whereClause}
+        AND NOT EXISTS (
+          SELECT 1
+            FROM automation_job_runs AS active
+           WHERE active.job_id = candidate.job_id
+             AND active.id <> candidate.id
+             AND active.status IN ('claimed', 'running')
+             AND active.lease_expires_at IS NOT NULL
+             AND active.lease_expires_at > ?
+             AND active.deadline_at > ?
+             AND (
+               JSON_EXTRACT(candidate.execution_parameters_snapshot, '$.project_id') IS NULL
+               OR JSON_EXTRACT(active.execution_parameters_snapshot, '$.project_id') IS NULL
+               OR JSON_EXTRACT(active.execution_parameters_snapshot, '$.project_id') =
+                  JSON_EXTRACT(candidate.execution_parameters_snapshot, '$.project_id')
+             )
+        )
+      ORDER BY ${orderBy}
+      LIMIT 1`,
+    [...parameters, now, now],
+  );
+  return rows[0]?.job_id === undefined ? null : Number(rows[0].job_id);
+}
+
+type ManualRunScope = {
+  projectId: number | null;
+  summaryScope: ProjectProgressSummaryScope;
+};
+
+function resolveRequestedRunScope(
+  executionParameters: { project_id?: number; summary_scope?: ProjectProgressSummaryScope },
+  modelParameters: Record<string, unknown>,
+): ManualRunScope {
+  const modelScope = modelParameters.summary_scope;
+  return {
+    projectId: executionParameters.project_id ?? null,
+    summaryScope:
+      executionParameters.summary_scope ??
+      (modelScope === "latest_commit_of_updating_projects"
+        ? modelScope
+        : "today"),
+  };
+}
+
+function runScope(run: {
+  model_parameters_snapshot: unknown;
+  execution_parameters_snapshot: unknown;
+}): ManualRunScope {
+  return resolveRequestedRunScope(
+    parseJson(run.execution_parameters_snapshot, {}),
+    parseJson(run.model_parameters_snapshot, {}),
+  );
+}
+
+function isSameManualRunScope(
+  requested: ManualRunScope,
+  active: {
+    scheduled_at: Date;
+    timezone_snapshot: string;
+    model_parameters_snapshot: unknown;
+    execution_parameters_snapshot: unknown;
+  },
+  now: Date,
+  requestedTimezone: string,
+): boolean {
+  const existing = runScope(active);
+  if (
+    requested.projectId !== existing.projectId ||
+    requested.summaryScope !== existing.summaryScope
+  ) {
+    return false;
+  }
+  if (requested.summaryScope !== "today") return true;
+  return (
+    formatDateInTimeZone(asDate(active.scheduled_at), active.timezone_snapshot) ===
+    formatDateInTimeZone(now, requestedTimezone)
+  );
+}
+
+async function nextManualScheduledAt(
+  executor: DbExecutor,
+  jobId: number,
+  now: Date,
+): Promise<Date> {
+  let scheduledAt = now;
+  for (;;) {
+    const collision = await executor
+      .selectFrom("automation_job_runs")
+      .select("id")
+      .where("job_id", "=", jobId)
+      .where("scheduled_at", "=", scheduledAt)
+      .where("attempt", "=", 1)
+      .executeTakeFirst();
+    if (!collision) return scheduledAt;
+    scheduledAt = new Date(scheduledAt.getTime() + 1);
+  }
 }
 
 async function loadWorkerRun(
@@ -1988,6 +2226,7 @@ function claimResponse(run: RunRow, rawLeaseToken: string): Record<string, unkno
     model_provider: run.model_provider_snapshot,
     model_id: run.model_id_snapshot,
     model_parameters: parseJson(run.model_parameters_snapshot, {}),
+    execution_parameters: parseJson(run.execution_parameters_snapshot, {}),
     model_catalog_version: run.model_catalog_version_snapshot,
     prompt_profile:
       run.prompt_version_snapshot && run.system_prompt_snapshot
@@ -2133,6 +2372,7 @@ function serializeRun(run: RunRow, jobDeleted: boolean): Record<string, unknown>
     model_provider: run.model_provider_snapshot,
     model_id: run.model_id_snapshot,
     model_parameters: parseJson(run.model_parameters_snapshot, {}),
+    execution_parameters: parseJson(run.execution_parameters_snapshot, {}),
     model_catalog_version: run.model_catalog_version_snapshot,
     cron_expression: run.cron_expression_snapshot,
     timezone: run.timezone_snapshot,

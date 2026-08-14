@@ -82,6 +82,11 @@ export type AutomationJobParameters = {
   max_output_tokens?: number
 }
 
+export type AutomationManualRunInput = {
+  project_id?: number
+  summary_scope?: AutomationSummaryScope
+}
+
 export type AutomationJob = {
   id: number
   job_key: string
@@ -164,6 +169,7 @@ export type AutomationRun = {
   attempt: number
   model_provider: string
   model_id: string
+  execution_parameters?: AutomationManualRunInput
   model_catalog_version?: string | null
   cron_expression?: string
   timezone?: string
@@ -387,8 +393,12 @@ export function validateAutomationJob(jobId: number): Promise<AutomationJob> {
 
 export function triggerAutomationJob(
   jobId: number,
-): Promise<{ run_id: string; status: AutomationRunStatus }> {
-  return automationRequest(`/jobs/${jobId}/runs`, { method: "POST" })
+  input?: AutomationManualRunInput,
+): Promise<{ run_id: string; status: AutomationRunStatus; reused: boolean }> {
+  return automationRequest(`/jobs/${jobId}/runs`, {
+    method: "POST",
+    ...(input ? { body: JSON.stringify(input) } : {}),
+  })
 }
 
 export async function listAutomationTags(

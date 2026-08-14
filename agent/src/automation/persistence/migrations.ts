@@ -20,6 +20,7 @@ const MIGRATION_LOCK = "oaagent_automation_schema_baseline";
 
 export type AutomationMigrationResult = {
   baselineApplied: boolean;
+  executionParametersApplied: boolean;
   seedApplied: boolean;
   tables: readonly string[];
 };
@@ -73,6 +74,24 @@ export async function runAutomationMigrations(
       baselineApplied = true;
     }
 
+    const [columnRows] = await connection.query<RowDataPacket[]>(
+      `SELECT column_name
+         FROM information_schema.columns
+        WHERE table_schema = ?
+          AND table_name = 'automation_job_runs'
+          AND column_name = 'execution_parameters_snapshot'`,
+      [databaseName],
+    );
+    let executionParametersApplied = false;
+    if (columnRows.length === 0) {
+      const executionParametersMigration = await readFile(
+        path.join(sqlDirectory, "003_automation_run_execution_parameters.up.sql"),
+        "utf8",
+      );
+      await connection.query(executionParametersMigration);
+      executionParametersApplied = true;
+    }
+
     const seed = await readFile(
       path.join(sqlDirectory, "002_automation_defaults_seed.up.sql"),
       "utf8",
@@ -80,6 +99,7 @@ export async function runAutomationMigrations(
     await connection.query(seed);
     return {
       baselineApplied,
+      executionParametersApplied,
       seedApplied: true,
       tables: AUTOMATION_TABLES,
     };
@@ -90,4 +110,3 @@ export async function runAutomationMigrations(
     await connection.end();
   }
 }
-
