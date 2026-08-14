@@ -592,6 +592,28 @@ test(
         run_id: string;
       };
 
+      const project51Active = (await service.listRuns(
+        new URLSearchParams(
+          `job_id=${job.id}&project_id=51&active_only=true&size=20`,
+        ),
+        42,
+      )) as { items: Array<{ id: string }> };
+      assert.deepEqual(
+        project51Active.items.map((run) => run.id).sort(),
+        [project51First.run_id, project51Latest.run_id, fullRun.run_id].sort(),
+      );
+
+      const project51TargetedOnly = (await service.listRuns(
+        new URLSearchParams(
+          `job_id=${job.id}&project_id=51&active_only=true&include_full_scope=false&size=20`,
+        ),
+        42,
+      )) as { items: Array<{ id: string }> };
+      assert.deepEqual(
+        project51TargetedOnly.items.map((run) => run.id).sort(),
+        [project51First.run_id, project51Latest.run_id].sort(),
+      );
+
       const initialClaimResults = await Promise.all(
         [51, 52, 53].map(async (workerId) => {
           const workerInstance = `project-worker-${workerId}`;
@@ -642,6 +664,13 @@ test(
       const project53Initial = initialByProject.get(53)!;
       await finishClaim(service, project52Initial.claim, project52Initial.workerInstance);
       await finishClaim(service, project53Initial.claim, project53Initial.workerInstance);
+      const project52Active = (await service.listRuns(
+        new URLSearchParams(
+          `job_id=${job.id}&project_id=52&active_only=true&include_full_scope=false&size=20`,
+        ),
+        42,
+      )) as { items: Array<{ id: string }> };
+      assert.equal(project52Active.items.length, 0);
       assert.equal(await service.claimRun({
         worker_instance: "still-blocked-worker",
         supported_job_types: ["github_project_progress_sync"],
