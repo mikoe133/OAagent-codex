@@ -34,7 +34,7 @@ OA 保存任务、标签、cron、模型标识、运行快照和审计，负责 
 | DELETE | `/automation-jobs/{job_id}?version={version}` | write | 软删除；有未结束运行时返回 409 |
 | POST | `/automation-jobs/{job_id}/validate` | write | 实时校验 OAagent 模型配置 |
 | POST | `/automation-jobs/{job_id}/runs` | trigger | 手动触发；可指定单个项目，返回 202 |
-| GET | `/automation-job-runs` | read | 分页、状态、模型、标签和时间过滤 |
+| GET | `/automation-job-runs` | read | 分页、项目、活动状态、模型、标签和时间过滤 |
 | GET | `/automation-job-runs/{run_id}` | read/audit | `include=projects,ai_interactions,attempts` |
 | GET | `/automation-job-runs/{run_id}/trace-events` | read | 查询脱敏运行阶段与实时进度 |
 | POST | `/automation-job-runs/{run_id}/cancel` | write | pending 直接取消；claimed/running 发出取消请求 |
@@ -61,6 +61,17 @@ token。空 body 和 `{}` 均兼容原有调用。
 不同 `project_id` 可分别创建 Run；同一项目不同范围会创建 Run 后排队。全量 Run
 与所有单项目 Run 在 claim 阶段互斥，单项目 Run 之间仅同项目互斥。定时到期的
 全量 Run 也使用同一队列，不会因为单项目 Run 正在执行而记为 `skipped`。
+
+OA 查询会影响某个项目的活动 Run 时使用：
+
+```http
+GET /automation-job-runs?job_id=1&project_id=64&active_only=true&include_full_scope=true
+```
+
+`active_only=true` 只返回 `pending`、`claimed`、`running`；`include_full_scope`
+在传入 `project_id` 时默认为 `true`，因此没有指定项目的全量 Run 也会返回。
+传 `false` 时只返回 `execution_parameters.project_id` 与查询项目完全相同的定向 Run。
+该查询只用于展示和管理，创建仍应依赖 `POST .../runs` 的原子 `reused` 结果防重。
 
 ```json
 {

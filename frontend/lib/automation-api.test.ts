@@ -217,6 +217,9 @@ test("forwards every documented run-list filter and pagination field", async () 
       size: 10,
       jobId: 7,
       tagId: 3,
+      projectId: 64,
+      activeOnly: true,
+      includeFullScope: false,
       status: "failed",
       triggerSource: "manual",
       modelProvider: "nexttoken",
@@ -225,7 +228,7 @@ test("forwards every documented run-list filter and pagination field", async () 
       startedBefore: "2026-07-31T23:59:59.000Z",
     })
 
-    assert.equal(requestUrl, "/api/automation/runs?page=2&size=10&sort=-scheduled_at&job_id=7&tag_id=3&status=failed&trigger_source=manual&model_provider=nexttoken&model_id=gpt-5.6-terra&started_after=2026-07-01T00%3A00%3A00.000Z&started_before=2026-07-31T23%3A59%3A59.000Z")
+    assert.equal(requestUrl, "/api/automation/runs?page=2&size=10&sort=-scheduled_at&job_id=7&tag_id=3&project_id=64&active_only=true&include_full_scope=false&status=failed&trigger_source=manual&model_provider=nexttoken&model_id=gpt-5.6-terra&started_after=2026-07-01T00%3A00%3A00.000Z&started_before=2026-07-31T23%3A59%3A59.000Z")
   } finally {
     globalThis.fetch = originalFetch
   }

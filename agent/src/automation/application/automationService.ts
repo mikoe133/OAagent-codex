@@ -772,6 +772,9 @@ export class AutomationService implements AutomationOperations {
     const size = queryInteger(query, "size", 10, 1, 100);
     const jobId = queryOptionalInteger(query, "job_id");
     const tagId = queryOptionalInteger(query, "tag_id");
+    const projectId = queryOptionalInteger(query, "project_id");
+    const activeOnly = queryBoolean(query, "active_only") ?? false;
+    const includeFullScope = queryBoolean(query, "include_full_scope") ?? true;
     const filters = {
       status: optionalQuery(query, "status", 32),
       triggerSource: optionalQuery(query, "trigger_source", 20),
@@ -792,6 +795,18 @@ export class AutomationService implements AutomationOperations {
       );
     }
     if (jobId !== null) base = base.where("run.job_id", "=", jobId);
+    if (projectId !== null) {
+      const targetProjectId = sql<number | null>`CAST(
+        JSON_UNQUOTE(JSON_EXTRACT(run.execution_parameters_snapshot, '$.project_id'))
+        AS UNSIGNED
+      )`;
+      base = base.where(
+        includeFullScope
+          ? sql<boolean>`(${targetProjectId} = ${projectId} OR ${targetProjectId} IS NULL)`
+          : sql<boolean>`${targetProjectId} = ${projectId}`,
+      );
+    }
+    if (activeOnly) base = base.where("run.status", "in", [...ACTIVE_RUN_STATUSES]);
     if (filters.status) base = base.where("run.status", "=", filters.status);
     if (filters.triggerSource) base = base.where("run.trigger_source", "=", filters.triggerSource);
     if (filters.modelProvider) base = base.where("run.model_provider_snapshot", "=", filters.modelProvider);
