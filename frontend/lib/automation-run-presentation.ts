@@ -74,6 +74,19 @@ export function projectOutcomeForDisplay(
   return project.outcome
 }
 
+export function automationInteractionRepositoryFullName(
+  interaction: Pick<AutomationAiInteraction, "request_payload_sanitized">,
+): string {
+  const payload = interaction.request_payload_sanitized
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return "未记录仓库"
+  }
+  const repositoryFullName = (payload as Record<string, unknown>).repository_full_name
+  return typeof repositoryFullName === "string" && repositoryFullName.trim()
+    ? repositoryFullName.trim()
+    : "未记录仓库"
+}
+
 export function buildAutomationProjectOutcomeChartData(
   projects: AutomationRunProject[],
   projectsTotal: number,

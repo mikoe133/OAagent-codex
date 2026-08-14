@@ -41,6 +41,7 @@ import {
   cancelAutomationRun,
 } from "@/lib/automation-api"
 import {
+  automationInteractionRepositoryFullName,
   buildAutomationProjectOutcomeChartData,
   projectOutcomeForDisplay,
 } from "@/lib/automation-run-presentation"
@@ -248,7 +249,9 @@ export function AutomationRunDetailDialog({
                     <summary className="cursor-pointer list-none">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <p className="font-medium">{interaction.provider}/{interaction.model}</p>
+                          <p className="font-medium">
+                            {automationInteractionRepositoryFullName(interaction)} · {interaction.provider}/{interaction.model}
+                          </p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {interaction.input_tokens ?? 0} 输入 Token · {interaction.output_tokens ?? 0} 输出 Token · {formatDuration(interaction.latency_ms)}
                           </p>

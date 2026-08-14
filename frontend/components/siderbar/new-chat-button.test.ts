@@ -381,6 +381,7 @@ test("loads full run audit and supports permission fallback and cancellation", (
   assert.match(automatedTasksSource, /automation:audit/)
   assert.match(runDetailSource, /data-slot="automation-run-detail-dialog"/)
   assert.match(runDetailSource, /AI 对话与调用审计/)
+  assert.match(runDetailSource, /automationInteractionRepositoryFullName\(interaction\)/)
   assert.match(runDetailSource, /system_prompt_snapshot/)
   assert.match(runDetailSource, /request_payload_sanitized/)
   assert.match(runDetailSource, /cancelAutomationRun\(run\.id\)/)

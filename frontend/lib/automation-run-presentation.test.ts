@@ -1,14 +1,38 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import type { AutomationRun, AutomationRunProject } from "./automation-api"
+import type { AutomationAiInteraction, AutomationRun, AutomationRunProject } from "./automation-api"
 import {
+  automationInteractionRepositoryFullName,
   buildAutomationProjectOutcomeChartData,
   hasActiveAutomationRuns,
   hasPollableAutomationRuns,
   resolveAutomationRunReply,
   shouldRefreshAutomationRunDetail,
 } from "./automation-run-presentation"
+
+test("reads the repository full name used by an AI interaction", () => {
+  assert.equal(
+    automationInteractionRepositoryFullName(interaction({
+      request_payload_sanitized: {
+        repository_full_name: "  mikoe133/oaagent-codex  ",
+      },
+    })),
+    "mikoe133/oaagent-codex",
+  )
+  assert.equal(
+    automationInteractionRepositoryFullName(interaction({
+      request_payload_sanitized: { repository_full_name: 42 },
+    })),
+    "未记录仓库",
+  )
+  assert.equal(
+    automationInteractionRepositoryFullName(interaction({
+      request_payload_sanitized: null,
+    })),
+    "未记录仓库",
+  )
+})
 
 test("aggregates project outcome tags and accounts for unloaded project details", () => {
   const data = buildAutomationProjectOutcomeChartData([
@@ -181,6 +205,32 @@ function project(overrides: Partial<AutomationRunProject>): AutomationRunProject
     duration_ms: 100,
     created_at: "2026-08-04T00:00:00.000Z",
     updated_at: "2026-08-04T00:00:00.000Z",
+    ...overrides,
+  }
+}
+
+function interaction(
+  overrides: Partial<AutomationAiInteraction>,
+): AutomationAiInteraction {
+  return {
+    id: 1,
+    run_id: "run-1",
+    run_project_id: 2,
+    interaction_key: "project-2-summary",
+    provider: "nexttoken",
+    model: "gpt-5.6-terra",
+    model_catalog_version: "catalog-v1",
+    prompt_version: "v1",
+    fallback_used: false,
+    upstream_request_id: null,
+    input_tokens: 10,
+    output_tokens: 5,
+    latency_ms: 100,
+    status: "succeeded",
+    error_code: null,
+    error_summary: null,
+    purged_at: null,
+    created_at: "2026-07-31T12:00:00.000Z",
     ...overrides,
   }
 }
