@@ -180,7 +180,33 @@ HTTP `202` 不表示 GitHub 读取或 AI 总结已经完成。`reused=false` 表
 - 全量 Run 与任意单项目 Run 互斥；等待期间保持 `pending`；
 - 定时自动运行属于全量 Run，和接口创建的 Run 共用上述队列。
 
-## 4. 查询运行详情
+## 4. 按项目查询活动运行
+
+OA 页面地址：
+
+```http
+GET /api/automation/runs?job_id=1&project_id=64&active_only=true&include_full_scope=true&page=1&size=20
+```
+
+Node 原始地址：
+
+```http
+GET /automation-job-runs?job_id=1&project_id=64&active_only=true&include_full_scope=true&page=1&size=20
+```
+
+新增过滤参数：
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `project_id` | integer | - | 只返回会影响指定项目的 Run |
+| `active_only` | boolean | `false` | 只返回 `pending`、`claimed`、`running` |
+| `include_full_scope` | boolean | `true` | 查询项目时是否包含未指定项目的全量 Run |
+
+`active_only` 与已有 `status` 同时传入时按交集过滤。`include_full_scope=false`
+只返回 `execution_parameters.project_id` 与查询值相同的定向 Run。该查询用于展示、
+轮询和取消；调用方不能用“先查再创建”防重，创建时仍以 `reused` 的原子结果为准。
+
+## 5. 查询运行详情
 
 OA 页面地址：
 
@@ -194,7 +220,7 @@ Node 原始地址：
 GET /automation-job-runs/{run_id}?include=projects,ai_interactions,attempts
 ```
 
-### 4.1 `include` 枚举
+### 5.1 `include` 枚举
 
 多个值使用英文逗号分隔：
 
@@ -206,7 +232,7 @@ GET /automation-job-runs/{run_id}?include=projects,ai_interactions,attempts
 
 不支持的值返回 HTTP `422 invalid_include`。
 
-### 4.2 运行详情示例
+### 5.2 运行详情示例
 
 ```json
 {
@@ -243,7 +269,7 @@ GET /automation-job-runs/{run_id}?include=projects,ai_interactions,attempts
 
 `execution_parameters` 是本次运行快照。任务后续修改不会改变该值；自动重试也会继承相同的 `project_id` 和 `summary_scope`。
 
-## 5. 运行状态枚举
+## 6. 运行状态枚举
 
 | 状态 | 是否终态 | 说明 |
 | --- | --- | --- |
@@ -259,7 +285,7 @@ GET /automation-job-runs/{run_id}?include=projects,ai_interactions,attempts
 
 页面应仅在 `pending`、`claimed`、`running` 状态下继续轮询。
 
-## 6. 项目结果枚举
+## 7. 项目结果枚举
 
 查询详情并包含 `projects` 时，每个项目的 `outcome` 可能为：
 
@@ -292,7 +318,7 @@ GET /automation-job-runs/{run_id}?include=projects,ai_interactions,attempts
 }
 ```
 
-## 7. 查询 Trace
+## 8. 查询 Trace
 
 OA 页面地址：
 
@@ -348,7 +374,7 @@ failed
 cancelled
 ```
 
-## 8. 取消运行
+## 9. 取消运行
 
 OA 页面地址：
 
@@ -377,7 +403,7 @@ await fetch(`/api/automation/runs/${encodeURIComponent(runId)}/cancel`, {
 - `claimed`、`running`：写入取消请求，Worker 在安全检查点停止；
 - 已进入终态：返回 HTTP `409 invalid_run_transition`。
 
-## 9. 错误响应
+## 10. 错误响应
 
 统一结构示例：
 
@@ -393,7 +419,7 @@ await fetch(`/api/automation/runs/${encodeURIComponent(runId)}/cancel`, {
 }
 ```
 
-### 9.1 创建运行常见错误
+### 10.1 创建运行常见错误
 
 | HTTP | `data.error_code` | 说明 |
 | --- | --- | --- |
@@ -410,7 +436,7 @@ await fetch(`/api/automation/runs/${encodeURIComponent(runId)}/cancel`, {
 
 字段校验错误的 `error_code` 当前取第一条校验消息，调用方不要把该文案视为长期稳定枚举；应以 HTTP `422`、`success=false` 和 `details` 判断。
 
-### 9.2 异步运行错误
+### 10.2 异步运行错误
 
 接口返回 `202` 后仍可能在 Worker 阶段失败。调用方需要查询运行详情中的：
 
@@ -443,7 +469,7 @@ retry_recommended
 }
 ```
 
-## 10. 重试与覆盖规则
+## 11. 重试与覆盖规则
 
 - 仅 AI 总结失败且 `retry_recommended=true` 时创建自动重试；
 - GitHub `404`、错误仓库地址、指定项目不存在等配置问题不自动重试；
@@ -452,7 +478,7 @@ retry_recommended
 - 同一项目同一天已有总结时，手动运行允许覆盖；
 - 自动重试采用受管写入规则，不覆盖无法确认归属的人工修改。
 
-## 11. 前端推荐流程
+## 12. 前端推荐流程
 
 1. 使用 `sessionid` 创建手动运行。
 2. 保存响应中的 `run_id`。

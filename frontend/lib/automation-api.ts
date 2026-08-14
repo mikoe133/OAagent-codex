@@ -291,6 +291,9 @@ export type AutomationRunFilters = {
   size?: number
   jobId?: number
   tagId?: number
+  projectId?: number
+  activeOnly?: boolean
+  includeFullScope?: boolean
   status?: AutomationRunStatus
   triggerSource?: AutomationRun["trigger_source"]
   modelProvider?: string
@@ -482,6 +485,9 @@ export function listAutomationRuns(
   })
   if (normalizedFilters.jobId !== undefined) query.set("job_id", String(normalizedFilters.jobId))
   if (normalizedFilters.tagId !== undefined) query.set("tag_id", String(normalizedFilters.tagId))
+  if (normalizedFilters.projectId !== undefined) query.set("project_id", String(normalizedFilters.projectId))
+  if (normalizedFilters.activeOnly !== undefined) query.set("active_only", String(normalizedFilters.activeOnly))
+  if (normalizedFilters.includeFullScope !== undefined) query.set("include_full_scope", String(normalizedFilters.includeFullScope))
   if (normalizedFilters.status) query.set("status", normalizedFilters.status)
   if (normalizedFilters.triggerSource) query.set("trigger_source", normalizedFilters.triggerSource)
   if (normalizedFilters.modelProvider) query.set("model_provider", normalizedFilters.modelProvider)
