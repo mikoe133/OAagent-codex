@@ -142,14 +142,19 @@ POST /api/automation/jobs/{job_id}/runs
 在创建前或页面刷新时查询指定项目是否已有运行：
 
 ```http
-GET /api/automation/runs?project_id=123&active_only=true&include_full_scope=true&page=1&size=20
+GET /api/automation/runs?job_id=1&project_id=123&active_only=true&include_full_scope=true&page=1&size=20
 ```
+
+`job_id` 和 `project_id` 同时传入时按交集过滤。本流程应传入已按
+`job_key` 获取的 `job_id`，避免把同一项目下其他自动任务的活动运行误判为当前任务。
+通用运行列表查询仍可省略 `job_id`，以保留跨任务查询能力。
 
 | 查询参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
+| `job_id` | integer | 否 | 自动任务 ID。通用运行列表可省略；查询指定任务的项目活动运行时建议传入。 |
 | `project_id` | integer | 是 | OA 项目 ID。 |
 | `active_only` | boolean | 否 | `true` 时只返回 `pending`、`claimed`、`running`。 |
-| `include_full_scope` | boolean | 否 | `true` 时也返回可能处理该项目的全量运行。建议传 `true`。 |
+| `include_full_scope` | boolean | 否 | `true` 时也返回同一任务下可能处理该项目的全量运行。建议传 `true`。 |
 | `page` | integer | 否 | 页码，从 1 开始。 |
 | `size` | integer | 否 | 每页数量。 |
 
@@ -257,13 +262,20 @@ GET /api/automation/runs/{run_id}?include=projects
 }
 ```
 
-运行字段：
+### 6.1 运行详情示例与字段说明
+
+`data` 中的字段分为运行级状态和项目级结果两部分。运行尚未结束时，计数和
+`projects` 可能仍在变化；调用方应先根据 `data.status` 判断是否进入终态，再读取最终结果。
+
+运行级字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `data.id` | string(UUID) | 运行 ID。 |
 | `data.status` | string | 运行状态。只有终态时才能确定最终结果。 |
 | `data.execution_parameters` | object | 本次实际执行范围，字段含义同活动运行接口。 |
+| `data.execution_parameters.project_id` | integer / null | 指定项目 ID；为空或不存在表示本次运行按任务范围处理项目。 |
+| `data.execution_parameters.summary_scope` | string / omitted | 本次运行显式使用的总结范围；省略时由任务配置解析实际范围。 |
 | `data.attempt` | integer | 当前是第几次尝试。 |
 | `data.projects_total` | integer | 本次纳入处理的项目数。 |
 | `data.projects_succeeded` | integer | 成功完成处理的项目数，包括正常的“无 Commit”结果。 |
@@ -433,7 +445,7 @@ POST /api/automation/runs/{run_id}/cancel
 ## 12. OA 推荐调用流程
 
 1. OA 启动时按 `job_key` 获取并缓存 `job_id`。
-2. 页面进入项目时查询该项目的活动运行。
+2. 页面进入项目时携带 `job_id` 和 `project_id` 查询该任务的活动运行。
 3. 没有活动运行时调用创建接口；有活动运行时直接复用它的 `id`。
 4. 每 2 至 5 秒查询运行详情；需要进度时同时查询 Trace。
 5. 进入终态后读取 `projects[0].outcome` 和 `generated_summary`。
