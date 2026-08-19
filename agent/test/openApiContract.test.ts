@@ -54,8 +54,12 @@ describe("resolveOpenApiContract", () => {
     });
 
     assert.equal(resolved.source, "local");
-    assert.equal(resolved.path, fixture.fallbackPath);
+    assert.notEqual(resolved.path, fixture.fallbackPath);
     assert.deepEqual(resolved.document, fixture.localContract);
+    assert.deepEqual(
+      JSON.parse(await readFile(resolved.path, "utf8")),
+      resolved.document,
+    );
   });
 
   it("uses the local contract when the remote response is not successful", async () => {

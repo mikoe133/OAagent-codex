@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../../config/config.js";
+import { filterChatOpenApiDocument } from "./openApiChatPolicy.js";
 import {
   resolveOpenApiIndex,
   type OpenApiOperationIndex,
@@ -27,9 +28,11 @@ export async function resolveOpenApiContract(
   fetchImpl: OpenApiFetch = fetch,
 ): Promise<ResolvedOpenApiContract> {
   try {
-    const document = await fetchRemoteContract(config.openapiUrl, fetchImpl);
+    const document = filterChatOpenApiDocument(
+      await fetchRemoteContract(config.openapiUrl, fetchImpl),
+    );
     const [contractPath, index] = await Promise.all([
-      materializeRemoteContract(config.projectRoot, document),
+      materializeContract(config.projectRoot, document),
       resolveOpenApiIndex(config.projectRoot, document),
     ]);
     return {
@@ -39,14 +42,20 @@ export async function resolveOpenApiContract(
       source: "remote",
     };
   } catch (error) {
-    const document = parseOpenApiDocument(
-      await readFile(config.openapiPath, "utf8"),
-      `本地 OpenAPI 文件 ${config.openapiPath}`,
+    const document = filterChatOpenApiDocument(
+      parseOpenApiDocument(
+        await readFile(config.openapiPath, "utf8"),
+        `本地 OpenAPI 文件 ${config.openapiPath}`,
+      ),
     );
+    const [contractPath, index] = await Promise.all([
+      materializeContract(config.projectRoot, document),
+      resolveOpenApiIndex(config.projectRoot, document),
+    ]);
     return {
       document,
-      index: await resolveOpenApiIndex(config.projectRoot, document),
-      path: config.openapiPath,
+      index,
+      path: contractPath,
       source: "local",
       fallbackReason: error instanceof Error ? error.message : String(error),
     };
@@ -74,7 +83,7 @@ async function fetchRemoteContract(
   }
 }
 
-async function materializeRemoteContract(
+async function materializeContract(
   projectRoot: string,
   document: unknown,
 ): Promise<string> {

@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { AppConfig } from "../src/config/config.js";
 import { callOaApiTool } from "../src/infrastructure/oa/oaApiTool.js";
+import { isChatOpenApiOperationAllowed } from "../src/infrastructure/oa/openApiChatPolicy.js";
 import { resolveOpenApiContract } from "../src/infrastructure/oa/openApiContract.js";
 
 const temporaryDirectories: string[] = [];
@@ -18,6 +19,16 @@ afterEach(async () => {
 });
 
 describe("chat OpenAPI safety", () => {
+  it("does not hide an ordinary operation for an incidental admin substring", () => {
+    assert.equal(
+      isChatOpenApiOperationAllowed("/domains", {
+        operationId: "domain_info_get",
+        tags: ["nonadmin"],
+      }),
+      true,
+    );
+  });
+
   it("materializes and indexes a contract without administrator operations", async () => {
     const fixture = await createFixture();
     const resolved = await resolveOpenApiContract(
@@ -36,7 +47,9 @@ describe("chat OpenAPI safety", () => {
       "/user/user-list",
     ]);
     assert.equal("delete" in document.paths["/mixed"]!, false);
+    assert.deepEqual(document.paths["/mixed"]!.parameters, []);
     assert.deepEqual(materialized, document);
+    assert.equal("/admin/user-list" in fixture.contract.paths, true);
     assert.deepEqual(
       resolved.index.operations.map((operation) => operation.operationId).sort(),
       ["mixed_read_get", "user_info_user_user_list_get"],
@@ -86,6 +99,11 @@ describe("chat OpenAPI safety", () => {
         { operationId: "staff_directory_get", query: {} },
         "user-session-token",
       );
+      const operationIdAdmin = await callOaApiTool(
+        fixture.config,
+        { operationId: "role_admin_list_get", query: {} },
+        "user-session-token",
+      );
       const allowed = await callOaApiTool(
         fixture.config,
         { operationId: "user_info_user_user_list_get", query: {} },
@@ -98,6 +116,8 @@ describe("chat OpenAPI safety", () => {
       assert.equal(byMethodAndPath.error?.code, "operation_not_found");
       assert.equal(taggedAdmin.ok, false);
       assert.equal(taggedAdmin.error?.code, "operation_not_found");
+      assert.equal(operationIdAdmin.ok, false);
+      assert.equal(operationIdAdmin.error?.code, "operation_not_found");
       assert.equal(allowed.ok, true);
       assert.equal(oaRequestCount, 1);
     } finally {
@@ -156,6 +176,13 @@ function createContract() {
         get: {
           operationId: "staff_directory_get",
           tags: ["admin"],
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      "/security/roles": {
+        get: {
+          operationId: "role_admin_list_get",
+          tags: ["security"],
           responses: { "200": { description: "ok" } },
         },
       },
