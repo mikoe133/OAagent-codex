@@ -31,4 +31,29 @@ describe("task reasoning policy", () => {
       "high",
     );
   });
+
+  it("maps unsupported GLM 5.3 reasoning efforts to high", () => {
+    const config = {
+      model: "z-ai/glm-5.3",
+      oaApiBaseUrl: null,
+      projectRoot: "/tmp/agent",
+    } as AppConfig;
+
+    assert.equal(
+      createThreadOptions(config, "z-ai/glm-5.3", "medium").modelReasoningEffort,
+      "high",
+    );
+    assert.equal(
+      createThreadOptions(config, "z-ai/glm-5.3", "minimal").modelReasoningEffort,
+      "high",
+    );
+    assert.equal(
+      createThreadOptions(config, "z-ai/glm-5.3", "xhigh").modelReasoningEffort,
+      "high",
+    );
+    assert.equal(
+      createThreadOptions(config, "z-ai/glm-5.3", "low").modelReasoningEffort,
+      "low",
+    );
+  });
 });

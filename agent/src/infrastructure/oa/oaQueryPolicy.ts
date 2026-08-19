@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import type { StoredOaResponse } from "./oaResponseNavigator.js";
+
 export type OaQueryMode = "single_step" | "multi_step" | "unknown";
 
 export type OaQueryPolicy = {
@@ -7,6 +10,9 @@ export type OaQueryPolicy = {
 
 type OaToolResultLike = {
   ok: boolean;
+  coverage?: {
+    status?: string;
+  };
   warnings?: string[];
   data?: unknown;
   error?: {
@@ -19,6 +25,8 @@ type OaTurnState = {
   policy: OaQueryPolicy;
   callCount: number;
   upgraded: boolean;
+  requestResults: Map<string, Promise<unknown>>;
+  responses: Map<string, StoredOaResponse>;
 };
 
 const WRITE_PATTERN =
@@ -87,6 +95,8 @@ export function beginOaTurn(sessionId: string, policy: OaQueryPolicy): void {
     policy,
     callCount: 0,
     upgraded: false,
+    requestResults: new Map(),
+    responses: new Map(),
   });
 }
 
@@ -98,6 +108,52 @@ export function getActiveOaQueryPolicy(
   sessionId: string | null | undefined,
 ): OaQueryPolicy | null {
   return sessionId ? turnStates.get(sessionId)?.policy ?? null : null;
+}
+
+export function getCachedOaApiResult(
+  sessionId: string | null | undefined,
+  requestKey: string,
+): Promise<unknown> | undefined {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  return state?.requestResults.get(requestKey);
+}
+
+export function cacheOaApiResult(
+  sessionId: string | null | undefined,
+  requestKey: string,
+  result: Promise<unknown>,
+): void {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  state?.requestResults.set(requestKey, result);
+}
+
+export function clearCachedOaApiResult(
+  sessionId: string | null | undefined,
+  requestKey: string,
+): void {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  state?.requestResults.delete(requestKey);
+}
+
+export function storeOaResponse(
+  sessionId: string | null | undefined,
+  response: StoredOaResponse,
+): string | null {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  if (!state) {
+    return null;
+  }
+  const responseId = `oa_resp_${randomUUID()}`;
+  state.responses.set(responseId, response);
+  return responseId;
+}
+
+export function getStoredOaResponse(
+  sessionId: string | null | undefined,
+  responseId: string,
+): StoredOaResponse | null {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  return state?.responses.get(responseId) ?? null;
 }
 
 export function reserveOaApiCall(sessionId: string | null | undefined): {
@@ -144,6 +200,12 @@ export function recordOaApiCallResult(
 }
 
 export function requiresAdditionalOaCall(result: OaToolResultLike): boolean {
+  if (
+    result.coverage?.status === "partial" ||
+    result.coverage?.status === "unknown"
+  ) {
+    return true;
+  }
   if (
     result.warnings?.some((warning) =>
       /截断|分页|继续查询|更多数据|超过\s*\d+\s*项/i.test(warning),

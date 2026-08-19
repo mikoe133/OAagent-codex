@@ -5,7 +5,10 @@ import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { buildRuntimeContext } from "../src/application/runCodexAgent.js";
 import type { AppConfig } from "../src/config/config.js";
-import { resolveOpenApiContract } from "../src/infrastructure/oa/openApiContract.js";
+import {
+  OPENAPI_CONTRACT_CACHE_TTL_MS,
+  resolveOpenApiContract,
+} from "../src/infrastructure/oa/openApiContract.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -18,6 +21,32 @@ afterEach(async () => {
 });
 
 describe("resolveOpenApiContract", () => {
+  it("caches a resolved contract for the configured thirty-minute window", async () => {
+    const fixture = await createFixture();
+    let now = 1_000;
+    let remoteFetches = 0;
+    const fetchImpl = async () => {
+      remoteFetches += 1;
+      return Response.json(createContract(`cached_operation_${remoteFetches}`));
+    };
+
+    const first = await resolveOpenApiContract(fixture.config, fetchImpl, now);
+    now += OPENAPI_CONTRACT_CACHE_TTL_MS - 1;
+    const second = await resolveOpenApiContract(fixture.config, fetchImpl, now);
+    now += 1;
+    const refreshed = await resolveOpenApiContract(fixture.config, fetchImpl, now);
+
+    assert.equal(OPENAPI_CONTRACT_CACHE_TTL_MS, 30 * 60 * 1000);
+    assert.equal(second.document, first.document);
+    assert.equal(second.index.documentHash, first.index.documentHash);
+    assert.equal(remoteFetches, 2);
+    assert.notEqual(refreshed.document, first.document);
+    assert.equal(
+      refreshed.index.operations[0]?.operationId,
+      "cached_operation_2",
+    );
+  });
+
   it("uses and materializes the remote contract when it is available", async () => {
     const fixture = await createFixture();
     const remoteContract = createContract("remote_operation");
@@ -133,6 +162,11 @@ describe("buildRuntimeContext", () => {
     assert.match(runtimeContext, /候选接口.*未包含.*用户意图/);
     assert.match(runtimeContext, /候选以外的完整 OpenAPI/);
     assert.match(runtimeContext, /不得因候选接口未命中就直接断言接口不存在/);
+    assert.match(runtimeContext, /mode=inspect/);
+    assert.match(runtimeContext, /responseId/);
+    assert.match(runtimeContext, /find、filter、count、group_count 或 read/);
+    assert.match(runtimeContext, /coverage=complete/);
+    assert.match(runtimeContext, /partial 或 unknown.*不得断言不存在/);
     assert.doesNotMatch(runtimeContext, /先用 .*确认 operationId/);
     assert.doesNotMatch(runtimeContext, /grep|sed/);
   });

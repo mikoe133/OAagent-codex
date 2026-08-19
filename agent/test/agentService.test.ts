@@ -9,6 +9,7 @@ import type { AppConfig } from "../src/config/config.js";
 import {
   MODEL_CATALOG,
   decodeAutomationModelParameters,
+  getModelDisplayName,
   resolveAutomationModelSelection,
   resolveRequestedProvider,
   resolveRequestedModel,
@@ -27,7 +28,7 @@ describe("model provider selection", () => {
       "gpt-5.6-terra",
     ]);
     assert.deepEqual(MODEL_CATALOG.openrouter, [
-      "z-ai/glm-5.2",
+      "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
       "openai/gpt-5.5",
       "openai/gpt-5.4",
@@ -37,13 +38,21 @@ describe("model provider selection", () => {
   it("accepts a supported provider and model", () => {
     assert.equal(resolveRequestedProvider("openrouter", "nexttoken"), "openrouter");
     assert.equal(
-      resolveRequestedModel("openrouter", "z-ai/glm-5.2", "z-ai/glm-5.2"),
-      "z-ai/glm-5.2",
+      resolveRequestedModel("openrouter", "z-ai/glm-5.3", "z-ai/glm-5.3"),
+      "z-ai/glm-5.3",
     );
     assert.equal(
-      resolveRequestedModel("openrouter", "moonshotai/kimi-k3", "z-ai/glm-5.2"),
+      resolveRequestedModel("openrouter", "moonshotai/kimi-k3", "z-ai/glm-5.3"),
       "moonshotai/kimi-k3",
     );
+    assert.throws(
+      () => resolveRequestedModel("openrouter", "z-ai/glm-5.2", "z-ai/glm-5.3"),
+      /不支持模型/,
+    );
+  });
+
+  it("formats the GLM acronym in model catalogs", () => {
+    assert.equal(getModelDisplayName("z-ai/glm-5.3"), "GLM 5.3");
   });
 
   it("rejects unknown providers and cross-provider models", () => {
@@ -52,15 +61,15 @@ describe("model provider selection", () => {
       /不支持的模型提供商/,
     );
     assert.throws(
-      () => resolveRequestedModel("openrouter", "gpt-5.6-terra", "z-ai/glm-5.2"),
+      () => resolveRequestedModel("openrouter", "gpt-5.6-terra", "z-ai/glm-5.3"),
       /不支持模型/,
     );
     assert.throws(
-      () => resolveRequestedModel("openrouter", "openai/gpt-5.4-mini", "z-ai/glm-5.2"),
+      () => resolveRequestedModel("openrouter", "openai/gpt-5.4-mini", "z-ai/glm-5.3"),
       /不支持模型/,
     );
     assert.throws(
-      () => resolveRequestedModel("openrouter", "openai/gpt-5.4-nano", "z-ai/glm-5.2"),
+      () => resolveRequestedModel("openrouter", "openai/gpt-5.4-nano", "z-ai/glm-5.3"),
       /不支持模型/,
     );
   });
@@ -94,6 +103,24 @@ describe("model provider selection", () => {
     assert.throws(
       () => decodeAutomationModelParameters({ max_output_tokens: 100 }),
       /256-4096/,
+    );
+  });
+
+  it("normalizes GLM 5.3 automation reasoning parameters", () => {
+    assert.deepEqual(
+      resolveAutomationModelSelection(
+        {
+          modelProvider: "openrouter",
+          modelId: "z-ai/glm-5.3",
+          modelParameters: { reasoning_effort: "medium" },
+        },
+        { modelProvider: "nexttoken", modelId: "gpt-5.6-terra" },
+      ),
+      {
+        modelProvider: "openrouter",
+        modelId: "z-ai/glm-5.3",
+        modelParameters: { reasoning_effort: "high" },
+      },
     );
   });
 

@@ -11,7 +11,7 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "npm run dev -w agent --",
+    "dev": "PORT=3001 npm run dev -w frontend",
     "dev:agent": "npm run dev -w agent --",
     "dev:server": "npm run dev:server -w agent",
     "dev:frontend": "npm run dev -w frontend",

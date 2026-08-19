@@ -93,7 +93,7 @@ test("routes a project progress OpenRouter Agent through the HTTP/1.1 relay", as
     provider: "openrouter",
     apiBaseUrl: `http://127.0.0.1:${upstreamPort}/api/v1`,
     apiKey: "openrouter-secret",
-    model: "z-ai/glm-5.2",
+    model: "z-ai/glm-5.3",
     parameters: {},
   } satisfies ProjectProgressConfig["model"]);
   t.after(() => relay.close());

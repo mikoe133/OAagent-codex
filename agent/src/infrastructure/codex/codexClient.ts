@@ -5,7 +5,10 @@ import {
   type ThreadOptions,
 } from "@openai/codex-sdk";
 import type { AppConfig } from "../../config/config.js";
-import type { ModelProviderId } from "../../config/modelCatalog.js";
+import {
+  normalizeModelReasoningEffort,
+  type ModelProviderId,
+} from "../../config/modelCatalog.js";
 import { resolveCodexModelCatalogPath } from "./modelMetadataCatalog.js";
 
 /**
@@ -79,7 +82,10 @@ export function createThreadOptions(
     config.codexSandboxMode ?? (oaToolEnabled ? "workspace-write" : "read-only");
   return {
     model,
-    modelReasoningEffort,
+    modelReasoningEffort: normalizeModelReasoningEffort(
+      model,
+      modelReasoningEffort,
+    ),
     sandboxMode,
     workingDirectory: config.projectRoot,
     skipGitRepoCheck: true,

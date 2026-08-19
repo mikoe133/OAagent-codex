@@ -213,8 +213,8 @@ function normalizeModelId(value: string | undefined): string | undefined {
   if (value === "gpt5.6-terra") {
     return "gpt-5.6-terra";
   }
-  if (value === "glm5.2") {
-    return "z-ai/glm-5.2";
+  if (value === "glm5.3") {
+    return "z-ai/glm-5.3";
   }
   return value;
 }

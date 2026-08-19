@@ -86,6 +86,31 @@ describe("OpenAPI operation index", () => {
     assert.notEqual(candidates[0]?.permissionLevel, "admin");
   });
 
+  it("prefers person lookup before dependent skill endpoints for mixed person skill queries", async () => {
+    const contract = JSON.parse(
+      await readFile(new URL("../openapi/openapi.json", import.meta.url), "utf8"),
+    ) as unknown;
+    const candidates = selectOpenApiCandidates(
+      buildOpenApiIndex(contract),
+      "罗奇奇的信息和技能",
+    );
+    const operationIds = candidates.map((operation) => operation.operationId);
+
+    assert.equal(operationIds[0], "user_info_user_user_list_get");
+    assert.ok(
+      operationIds.includes("user_skill_list_user_user_skill_list_get"),
+      "expected candidates to include the user skill list after person lookup",
+    );
+    const skillCatalogIndex = operationIds.indexOf("skill_user_skills_get");
+    if (skillCatalogIndex >= 0) {
+      assert.ok(
+        operationIds.indexOf("user_skill_list_user_user_skill_list_get") <
+          skillCatalogIndex,
+        "expected assigned user skills to rank above the skill catalog",
+      );
+    }
+  });
+
   it("ranks the requested business resource above adjacent maintenance endpoints", () => {
     const index = buildOpenApiIndex(createContract());
     const statistics = selectOpenApiCandidates(

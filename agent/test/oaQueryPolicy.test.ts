@@ -90,6 +90,15 @@ describe("OA dynamic query policy", () => {
       data: { total: 2, items: [{ full_name: "另一位用户" }] },
     });
     assert.equal(reserveOaApiCall(paginated).allowed, true);
+
+    const unknownCoverage = startTurn("unknown-coverage", "赵敏资料");
+    assert.equal(reserveOaApiCall(unknownCoverage).allowed, true);
+    recordOaApiCallResult(unknownCoverage, {
+      ok: true,
+      coverage: { status: "unknown" },
+      data: [{ full_name: "另一位用户" }],
+    });
+    assert.equal(reserveOaApiCall(unknownCoverage).allowed, true);
   });
 
   it("upgrades when a dependent identifier is missing", () => {

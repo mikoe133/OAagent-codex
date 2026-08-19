@@ -1,10 +1,23 @@
 import type { AppConfig } from "../../config/config.js";
 import { resolveOpenApiContract } from "./openApiContract.js";
 import {
+  cacheOaApiResult,
+  clearCachedOaApiResult,
+  getCachedOaApiResult,
   getActiveOaQueryPolicy,
+  getStoredOaResponse,
   recordOaApiCallResult,
   reserveOaApiCall,
+  storeOaResponse,
 } from "./oaQueryPolicy.js";
+import {
+  canStoreProgressiveResponse,
+  inferOaResponseCoverage,
+  inspectOaResponse,
+  requiresProgressiveInspection,
+  runOaResponseAction,
+  type OaResponseCoverage,
+} from "./oaResponseNavigator.js";
 
 export type OaApiToolInput = {
   sessionId?: unknown;
@@ -15,6 +28,14 @@ export type OaApiToolInput = {
   query?: unknown;
   body?: unknown;
   confirmed?: unknown;
+  responseId?: unknown;
+  action?: unknown;
+  responsePath?: unknown;
+  conditions?: unknown;
+  fields?: unknown;
+  groupBy?: unknown;
+  offset?: unknown;
+  limit?: unknown;
 };
 
 export type OaApiToolResult = {
@@ -23,6 +44,8 @@ export type OaApiToolResult = {
   operationId?: string;
   method?: string;
   path?: string;
+  responseId?: string;
+  coverage?: OaResponseCoverage;
   warnings?: string[];
   data?: unknown;
   error?: {
@@ -61,6 +84,11 @@ export async function callOaApiTool(
       "oa_not_configured",
       "缺少 OA_API_BASE_URL 或 OA 登录态,无法调用 OA 后端。",
     );
+  }
+
+  const responseId = stringField(input.responseId);
+  if (responseId) {
+    return navigateStoredResponse(sessionId, responseId, input);
   }
 
   const { document: openapi } = await resolveOpenApiContract(config);
@@ -103,6 +131,17 @@ export async function callOaApiTool(
   }
 
   const normalizedQuery = normalizeQueryForTool(query);
+  const requestKey = buildOaRequestKey(
+    operation,
+    path.value,
+    normalizedQuery.value,
+    input.body,
+  );
+  const cachedResult = getCachedOaApiResult(sessionId, requestKey);
+  if (cachedResult !== undefined) {
+    return (await cachedResult) as OaApiToolResult;
+  }
+
   const reservation = reserveOaApiCall(sessionId);
   if (!reservation.allowed) {
     return toolError(
@@ -110,38 +149,177 @@ export async function callOaApiTool(
       "当前查询的首次结果完整,本 turn 不再执行额外 OA 查询。请直接基于已有结果回答。",
     );
   }
+  const resultPromise = executeOaRequest(
+    config,
+    operation,
+    path.value,
+    normalizedQuery.value,
+    normalizedQuery.warnings,
+    input.body,
+    sessionId,
+    sessionOaApiToken,
+  );
+  cacheOaApiResult(sessionId, requestKey, resultPromise);
+  try {
+    return await resultPromise;
+  } catch (error) {
+    clearCachedOaApiResult(sessionId, requestKey);
+    throw error;
+  }
+}
+
+async function executeOaRequest(
+  config: AppConfig,
+  operation: OpenApiOperation,
+  renderedPath: string,
+  query: Record<string, unknown>,
+  queryWarnings: string[],
+  body: unknown,
+  sessionId: string | null,
+  sessionOaApiToken: string,
+): Promise<OaApiToolResult> {
   const response = await requestOa(config, {
     method: operation.method.toUpperCase(),
-    path: path.value,
-    query: normalizedQuery.value,
-    body: input.body,
+    path: renderedPath,
+    query,
+    body,
     oaApiToken: sessionOaApiToken,
   });
   const exactPersonName = getActiveOaQueryPolicy(sessionId)?.exactPersonName;
   const focusedData = exactPersonName
     ? focusExactPersonResult(response.data, exactPersonName)
     : response.data;
+  const coverage = inferOaResponseCoverage(
+    focusedData,
+    operationDeclaresPagination(operation),
+  );
+  const progressive = (coverage.status === "partial" ||
+    requiresProgressiveInspection(focusedData)) &&
+    canStoreProgressiveResponse(focusedData);
+  const responseId = progressive
+    ? storeOaResponse(sessionId, {
+        operationId: operation.operationId,
+        method: operation.method.toUpperCase(),
+        path: operation.pathTemplate,
+        data: focusedData,
+        coverage,
+      })
+    : null;
+  if (responseId) {
+    const result: OaApiToolResult = {
+      ok: response.ok,
+      status: response.status,
+      operationId: operation.operationId,
+      method: operation.method.toUpperCase(),
+      path: operation.pathTemplate,
+      responseId,
+      coverage,
+      ...(queryWarnings.length > 0 ? { warnings: queryWarnings } : {}),
+      data: inspectOaResponse(focusedData),
+    };
+    recordOaApiCallResult(sessionId, result);
+    return result;
+  }
   const limitedData = limitToolOutput(focusedData);
   const warnings = [
-    ...normalizedQuery.warnings,
+    ...queryWarnings,
     ...(limitedData.truncated
       ? [
           `响应过大,已截断数组超过 ${MAX_TOOL_ARRAY_ITEMS} 项、对象超过 ${MAX_TOOL_OBJECT_KEYS} 个字段或字符串超过 ${MAX_TOOL_STRING_LENGTH} 字符的部分。需要更多数据时请缩小查询条件或分页继续查询。`,
         ]
       : []),
   ];
-
   const result: OaApiToolResult = {
     ok: response.ok,
     status: response.status,
     operationId: operation.operationId,
     method: operation.method.toUpperCase(),
     path: operation.pathTemplate,
+    coverage: limitedData.truncated
+      ? { status: "partial", reason: "inline_output_budget_exceeded" }
+      : coverage,
     ...(warnings.length > 0 ? { warnings } : {}),
     data: limitedData.value,
   };
   recordOaApiCallResult(sessionId, result);
   return result;
+}
+
+function navigateStoredResponse(
+  sessionId: string | null,
+  responseId: string,
+  input: OaApiToolInput,
+): OaApiToolResult {
+  if (!sessionId) {
+    return toolError(
+      "response_session_required",
+      "渐进式响应读取必须提供当前 sessionId。",
+    );
+  }
+  const stored = getStoredOaResponse(sessionId, responseId);
+  if (!stored) {
+    return toolError(
+      "response_not_found",
+      "responseId 不存在、已过期或不属于当前 turn。请重新调用原 OA 接口。",
+    );
+  }
+  const actionResult = runOaResponseAction(stored, input);
+  if (!actionResult.ok) {
+    return toolError(actionResult.code, actionResult.message, actionResult.details);
+  }
+  const limitedData = limitToolOutput(actionResult.data);
+  return {
+    ok: true,
+    operationId: stored.operationId,
+    method: stored.method,
+    path: stored.path,
+    responseId,
+    coverage: limitedData.truncated
+      ? { status: "partial", reason: "analysis_output_budget_exceeded" }
+      : actionResult.coverage,
+    ...(limitedData.truncated
+      ? { warnings: ["渐进式分析展示结果过大,已截断;请缩小 fields、conditions 或 read 范围。"] }
+      : {}),
+    data: limitedData.value,
+  };
+}
+
+function buildOaRequestKey(
+  operation: OpenApiOperation,
+  renderedPath: string,
+  query: Record<string, unknown>,
+  body: unknown,
+): string {
+  return JSON.stringify({
+    operationId: operation.operationId,
+    method: operation.method.toUpperCase(),
+    path: renderedPath,
+    query: canonicalizeQuery(query),
+    body: canonicalizeRequestValue(body),
+  });
+}
+
+function canonicalizeQuery(query: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.keys(query)
+      .sort()
+      .filter((key) => query[key] !== null && query[key] !== undefined)
+      .map((key) => [key, String(query[key])]),
+  );
+}
+
+function canonicalizeRequestValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeRequestValue(item));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalizeRequestValue(value[key])]),
+    );
+  }
+  return value;
 }
 
 function resolveOperation(
@@ -490,6 +668,18 @@ function applyConfiguredOaAlias(
 
 function isPaginationSizeKey(key: string): boolean {
   return /^(size|limit|pageSize|page_size|perPage|per_page)$/i.test(key);
+}
+
+function operationDeclaresPagination(operation: OpenApiOperation): boolean {
+  const parameters = Array.isArray(operation.operation.parameters)
+    ? operation.operation.parameters
+    : [];
+  return parameters.some(
+    (parameter) =>
+      isRecord(parameter) &&
+      stringField(parameter.in) === "query" &&
+      Boolean(stringField(parameter.name)?.match(/^(?:page|cursor|offset|size|limit|pageSize|page_size|perPage|per_page)$/i)),
+  );
 }
 
 function focusExactPersonResult(value: unknown, exactName: string): unknown {

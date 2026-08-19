@@ -9,6 +9,7 @@ import {
 } from "./openApiIndex.js";
 
 const OPENAPI_FETCH_TIMEOUT_MS = 5_000;
+export const OPENAPI_CONTRACT_CACHE_TTL_MS = 30 * 60 * 1000;
 
 export type ResolvedOpenApiContract = {
   document: unknown;
@@ -23,9 +24,48 @@ type OpenApiFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+type OpenApiContractCacheEntry = {
+  expiresAt: number;
+  promise: Promise<ResolvedOpenApiContract>;
+};
+
+const resolvedContractCache = new Map<string, OpenApiContractCacheEntry>();
+
 export async function resolveOpenApiContract(
   config: AppConfig,
   fetchImpl: OpenApiFetch = fetch,
+  now = Date.now(),
+): Promise<ResolvedOpenApiContract> {
+  const cacheKey = [
+    config.projectRoot,
+    config.openapiUrl,
+    config.openapiPath,
+  ].join("\u0000");
+  const cached = resolvedContractCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+  if (cached) {
+    resolvedContractCache.delete(cacheKey);
+  }
+
+  const promise = resolveOpenApiContractUncached(config, fetchImpl);
+  const entry: OpenApiContractCacheEntry = {
+    expiresAt: now + OPENAPI_CONTRACT_CACHE_TTL_MS,
+    promise,
+  };
+  resolvedContractCache.set(cacheKey, entry);
+  promise.catch(() => {
+    if (resolvedContractCache.get(cacheKey) === entry) {
+      resolvedContractCache.delete(cacheKey);
+    }
+  });
+  return promise;
+}
+
+async function resolveOpenApiContractUncached(
+  config: AppConfig,
+  fetchImpl: OpenApiFetch,
 ): Promise<ResolvedOpenApiContract> {
   try {
     const document = filterChatOpenApiDocument(

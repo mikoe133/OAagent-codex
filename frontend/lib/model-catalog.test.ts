@@ -13,7 +13,7 @@ import {
 
 test("defaults to OpenRouter while exposing both provider choices", () => {
   assert.equal(DEFAULT_MODEL_PROVIDER, "openrouter")
-  assert.equal(getDefaultModel(DEFAULT_MODEL_PROVIDER), "z-ai/glm-5.2")
+  assert.equal(getDefaultModel(DEFAULT_MODEL_PROVIDER), "z-ai/glm-5.3")
   assert.deepEqual(
     MODEL_PROVIDERS.map((provider) => provider.id),
     ["nexttoken", "openrouter"],
@@ -25,22 +25,23 @@ test("defaults to OpenRouter while exposing both provider choices", () => {
 
 test("keeps provider model lists isolated", () => {
   assert.equal(getDefaultModel("nexttoken"), "gpt-5.6-terra")
-  assert.equal(getDefaultModel("openrouter"), "z-ai/glm-5.2")
+  assert.equal(getDefaultModel("openrouter"), "z-ai/glm-5.3")
   assert.deepEqual(
     getModelsForProvider("openrouter").map((model) => model.id),
     [
-      "z-ai/glm-5.2",
+      "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
       "openai/gpt-5.6",
     ],
   )
-  assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.2"), true)
+  assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.3"), true)
+  assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.2"), false)
   assert.equal(isModelForProvider("openrouter", "moonshotai/kimi-k3"), true)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.5"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4-mini"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4-nano"), false)
-  assert.equal(isModelForProvider("nexttoken", "z-ai/glm-5.2"), false)
+  assert.equal(isModelForProvider("nexttoken", "z-ai/glm-5.3"), false)
 })
 
 test("marks OpenRouter GPT-5.6 as temporarily unavailable", () => {
@@ -64,8 +65,8 @@ test("labels Kimi K3 in the OpenRouter model list", () => {
   assert.equal(kimiModel?.name, "Kimi K3")
 })
 
-test("uses the official Z.ai icon for GLM-5.2", () => {
-  const glmModel = getModelsForProvider("openrouter").find((model) => model.id === "z-ai/glm-5.2")
+test("uses the official Z.ai icon for GLM-5.3", () => {
+  const glmModel = getModelsForProvider("openrouter").find((model) => model.id === "z-ai/glm-5.3")
 
   assert.equal(glmModel?.icon, "/images/z-ai.svg")
 })

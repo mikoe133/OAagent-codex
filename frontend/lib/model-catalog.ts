@@ -22,7 +22,7 @@ export const MODELS_BY_PROVIDER = {
     { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", icon: "/images/gpt.png" },
   ],
   openrouter: [
-    { id: "z-ai/glm-5.2", name: "GLM-5.2", icon: "/images/z-ai.svg" },
+    { id: "z-ai/glm-5.3", name: "GLM-5.3", icon: "/images/z-ai.svg" },
     { id: "moonshotai/kimi-k3", name: "Kimi K3", icon: "/images/moonshot-ai.svg" },
     { id: "openai/gpt-5.6", name: "GPT-5.6", icon: "/images/gpt.png", disabled: true },
   ],
@@ -36,7 +36,7 @@ export const DEFAULT_MODEL_PROVIDER: ModelProvider = "openrouter"
 
 const DEFAULT_MODELS = {
   nexttoken: "gpt-5.6-terra",
-  openrouter: "z-ai/glm-5.2",
+  openrouter: "z-ai/glm-5.3",
 } as const satisfies Record<ModelProvider, AIModel>
 
 export function isModelProvider(value: unknown): value is ModelProvider {
