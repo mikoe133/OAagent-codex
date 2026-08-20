@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import {
   createServer,
   request as httpRequest,
+  type ClientRequest,
   type IncomingHttpHeaders,
   type IncomingMessage,
   type OutgoingHttpHeaders,
@@ -114,48 +115,71 @@ function proxyModelRequest(
   const upstreamUrl = new URL(
     `${provider.baseUrl.replace(/\/+$/, "")}${suffix}${requestUrl.search}`,
   );
-  const requestUpstream =
-    upstreamUrl.protocol === "https:" ? httpsRequest : httpRequest;
-  const upstreamRequest = requestUpstream(
-    upstreamUrl,
-    {
-      method: request.method,
-      headers: copyHeaders(request.headers),
-      ...(upstreamUrl.protocol === "https:"
-        ? { ALPNProtocols: ["http/1.1"] }
-        : {}),
-    },
-    (upstreamResponse) => {
-      response.writeHead(
-        upstreamResponse.statusCode ?? 502,
-        upstreamResponse.statusMessage,
-        {
-          ...copyHeaders(upstreamResponse.headers),
-          "x-accel-buffering": "no",
-        },
-      );
-      upstreamResponse.on("error", (error) => failRelay(response, error));
-      upstreamResponse.pipe(response);
-    },
-  );
-
-  upstreamRequest.on("socket", (socket) => {
-    socket.setKeepAlive(true, 15_000);
-    socket.setNoDelay(true);
-  });
-  upstreamRequest.on("error", (error) => failRelay(response, error));
-
+  let upstreamRequest: ClientRequest | null = null;
   let responseFinished = false;
   response.on("finish", () => {
     responseFinished = true;
   });
   response.on("close", () => {
-    if (!responseFinished) {
+    if (!responseFinished && upstreamRequest) {
       upstreamRequest.destroy();
     }
   });
-  request.on("aborted", () => upstreamRequest.destroy());
-  request.pipe(upstreamRequest);
+  let requestAborted = false;
+  request.on("aborted", () => {
+    requestAborted = true;
+    upstreamRequest?.destroy();
+  });
+
+  const startUpstream = (body: Buffer | null): void => {
+    if (requestAborted) {
+      return;
+    }
+    const requestUpstream =
+      upstreamUrl.protocol === "https:" ? httpsRequest : httpRequest;
+    const upstreamHeaders = copyHeaders(request.headers, body?.byteLength);
+    upstreamRequest = requestUpstream(
+      upstreamUrl,
+      {
+        method: request.method,
+        headers: upstreamHeaders,
+        ...(upstreamUrl.protocol === "https:"
+          ? { ALPNProtocols: ["http/1.1"] }
+          : {}),
+      },
+      (upstreamResponse) => {
+        response.writeHead(
+          upstreamResponse.statusCode ?? 502,
+          upstreamResponse.statusMessage,
+          {
+            ...copyHeaders(upstreamResponse.headers),
+            "x-accel-buffering": "no",
+          },
+        );
+        upstreamResponse.on("error", (error) => failRelay(response, error));
+        upstreamResponse.pipe(response);
+      },
+    );
+
+    upstreamRequest.on("socket", (socket) => {
+      socket.setKeepAlive(true, 15_000);
+      socket.setNoDelay(true);
+    });
+    upstreamRequest.on("error", (error) => failRelay(response, error));
+    if (body === null) {
+      request.pipe(upstreamRequest);
+    } else {
+      upstreamRequest.end(body);
+    }
+  };
+
+  if (providerId === "openrouter") {
+    collectRequestBody(request)
+      .then((body) => startUpstream(normalizeOpenRouterRequestBody(body)))
+      .catch((error: unknown) => failRelay(response, error));
+  } else {
+    startUpstream(null);
+  }
 }
 
 function credentialsMatch(
@@ -167,7 +191,10 @@ function credentialsMatch(
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-function copyHeaders(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
+function copyHeaders(
+  headers: IncomingHttpHeaders,
+  bodyLength?: number,
+): OutgoingHttpHeaders {
   const result: OutgoingHttpHeaders = {};
   for (const [name, value] of Object.entries(headers)) {
     if (
@@ -178,19 +205,55 @@ function copyHeaders(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
       result[name] = value;
     }
   }
+  if (bodyLength !== undefined) {
+    delete result["content-length"];
+    delete result["transfer-encoding"];
+    result["content-length"] = bodyLength;
+  }
   return result;
 }
 
-function failRelay(response: ServerResponse, error: Error): void {
+function collectRequestBody(request: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer | string) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    request.on("end", () => resolve(Buffer.concat(chunks)));
+    request.on("error", reject);
+  });
+}
+
+function normalizeOpenRouterRequestBody(body: Buffer): Buffer {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body.toString("utf8")) as unknown;
+  } catch {
+    return body;
+  }
+  if (!isRecord(payload) || !Array.isArray(payload.tools)) {
+    return body;
+  }
+  const tools = payload.tools.filter(
+    (tool) => !isRecord(tool) || tool.type !== "custom",
+  );
+  if (tools.length === payload.tools.length) {
+    return body;
+  }
+  return Buffer.from(JSON.stringify({ ...payload, tools }), "utf8");
+}
+
+function failRelay(response: ServerResponse, error: unknown): void {
   if (response.destroyed || response.writableEnded) {
     return;
   }
+  const message = error instanceof Error ? error.message : String(error);
   if (response.headersSent) {
-    response.destroy(error);
+    response.destroy(error instanceof Error ? error : new Error(message));
     return;
   }
   writeJson(response, 502, {
-    error: `model relay upstream request failed: ${error.message}`,
+    error: `model relay upstream request failed: ${message}`,
   });
 }
 
@@ -204,6 +267,10 @@ function writeJson(
     "cache-control": "no-store",
   });
   response.end(`${JSON.stringify(payload)}\n`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function listen(server: Server): Promise<void> {

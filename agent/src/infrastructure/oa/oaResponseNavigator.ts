@@ -55,7 +55,12 @@ type ParsedCondition = {
   value?: unknown;
 };
 
+type ParsedConditionExpression =
+  | { type: "condition"; condition: ParsedCondition }
+  | { type: "all" | "any"; conditions: ParsedConditionExpression[] };
+
 const MAX_PROGRESSIVE_RESPONSE_BYTES = 10 * 1024 * 1024;
+const MAX_INLINE_RESPONSE_BYTES = 24 * 1024;
 const PROGRESSIVE_ARRAY_ITEMS = 30;
 const PROGRESSIVE_OBJECT_KEYS = 80;
 const PROGRESSIVE_STRING_LENGTH = 6000;
@@ -66,7 +71,11 @@ const MAX_ACTION_RESULTS = 100;
 const DEFAULT_ACTION_RESULTS = 20;
 
 export function requiresProgressiveInspection(value: unknown): boolean {
-  return exceedsInlineBudget(value);
+  return (
+    exceedsInlineBudget(value) ||
+    exceedsCollectionBudget(value) ||
+    exceedsInlineByteBudget(value)
+  );
 }
 
 export function canStoreProgressiveResponse(value: unknown): boolean {
@@ -75,6 +84,56 @@ export function canStoreProgressiveResponse(value: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+function exceedsCollectionBudget(
+  value: unknown,
+  depth = 0,
+  seen = new Set<object>(),
+): boolean {
+  return countCollectionItems(value, depth, seen) > PROGRESSIVE_ARRAY_ITEMS;
+}
+
+function exceedsInlineByteBudget(value: unknown): boolean {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_INLINE_RESPONSE_BYTES;
+  } catch {
+    return true;
+  }
+}
+
+function countCollectionItems(
+  value: unknown,
+  depth = 0,
+  seen = new Set<object>(),
+): number {
+  if (depth > PROGRESSIVE_DEPTH || value === null || typeof value !== "object") {
+    return 0;
+  }
+  if (seen.has(value)) {
+    return 0;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    let count = value.length;
+    for (const item of value) {
+      count += countCollectionItems(item, depth + 1, seen);
+      if (count > PROGRESSIVE_ARRAY_ITEMS) {
+        break;
+      }
+    }
+    return count;
+  }
+
+  let count = 0;
+  for (const item of Object.values(value)) {
+    count += countCollectionItems(item, depth + 1, seen);
+    if (count > PROGRESSIVE_ARRAY_ITEMS) {
+      break;
+    }
+  }
+  return count;
 }
 
 export function inferOaResponseCoverage(
@@ -171,11 +230,11 @@ export function runOaResponseAction(
     return fields;
   }
   const matchingItems = resolved.value.filter((item) =>
-    conditions.value.every((condition) => matchesCondition(item, condition)),
+    matchesConditionExpression(item, conditions.value),
   );
 
   if (action === "find" || action === "filter") {
-    if (action === "find" && conditions.value.length === 0) {
+    if (action === "find" && countLeafConditions(conditions.value) === 0) {
       return {
         ok: false,
         code: "response_conditions_required",
@@ -183,7 +242,12 @@ export function runOaResponseAction(
       };
     }
     const limit = parseBoundedInteger(input.limit, DEFAULT_ACTION_RESULTS, 1, MAX_ACTION_RESULTS);
-    const items = matchingItems.slice(0, limit).map((item) => projectFields(item, fields.value));
+    const returnedItems = matchingItems.slice(0, limit);
+    const items = returnedItems.map((item) => projectFields(item, fields.value));
+    const matchedBy = returnedItems.map((item, itemIndex) => ({
+      itemIndex,
+      fields: matchedConditionFields(item, conditions.value),
+    }));
     return {
       ok: true,
       coverage: stored.coverage,
@@ -194,6 +258,7 @@ export function runOaResponseAction(
         matched: matchingItems.length,
         returned: items.length,
         items,
+        ...(countLeafConditions(conditions.value) > 0 ? { matchedBy } : {}),
       },
     };
   }
@@ -222,13 +287,16 @@ export function runOaResponseAction(
     }
     const counts = new Map<string, { value: unknown; count: number }>();
     for (const item of matchingItems) {
-      const value = readField(item, groupBy);
-      const key = stableValueKey(value);
-      const existing = counts.get(key);
-      if (existing) {
-        existing.count += 1;
-      } else {
-        counts.set(key, { value: value ?? null, count: 1 });
+      const groupedValues = readFieldValues(item, groupBy);
+      const values = groupedValues.length > 0 ? groupedValues : [undefined];
+      for (const value of values) {
+        const key = stableValueKey(value);
+        const existing = counts.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          counts.set(key, { value: value ?? null, count: 1 });
+        }
       }
     }
     const groups = [...counts.values()].sort(
@@ -461,14 +529,14 @@ function resolveResponsePath(
   if (path === "$" || path === "") {
     return { ok: true, value: root };
   }
-  if (!path.startsWith("$.") || !/^\$(?:\.[A-Za-z0-9_-]+|\[\d+\])+$/.test(path)) {
+  if (!path.startsWith("$.") || !/^\$(?:\.[^.[\]]+|\[\d+\])+$/u.test(path)) {
     return {
       ok: false,
       code: "invalid_response_path",
-      message: "responsePath 仅支持 $.field、$.nested.field 和数组下标 [0]。",
+      message: "responsePath 仅支持 $.field、$.nested.field 和数组下标 [0]，字段名可包含中文。",
     };
   }
-  const segments = [...path.matchAll(/\.([A-Za-z0-9_-]+)|\[(\d+)\]/g)].map(
+  const segments = [...path.matchAll(/\.([^.[]+)|\[(\d+)\]/gu)].map(
     (match) => match[1] ?? Number(match[2]),
   );
   let current = root;
@@ -498,9 +566,9 @@ function resolveResponsePath(
 
 function parseConditions(
   value: unknown,
-): { ok: true; value: ParsedCondition[] } | { ok: false; code: string; message: string } {
+): { ok: true; value: ParsedConditionExpression } | { ok: false; code: string; message: string } {
   if (value === undefined || value === null) {
-    return { ok: true, value: [] };
+    return { ok: true, value: { type: "all", conditions: [] } };
   }
   if (!isRecord(value)) {
     return {
@@ -509,8 +577,24 @@ function parseConditions(
       message: "conditions 必须是 JSON object。",
     };
   }
-  const conditions: ParsedCondition[] = [];
+  return parseConditionGroup(value, "all");
+}
+
+function parseConditionGroup(
+  value: Record<string, unknown>,
+  type: "all" | "any",
+): { ok: true; value: ParsedConditionExpression } | { ok: false; code: string; message: string } {
+  const conditions: ParsedConditionExpression[] = [];
   for (const [field, expected] of Object.entries(value)) {
+    if (isConditionGroupKey(field)) {
+      const groupType = conditionGroupType(field);
+      const groupItems = parseConditionGroupItems(expected, groupType);
+      if (!groupItems.ok) {
+        return groupItems;
+      }
+      conditions.push(...groupItems.value);
+      continue;
+    }
     if (!field || field.length > 200) {
       return {
         ok: false,
@@ -518,21 +602,68 @@ function parseConditions(
         message: "conditions 字段名无效。",
       };
     }
-    if (isRecord(expected) && typeof expected.operator === "string") {
-      const operator = expected.operator.toLowerCase();
-      if (!isConditionOperator(operator)) {
-        return {
-          ok: false,
-          code: "invalid_response_condition_operator",
-          message: `不支持 conditions.${field}.operator=${operator}。`,
-        };
-      }
-      conditions.push({ field, operator, ...(operator !== "exists" ? { value: expected.value } : {}) });
-    } else {
-      conditions.push({ field, operator: "eq", value: expected });
+    const condition = parseCondition(field, expected);
+    if (!condition.ok) {
+      return condition;
     }
+    conditions.push({ type: "condition", condition: condition.value });
   }
-  return { ok: true, value: conditions };
+  return { ok: true, value: { type, conditions } };
+}
+
+function parseConditionGroupItems(
+  value: unknown,
+  type: "all" | "any",
+): { ok: true; value: ParsedConditionExpression[] } | { ok: false; code: string; message: string } {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 20) {
+    return {
+      ok: false,
+      code: "invalid_response_conditions",
+      message: "$or/$and 条件必须是 1 到 20 项的 JSON object 数组。",
+    };
+  }
+  const expressions: ParsedConditionExpression[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      return {
+        ok: false,
+        code: "invalid_response_conditions",
+        message: "$or/$and 的每一项都必须是 JSON object。",
+      };
+    }
+    const parsed = parseConditionGroup(item, "all");
+    if (!parsed.ok) {
+      return parsed;
+    }
+    expressions.push(parsed.value);
+  }
+  return { ok: true, value: [{ type, conditions: expressions }] };
+}
+
+function parseCondition(
+  field: string,
+  expected: unknown,
+): { ok: true; value: ParsedCondition } | { ok: false; code: string; message: string } {
+  if (isRecord(expected) && typeof expected.operator === "string") {
+    const operator = expected.operator.toLowerCase();
+    if (!isConditionOperator(operator)) {
+      return {
+        ok: false,
+        code: "invalid_response_condition_operator",
+        message: `不支持 conditions.${field}.operator=${operator}。`,
+      };
+    }
+    return { ok: true, value: { field, operator, ...(operator !== "exists" ? { value: expected.value } : {}) } };
+  }
+  return { ok: true, value: { field, operator: "eq", value: expected } };
+}
+
+function isConditionGroupKey(field: string): boolean {
+  return /^(?:\$or|anyOf|\$and|allOf)$/i.test(field);
+}
+
+function conditionGroupType(field: string): "all" | "any" {
+  return /^(?:\$or|anyOf)$/i.test(field) ? "any" : "all";
 }
 
 function parseFields(
@@ -556,20 +687,62 @@ function parseFields(
 }
 
 function matchesCondition(item: unknown, condition: ParsedCondition): boolean {
-  const actual = readField(item, condition.field);
+  const actualValues = readFieldValues(item, condition.field);
   if (condition.operator === "exists") {
-    return actual !== undefined && actual !== null;
+    return actualValues.some((actual) => actual !== undefined && actual !== null);
   }
   if (condition.operator === "contains") {
-    if (Array.isArray(actual)) {
-      return actual.some((candidate) => valuesEqual(candidate, condition.value));
-    }
-    return normalizeComparable(actual).includes(normalizeComparable(condition.value));
+    return actualValues.some((actual) => valueContains(actual, condition.value));
   }
   if (condition.operator === "in") {
-    return Array.isArray(condition.value) && condition.value.some((candidate) => valuesEqual(actual, candidate));
+    const expectedValues = Array.isArray(condition.value) ? condition.value : null;
+    return expectedValues !== null && actualValues.some((actual) =>
+      expectedValues.some((candidate) => valueMatches(actual, candidate)),
+    );
   }
-  return valuesEqual(actual, condition.value);
+  return actualValues.some((actual) => valueMatches(actual, condition.value));
+}
+
+function matchesConditionExpression(
+  item: unknown,
+  expression: ParsedConditionExpression,
+): boolean {
+  if (expression.type === "condition") {
+    return matchesCondition(item, expression.condition);
+  }
+  if (expression.type === "any") {
+    return expression.conditions.some((condition) =>
+      matchesConditionExpression(item, condition),
+    );
+  }
+  return expression.conditions.every((condition) =>
+    matchesConditionExpression(item, condition),
+  );
+}
+
+function countLeafConditions(expression: ParsedConditionExpression): number {
+  if (expression.type === "condition") {
+    return 1;
+  }
+  return expression.conditions.reduce(
+    (count, condition) => count + countLeafConditions(condition),
+    0,
+  );
+}
+
+function matchedConditionFields(
+  item: unknown,
+  expression: ParsedConditionExpression,
+): string[] {
+  if (expression.type === "condition") {
+    return matchesCondition(item, expression.condition)
+      ? [expression.condition.field]
+      : [];
+  }
+  const fields = expression.conditions.flatMap((condition) =>
+    matchedConditionFields(item, condition),
+  );
+  return [...new Set(fields)];
 }
 
 function projectFields(item: unknown, fields: string[]): unknown {
@@ -580,14 +753,57 @@ function projectFields(item: unknown, fields: string[]): unknown {
 }
 
 function readField(value: unknown, field: string): unknown {
-  let current = value;
-  for (const segment of field.split(".")) {
-    if (!segment || !isRecord(current) || !(segment in current)) {
-      return undefined;
-    }
-    current = current[segment];
+  const values = readFieldValues(value, field);
+  if (values.length === 0) {
+    return undefined;
   }
-  return current;
+  return values.length === 1 ? values[0] : values;
+}
+
+function readFieldValues(value: unknown, field: string): unknown[] {
+  const segments = field.split(".");
+  return readFieldValuesAtPath(value, segments, 0);
+}
+
+function readFieldValuesAtPath(
+  current: unknown,
+  segments: string[],
+  index: number,
+): unknown[] {
+  if (index >= segments.length) {
+    return current === undefined ? [] : [current];
+  }
+  if (Array.isArray(current)) {
+    return current.flatMap((item) => readFieldValuesAtPath(item, segments, index));
+  }
+  if (!isRecord(current)) {
+    return [];
+  }
+  const segment = segments[index];
+  if (!segment || !(segment in current)) {
+    return [];
+  }
+  return readFieldValuesAtPath(current[segment], segments, index + 1);
+}
+
+function valueMatches(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(actual)) {
+    return actual.some((candidate) => valueMatches(candidate, expected));
+  }
+  if (isRecord(actual)) {
+    return Object.values(actual).some((candidate) => valueMatches(candidate, expected));
+  }
+  return valuesEqual(actual, expected);
+}
+
+function valueContains(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(actual)) {
+    return actual.some((candidate) => valueContains(candidate, expected));
+  }
+  if (isRecord(actual)) {
+    return Object.values(actual).some((candidate) => valueContains(candidate, expected));
+  }
+  return normalizeComparable(actual).includes(normalizeComparable(expected));
 }
 
 function valuesEqual(left: unknown, right: unknown): boolean {

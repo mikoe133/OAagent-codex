@@ -167,6 +167,10 @@ describe("buildRuntimeContext", () => {
     assert.match(runtimeContext, /find、filter、count、group_count 或 read/);
     assert.match(runtimeContext, /coverage=complete/);
     assert.match(runtimeContext, /partial 或 unknown.*不得断言不存在/);
+    assert.match(runtimeContext, /full_name.*username.*wx_name.*qq_name.*email.*alias/);
+    assert.match(runtimeContext, /身份字段.*精确命中.*有效身份命中/);
+    assert.match(runtimeContext, /当前问题所需信息.*立即结束工具调用/);
+    assert.match(runtimeContext, /不得扩展到.*薪资.*聊天.*文件/);
     assert.doesNotMatch(runtimeContext, /先用 .*确认 operationId/);
     assert.doesNotMatch(runtimeContext, /grep|sed/);
   });

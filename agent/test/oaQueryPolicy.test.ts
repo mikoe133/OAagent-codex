@@ -37,6 +37,21 @@ describe("OA dynamic query policy", () => {
     });
   });
 
+  it("classifies explicit Latin handles and emails as exact person lookups", () => {
+    assert.deepEqual(resolveOaQueryPolicy("Ryan 是谁"), {
+      mode: "single_step",
+      exactPersonName: "Ryan",
+    });
+    assert.deepEqual(resolveOaQueryPolicy("谁是 Bo Peng？"), {
+      mode: "single_step",
+      exactPersonName: "Bo Peng",
+    });
+    assert.deepEqual(resolveOaQueryPolicy("查询 ryan@example.test 的个人信息"), {
+      mode: "single_step",
+      exactPersonName: "ryan@example.test",
+    });
+  });
+
   it("keeps reports, lists, writes, and chained queries multi step", () => {
     for (const task of [
       "查看我的本周周报",
@@ -58,6 +73,7 @@ describe("OA dynamic query policy", () => {
     assert.equal(resolveOaQueryPolicy("获取用户信息").mode, "unknown");
     assert.equal(resolveOaQueryPolicy("查看项目情况").mode, "unknown");
     assert.equal(resolveOaQueryPolicy("查询他的个人信息").mode, "unknown");
+    assert.equal(resolveOaQueryPolicy("Ryan 有什么技能").mode, "unknown");
   });
 
   it("blocks a second call after a complete single-step result", () => {
@@ -125,6 +141,86 @@ describe("OA dynamic query policy", () => {
 
     assert.equal(reserveOaApiCall(sessionId).allowed, true);
     assert.equal(reserveOaApiCall(sessionId).allowed, true);
+  });
+
+  it("recovers from an irrelevant result and stops again after an exact identity match", () => {
+    const sessionId = startTurn("reconverge", "Ryan 是谁");
+
+    assert.equal(reserveOaApiCall(sessionId).allowed, true);
+    recordOaApiCallResult(sessionId, {
+      ok: true,
+      identityMatch: {
+        query: "Ryan",
+        status: "insufficient",
+        scannedCandidates: 0,
+        matched: 0,
+      },
+      data: [{ category: "产品", user_id_list: [1, 25] }],
+    });
+
+    assert.equal(reserveOaApiCall(sessionId).allowed, true);
+    recordOaApiCallResult(sessionId, {
+      ok: true,
+      identityMatch: {
+        query: "Ryan",
+        status: "matched",
+        scannedCandidates: 30,
+        matched: 1,
+        matchedBy: [{ itemIndex: 0, fields: ["username", "wx_name"] }],
+      },
+      data: {
+        user_id: 25,
+        username: "Ryan",
+        full_name: "罗鑫",
+        department: "产品部",
+        employee_title: "全栈",
+      },
+    });
+
+    assert.equal(reserveOaApiCall(sessionId).allowed, false);
+  });
+
+  it("does not treat a complete scoped non-match as directory-wide absence", () => {
+    const sessionId = startTurn("scoped-non-match", "Ryan 是谁");
+
+    assert.equal(reserveOaApiCall(sessionId).allowed, true);
+    recordOaApiCallResult(sessionId, {
+      ok: true,
+      coverage: { status: "complete" },
+      identityMatch: {
+        query: "Ryan",
+        status: "not_found",
+        scannedCandidates: 1,
+        matched: 0,
+      },
+      data: {
+        user_id: 1,
+        username: "Current User",
+        full_name: "当前用户",
+      },
+    });
+
+    assert.equal(reserveOaApiCall(sessionId).allowed, true);
+  });
+
+  it("bounds recovery attempts for a simple identity lookup", () => {
+    const sessionId = startTurn("bounded-recovery", "Ryan 是谁");
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      assert.equal(reserveOaApiCall(sessionId).allowed, true);
+      recordOaApiCallResult(sessionId, {
+        ok: true,
+        identityMatch: {
+          query: "Ryan",
+          status: "insufficient",
+          scannedCandidates: 0,
+          matched: 0,
+        },
+        data: { message: "该接口不包含人员身份记录" },
+      });
+    }
+
+    assert.equal(reserveOaApiCall(sessionId).allowed, false);
   });
 
   it("never hard-limits multi-step or unknown turns", () => {

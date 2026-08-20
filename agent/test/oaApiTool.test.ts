@@ -132,6 +132,134 @@ test("filters an exact person before truncation and preserves follow-up for unkn
   }
 });
 
+test("focuses an exact Latin username and stops unrelated OA calls", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-api-tool-latin-person-"));
+  const originalFetch = globalThis.fetch;
+  const contract = createContract();
+  const openapiPath = path.join(directory, "openapi.json");
+  const sessionId = "latin-person-lookup-session";
+  let oaRequestCount = 0;
+  const config = {
+    projectRoot: directory,
+    openapiPath,
+    openapiUrl: "https://oa.example.test/openapi.json",
+    oaApiBaseUrl: "https://oa.example.test",
+    oaAuthAlias: "default",
+    oaApiTokenHeader: "Cookie",
+    oaApiTokenPrefix: "sessionid=",
+    oaApiToolToken: "internal-tool-token",
+  } as AppConfig;
+  const users = Array.from({ length: 30 }, (_, index) => ({
+    user_id: index + 1,
+    username: index === 24 ? "Ryan" : `User ${index + 1}`,
+    full_name: index === 24 ? "罗鑫" : `测试用户${index + 1}`,
+    wx_name: index === 24 ? "Ryan" : "",
+    email: index === 24 ? "luoxin@example.test" : `user${index + 1}@example.test`,
+    department: index % 2 === 0 ? "产品部" : "研发部",
+    employee_title: index === 24 ? "全栈" : "工程师",
+    intro: "x".repeat(1000),
+  }));
+
+  await writeFile(openapiPath, JSON.stringify(contract), "utf8");
+  globalThis.fetch = async (input) => {
+    if (String(input) === config.openapiUrl) {
+      return Response.json(contract);
+    }
+    oaRequestCount += 1;
+    return Response.json({ code: 200, message: "ok", data: users });
+  };
+  beginOaTurn(sessionId, resolveOaQueryPolicy("Ryan 是谁"));
+
+  try {
+    const found = await callOaApiTool(
+      config,
+      {
+        sessionId,
+        operationId: "user_info_user_user_list_get",
+        query: { is_active: true },
+      },
+      "user-token",
+    );
+    const blocked = await callOaApiTool(
+      config,
+      { sessionId, operationId: "status_get" },
+      "user-token",
+    );
+
+    assert.equal(found.ok, true);
+    assert.equal(found.responseId, undefined);
+    assert.deepEqual(found.identityMatch, {
+      query: "Ryan",
+      status: "matched",
+      scannedCandidates: 30,
+      matched: 1,
+      matchedBy: [{ itemIndex: 0, fields: ["username", "wx_name"] }],
+    });
+    assert.deepEqual(found.data, {
+      code: 200,
+      message: "ok",
+      data: [users[24]],
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.error?.code, "oa_call_budget_exceeded");
+    assert.equal(oaRequestCount, 1);
+  } finally {
+    finishOaTurn(sessionId);
+    globalThis.fetch = originalFetch;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("inspects thirty rich records instead of inlining the full collection", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-api-tool-thirty-rich-"));
+  const originalFetch = globalThis.fetch;
+  const contract = createContract();
+  const openapiPath = path.join(directory, "openapi.json");
+  const sessionId = "thirty-rich-records-session";
+  const config = {
+    projectRoot: directory,
+    openapiPath,
+    openapiUrl: "https://oa.example.test/openapi.json",
+    oaApiBaseUrl: "https://oa.example.test",
+    oaAuthAlias: "default",
+    oaApiTokenHeader: "Cookie",
+    oaApiTokenPrefix: "sessionid=",
+    oaApiToolToken: "internal-tool-token",
+  } as AppConfig;
+  const users = Array.from({ length: 30 }, (_, index) => ({
+    user_id: index + 1,
+    username: `User ${index + 1}`,
+    full_name: `测试用户${index + 1}`,
+    intro: "x".repeat(1000),
+  }));
+
+  await writeFile(openapiPath, JSON.stringify(contract), "utf8");
+  globalThis.fetch = async (input) => {
+    if (String(input) === config.openapiUrl) {
+      return Response.json(contract);
+    }
+    return Response.json({ code: 200, message: "ok", data: users });
+  };
+  beginOaTurn(sessionId, resolveOaQueryPolicy("查询在职用户列表"));
+
+  try {
+    const inspection = await callOaApiTool(
+      config,
+      { sessionId, operationId: "user_info_user_user_list_get" },
+      "user-token",
+    );
+
+    assert.equal(inspection.ok, true);
+    assert.equal(typeof inspection.responseId, "string");
+    assert.equal((inspection.data as { mode?: unknown }).mode, "inspect");
+    assert.doesNotMatch(JSON.stringify(inspection), /"intro":"x{500}/);
+  } finally {
+    finishOaTurn(sessionId);
+    globalThis.fetch = originalFetch;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("inspects a large response before running complete local analysis", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "oa-api-tool-user-list-"));
   const originalFetch = globalThis.fetch;
@@ -142,6 +270,7 @@ test("inspects a large response before running complete local analysis", async (
   const users = Array.from({ length: 45 }, (_, index) => ({
     id: index + 1,
     full_name: index === 40 ? "罗奇龙" : `测试用户${index + 1}`,
+    wx_name: index === 40 ? "罗奇奇" : "",
     email: `user${index + 1}@example.test`,
     department: index % 2 === 0 ? "研发部" : "产品部",
   }));
@@ -164,7 +293,7 @@ test("inspects a large response before running complete local analysis", async (
     oaRequestCount += 1;
     return Response.json({ success: true, data: users });
   };
-  beginOaTurn(sessionId, resolveOaQueryPolicy("/user/user-list这个接口能查到罗奇龙吗"));
+  beginOaTurn(sessionId, { mode: "single_step", exactPersonName: null });
 
   try {
     const inspection = await callOaApiTool(
@@ -208,6 +337,37 @@ test("inspects a large response before running complete local analysis", async (
       matched: 1,
       returned: 1,
       items: [{ id: 41, full_name: "罗奇龙", department: "研发部" }],
+      matchedBy: [{ itemIndex: 0, fields: ["full_name"] }],
+    });
+
+    const foundByAlias = await callOaApiTool(
+      config,
+      {
+        sessionId,
+        responseId,
+        action: "find",
+        responsePath: "$.data",
+        conditions: {
+          $or: [
+            { full_name: "罗奇奇" },
+            { username: "罗奇奇" },
+            { wx_name: "罗奇奇" },
+          ],
+        },
+        fields: ["id", "full_name", "wx_name"],
+      },
+      "user-token",
+    );
+    assert.equal(foundByAlias.ok, true);
+    assert.equal(foundByAlias.coverage?.status, "complete");
+    assert.deepEqual(foundByAlias.data, {
+      action: "find",
+      path: "$.data",
+      scanned: 45,
+      matched: 1,
+      returned: 1,
+      items: [{ id: 41, full_name: "罗奇龙", wx_name: "罗奇奇" }],
+      matchedBy: [{ itemIndex: 0, fields: ["wx_name"] }],
     });
 
     const grouped = await callOaApiTool(
@@ -263,9 +423,103 @@ test("inspects a large response before running complete local analysis", async (
       "user-token",
     );
     assert.equal(boundedRoot.ok, true);
-    assert.match(boundedRoot.warnings?.join("\n") ?? "", /展示结果.*截断/);
+    assert.equal(boundedRoot.coverage?.status, "complete");
+    assert.match(boundedRoot.warnings?.join("\n") ?? "", /分析结果.*缩小/);
     assert.doesNotMatch(JSON.stringify(boundedRoot.data), /罗奇龙/);
+    const blocked = await callOaApiTool(
+      config,
+      {
+        sessionId,
+        operationId: "status_get",
+      },
+      "user-token",
+    );
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.error?.code, "oa_call_budget_exceeded");
     assert.equal(oaRequestCount, 1);
+  } finally {
+    finishOaTurn(sessionId);
+    globalThis.fetch = originalFetch;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("stores complex categorized responses progressively and searches nested Chinese paths", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-api-tool-nested-"));
+  const originalFetch = globalThis.fetch;
+  const contract = createContract();
+  const openapiPath = path.join(directory, "openapi.json");
+  const sessionId = "nested-progressive-session";
+  let oaRequestCount = 0;
+  const config = {
+    projectRoot: directory,
+    openapiPath,
+    openapiUrl: "https://oa.example.test/openapi.json",
+    oaApiBaseUrl: "https://oa.example.test",
+    oaAuthAlias: "default",
+    oaApiTokenHeader: "Cookie",
+    oaApiTokenPrefix: "sessionid=",
+    oaApiToolToken: "internal-tool-token",
+  } as AppConfig;
+  const categorizedUsers = createCategorizedUsers();
+
+  await writeFile(openapiPath, JSON.stringify(contract), "utf8");
+  globalThis.fetch = async (input) => {
+    if (String(input) === config.openapiUrl) {
+      return Response.json(contract);
+    }
+    oaRequestCount += 1;
+    return Response.json({ success: true, code: 200, message: "ok", data: categorizedUsers });
+  };
+  beginOaTurn(sessionId, resolveOaQueryPolicy("查找罗奇龙的技能"));
+
+  try {
+    const inspection = await callOaApiTool(
+      config,
+      {
+        sessionId,
+        operationId: "user_info_user_user_list_get",
+        query: {},
+      },
+      "user-token",
+    );
+
+    assert.equal(inspection.ok, true);
+    assert.equal(typeof inspection.responseId, "string");
+    assert.equal(inspection.coverage?.status, "complete");
+    assert.equal((inspection.data as { mode?: unknown }).mode, "inspect");
+    assert.equal(oaRequestCount, 1);
+
+    const found = await callOaApiTool(
+      config,
+      {
+        sessionId,
+        responseId: inspection.responseId,
+        action: "find",
+        responsePath: "$.data.综合",
+        conditions: { "skills.skill_name": "技术文档" },
+        fields: ["user_id", "full_name", "skills.skill_name"],
+      },
+      "user-token",
+    );
+
+    assert.equal(found.ok, true);
+    assert.equal(found.coverage?.status, "complete");
+    assert.deepEqual(found.data, {
+      action: "find",
+      path: "$.data.综合",
+      scanned: 8,
+      matched: 1,
+      returned: 1,
+      items: [
+        {
+          user_id: 16,
+          full_name: "罗奇龙",
+          "skills.skill_name": ["装机", "技术文档"],
+        },
+      ],
+      matchedBy: [{ itemIndex: 0, fields: ["skills.skill_name"] }],
+    });
   } finally {
     finishOaTurn(sessionId);
     globalThis.fetch = originalFetch;
@@ -563,5 +817,40 @@ function createContract() {
         },
       },
     },
+  };
+}
+
+function createCategorizedUsers() {
+  const makeUser = (
+    userId: number,
+    fullName: string,
+    skillNames: string[] = [],
+  ) => ({
+    user_id: userId,
+    full_name: fullName,
+    username: fullName,
+    skills: skillNames.map((skill_name, index) => ({
+      skill_id: userId * 10 + index + 1,
+      skill_name,
+      description: `${skill_name} 说明`,
+    })),
+  });
+
+  return {
+    综合: [
+      makeUser(16, "罗奇龙", ["装机", "技术文档"]),
+      ...Array.from({ length: 7 }, (_, index) =>
+        makeUser(index + 1, `综合用户${index + 1}`),
+      ),
+    ],
+    产品: Array.from({ length: 8 }, (_, index) =>
+      makeUser(100 + index, `产品用户${index + 1}`),
+    ),
+    算法: Array.from({ length: 8 }, (_, index) =>
+      makeUser(200 + index, `算法用户${index + 1}`),
+    ),
+    管理: Array.from({ length: 8 }, (_, index) =>
+      makeUser(300 + index, `管理用户${index + 1}`),
+    ),
   };
 }

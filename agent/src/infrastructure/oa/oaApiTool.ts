@@ -9,6 +9,7 @@ import {
   recordOaApiCallResult,
   reserveOaApiCall,
   storeOaResponse,
+  type OaIdentityMatch,
 } from "./oaQueryPolicy.js";
 import {
   canStoreProgressiveResponse,
@@ -46,6 +47,7 @@ export type OaApiToolResult = {
   path?: string;
   responseId?: string;
   coverage?: OaResponseCoverage;
+  identityMatch?: OaIdentityMatch;
   warnings?: string[];
   data?: unknown;
   error?: {
@@ -186,9 +188,10 @@ async function executeOaRequest(
     oaApiToken: sessionOaApiToken,
   });
   const exactPersonName = getActiveOaQueryPolicy(sessionId)?.exactPersonName;
-  const focusedData = exactPersonName
+  const focusedResult = exactPersonName
     ? focusExactPersonResult(response.data, exactPersonName)
-    : response.data;
+    : null;
+  const focusedData = focusedResult?.data ?? response.data;
   const coverage = inferOaResponseCoverage(
     focusedData,
     operationDeclaresPagination(operation),
@@ -214,6 +217,7 @@ async function executeOaRequest(
       path: operation.pathTemplate,
       responseId,
       coverage,
+      ...(focusedResult ? { identityMatch: focusedResult.identityMatch } : {}),
       ...(queryWarnings.length > 0 ? { warnings: queryWarnings } : {}),
       data: inspectOaResponse(focusedData),
     };
@@ -225,7 +229,7 @@ async function executeOaRequest(
     ...queryWarnings,
     ...(limitedData.truncated
       ? [
-          `响应过大,已截断数组超过 ${MAX_TOOL_ARRAY_ITEMS} 项、对象超过 ${MAX_TOOL_OBJECT_KEYS} 个字段或字符串超过 ${MAX_TOOL_STRING_LENGTH} 字符的部分。需要更多数据时请缩小查询条件或分页继续查询。`,
+          "响应过大,已缩小展示范围;源数据仍然完整。需要更多细节时请缩小查询条件后查看。",
         ]
       : []),
   ];
@@ -235,9 +239,8 @@ async function executeOaRequest(
     operationId: operation.operationId,
     method: operation.method.toUpperCase(),
     path: operation.pathTemplate,
-    coverage: limitedData.truncated
-      ? { status: "partial", reason: "inline_output_budget_exceeded" }
-      : coverage,
+    coverage,
+    ...(focusedResult ? { identityMatch: focusedResult.identityMatch } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
     data: limitedData.value,
   };
@@ -274,11 +277,9 @@ function navigateStoredResponse(
     method: stored.method,
     path: stored.path,
     responseId,
-    coverage: limitedData.truncated
-      ? { status: "partial", reason: "analysis_output_budget_exceeded" }
-      : actionResult.coverage,
+    coverage: actionResult.coverage,
     ...(limitedData.truncated
-      ? { warnings: ["渐进式分析展示结果过大,已截断;请缩小 fields、conditions 或 read 范围。"] }
+      ? { warnings: ["渐进式分析结果过大,已缩小展示范围;请缩小 fields、conditions 或 read 范围。"] }
       : {}),
     data: limitedData.value,
   };
@@ -682,15 +683,39 @@ function operationDeclaresPagination(operation: OpenApiOperation): boolean {
   );
 }
 
-function focusExactPersonResult(value: unknown, exactName: string): unknown {
-  const matches: Record<string, unknown>[] = [];
+function focusExactPersonResult(
+  value: unknown,
+  exactName: string,
+): { data: unknown; identityMatch: OaIdentityMatch } {
+  const matches: Array<{ item: Record<string, unknown>; fields: string[] }> = [];
   const seen = new Set<object>();
-  collectExactPersonMatches(value, normalizePersonName(exactName), matches, seen);
+  const scannedCandidates = collectExactPersonMatches(
+    value,
+    normalizePersonName(exactName),
+    matches,
+    seen,
+  );
   if (matches.length === 0) {
-    return value;
+    return {
+      data: value,
+      identityMatch: {
+        query: exactName,
+        status: scannedCandidates > 0 ? "not_found" : "insufficient",
+        scannedCandidates,
+        matched: 0,
+      },
+    };
   }
+  const matchedItems = matches.map(({ item }) => item);
+  const identityMatch: OaIdentityMatch = {
+    query: exactName,
+    status: "matched",
+    scannedCandidates,
+    matched: matches.length,
+    matchedBy: matches.map(({ fields }, itemIndex) => ({ itemIndex, fields })),
+  };
   if (!isRecord(value)) {
-    return matches;
+    return { data: matchedItems, identityMatch };
   }
 
   const metadata = Object.fromEntries(
@@ -702,16 +727,16 @@ function focusExactPersonResult(value: unknown, exactName: string): unknown {
         ),
     ),
   );
-  return { ...metadata, data: matches };
+  return { data: { ...metadata, data: matchedItems }, identityMatch };
 }
 
 function collectExactPersonMatches(
   value: unknown,
   exactName: string,
-  matches: Record<string, unknown>[],
+  matches: Array<{ item: Record<string, unknown>; fields: string[] }>,
   seen: Set<object>,
   depth = 0,
-): void {
+): number {
   if (
     depth > MAX_TOOL_OUTPUT_DEPTH ||
     value === null ||
@@ -719,34 +744,65 @@ function collectExactPersonMatches(
     matches.length >= MAX_TOOL_ARRAY_ITEMS ||
     seen.has(value)
   ) {
-    return;
+    return 0;
   }
   seen.add(value);
 
   if (Array.isArray(value)) {
+    let scannedCandidates = 0;
     for (const item of value) {
-      collectExactPersonMatches(item, exactName, matches, seen, depth + 1);
+      scannedCandidates += collectExactPersonMatches(
+        item,
+        exactName,
+        matches,
+        seen,
+        depth + 1,
+      );
     }
-    return;
+    return scannedCandidates;
   }
 
   const record = value as Record<string, unknown>;
-  const hasExactName = Object.entries(record).some(
-    ([key, item]) =>
-      /^(?:full_?name|real_?name|display_?name|employee_?name|chinese_?name|name)$/i.test(
-        key,
-      ) &&
-      typeof item === "string" &&
-      normalizePersonName(item) === exactName,
+  const identityEntries = Object.entries(record).filter(
+    ([key, item]) => isPersonIdentityField(key, record) && typeof item === "string",
   );
-  if (hasExactName) {
-    matches.push(record);
-    return;
+  if (identityEntries.length > 0) {
+    const matchedFields = identityEntries
+      .filter(([, item]) => normalizePersonName(item as string) === exactName)
+      .map(([key]) => key);
+    if (matchedFields.length > 0) {
+      matches.push({ item: record, fields: matchedFields });
+    }
+    return 1;
   }
 
+  let scannedCandidates = 0;
   for (const item of Object.values(record)) {
-    collectExactPersonMatches(item, exactName, matches, seen, depth + 1);
+    scannedCandidates += collectExactPersonMatches(
+      item,
+      exactName,
+      matches,
+      seen,
+      depth + 1,
+    );
   }
+  return scannedCandidates;
+}
+
+function isPersonIdentityField(
+  key: string,
+  record: Record<string, unknown>,
+): boolean {
+  if (
+    /^(?:full_?name|real_?name|display_?name|employee_?name|chinese_?name|user_?name|wx_?name|qq_?name|email|alias)$/i.test(
+      key,
+    )
+  ) {
+    return true;
+  }
+  return key.toLowerCase() === "name" && Object.keys(record).some((field) =>
+    /^(?:user|employee|staff|member)_?id$/i.test(field),
+  );
 }
 
 function normalizePersonName(value: string): string {
@@ -769,7 +825,7 @@ function limitToolOutput(value: unknown, depth = 0): {
   truncated: boolean;
 } {
   if (depth > MAX_TOOL_OUTPUT_DEPTH) {
-    return { value: "[TRUNCATED: max depth]", truncated: true };
+    return { value: "[DISPLAY_TRUNCATED: max depth]", truncated: true };
   }
 
   if (typeof value === "string") {
@@ -802,7 +858,7 @@ function limitToolOutput(value: unknown, depth = 0): {
 
     if (value.length > MAX_TOOL_ARRAY_ITEMS) {
       items.push({
-        __truncated: true,
+        __display_truncated: true,
         omittedItems: value.length - MAX_TOOL_ARRAY_ITEMS,
       });
     }
@@ -823,7 +879,7 @@ function limitToolOutput(value: unknown, depth = 0): {
     const result: Record<string, unknown> = Object.fromEntries(limitedEntries);
 
     if (entries.length > MAX_TOOL_OBJECT_KEYS) {
-      result.__truncated = true;
+      result.__display_truncated = true;
       result.omittedFields = entries.length - MAX_TOOL_OBJECT_KEYS;
     }
 
