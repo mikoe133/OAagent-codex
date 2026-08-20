@@ -29,7 +29,7 @@ export const MODEL_CATALOG = {
     "gpt-5.6-terra",
   ],
   openrouter: [
-    "z-ai/glm-5.2",
+    "z-ai/glm-5.3",
     "moonshotai/kimi-k3",
     "openai/gpt-5.5",
     "openai/gpt-5.4",
@@ -43,7 +43,7 @@ export const MODEL_CATALOG_VERSION = `sha256:${createHash("sha256")
 
 const DEFAULT_MODELS = {
   nexttoken: "gpt-5.6-terra",
-  openrouter: "z-ai/glm-5.2",
+  openrouter: "z-ai/glm-5.3",
 } as const satisfies Record<ModelProviderId, string>;
 
 export function isModelProviderId(value: unknown): value is ModelProviderId {
@@ -58,7 +58,12 @@ export function getModelDisplayName(model: string): string {
   const modelName = model.split("/").at(-1) ?? model;
   return modelName
     .split("-")
-    .map((part) => part.toLowerCase() === "gpt" ? "GPT" : capitalize(part))
+    .map((part) => {
+      const normalized = part.toLowerCase();
+      return normalized === "gpt" || normalized === "glm"
+        ? normalized.toUpperCase()
+        : capitalize(part);
+    })
     .join(" ");
 }
 
@@ -115,13 +120,31 @@ export function resolveAutomationModelSelection(
   const fallbackModel = modelProvider === fallback.modelProvider
     ? fallback.modelId
     : getDefaultModel(modelProvider);
+  const modelId = resolveRequestedModel(
+    modelProvider,
+    requested.modelId,
+    fallbackModel,
+  );
+  const modelParameters = requested.modelParameters === undefined
+    ? { ...(fallback.modelParameters ?? {}) }
+    : decodeAutomationModelParameters(requested.modelParameters);
   return {
     modelProvider,
-    modelId: resolveRequestedModel(modelProvider, requested.modelId, fallbackModel),
-    modelParameters: requested.modelParameters === undefined
-      ? { ...(fallback.modelParameters ?? {}) }
-      : decodeAutomationModelParameters(requested.modelParameters),
+    modelId,
+    modelParameters: normalizeModelParameters(modelId, modelParameters),
   };
+}
+
+export function normalizeModelReasoningEffort<
+  ReasoningEffort extends ModelReasoningEffort | "minimal",
+>(
+  model: string,
+  effort: ReasoningEffort,
+): ReasoningEffort | "low" | "high" {
+  if (model !== "z-ai/glm-5.3") {
+    return effort;
+  }
+  return effort === "low" ? "low" : "high";
 }
 
 export function decodeAutomationModelParameters(
@@ -165,6 +188,21 @@ export function decodeAutomationModelParameters(
     parameters.max_output_tokens = value.max_output_tokens as number;
   }
   return parameters;
+}
+
+function normalizeModelParameters(
+  model: string,
+  parameters: AutomationModelParameters,
+): AutomationModelParameters {
+  return parameters.reasoning_effort
+    ? {
+        ...parameters,
+        reasoning_effort: normalizeModelReasoningEffort(
+          model,
+          parameters.reasoning_effort,
+        ),
+      }
+    : parameters;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

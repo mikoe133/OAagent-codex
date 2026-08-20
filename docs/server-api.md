@@ -287,7 +287,7 @@ GET /v1/models
       "gpt-5.6-terra"
     ],
     "openrouter": [
-      "z-ai/glm-5.2",
+      "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
       "openai/gpt-5.5",
       "openai/gpt-5.4"
@@ -592,6 +592,14 @@ CLI 参数:
 | `--query` | JSON object | 否 | query 参数。值会转成字符串加入 URL |
 | `--body` | JSON value | 否 | JSON request body |
 | `--confirmed` | boolean | 否 | 敏感操作确认标记。`true`、`1`、`yes` 会被视为确认 |
+| `--responseId` | `string` | 条件必填 | 大响应首次检查返回的临时句柄；与 `--action` 一起使用，不会再次请求 OA |
+| `--action` | `string` | 条件必填 | 本地响应动作：`inspect`、`find`、`filter`、`count`、`group_count` 或 `read` |
+| `--responsePath` | `string` | 否 | 要处理的 JSON 路径，例如 `$.data`，默认 `$` |
+| `--conditions` | JSON object | 否 | `find`、`filter`、`count` 的条件；简单值表示精确匹配，也支持 `operator`/`value` |
+| `--fields` | JSON string[] | 否 | 返回结果保留的字段，最多 20 个 |
+| `--groupBy` | `string` | 条件必填 | `group_count` 使用的分组字段 |
+| `--offset` | integer | 否 | `read` 的起始位置，默认 0 |
+| `--limit` | integer | 否 | `find`、`filter`、`read` 的返回上限，最大 100 |
 
 工具行为:
 
@@ -606,6 +614,10 @@ CLI 参数:
 - 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认。
 - 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作需要 agent 先取得用户确认,再传 `--confirmed true`。
 - 工具执行过程会作为 Codex 的 `command_execution` 事件出现在流式响应中。
+- 大数组、超长字段或明确未完成分页的响应不会先裁剪再交给模型。工具在当前 turn 内保存完整响应，并返回 `responseId`、`coverage` 和 `data.mode=inspect` 的结构摘要。
+- 结构摘要只展示数组长度、字段并集和一项样例。模型应通过同一 `responseId` 在完整缓存上执行本地查找、筛选、统计、分组或分块读取。
+- `coverage.status=complete` 表示可对未命中和统计结果下完整结论；`partial` 或 `unknown` 时不得据此断言数据不存在或当前数量就是总数。
+- `responseId` 绑定当前 session 和当前 turn；turn 结束后失效，不写入聊天记录或持久化存储。
 - 原生运行且未配置 `CODEX_SANDBOX_MODE` 时,配置 `OA_API_BASE_URL` 会让 Codex thread 使用 `workspace-write` 沙箱并开启 `network_access`,用于让 `agent` 工作目录下的 `scripts/callOaApi.mjs` 访问本机内部工具端点。
 - Docker Compose 显式设置 `CODEX_SANDBOX_MODE=danger-full-access`,由非 root、`cap_drop: ALL`、`no-new-privileges`、Docker seccomp/AppArmor 和独立网络共同构成外部隔离边界,避免 Codex 在受限容器内再次通过 `bwrap` 创建 namespace。不要在没有等价外部隔离的原生进程中使用该模式。
 

@@ -94,12 +94,12 @@ test("shows the selected OpenRouter GLM model in the composer", async () => {
       onStop={() => undefined}
       isStreaming={false}
       selectedProvider="openrouter"
-      selectedModel="z-ai/glm-5.2"
+      selectedModel="z-ai/glm-5.3"
       onModelChange={() => undefined}
     />,
   )
 
-  assert.match(html, /GLM-5\.2/)
+  assert.match(html, /GLM-5\.3/)
 })
 
 test("shows disabled models in gray with a hover hint", () => {

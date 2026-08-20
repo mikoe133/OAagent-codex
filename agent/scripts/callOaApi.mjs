@@ -20,6 +20,14 @@ const payload = {
   query: parseJsonArg(args.query, "query"),
   body: parseJsonArg(args.body, "body"),
   confirmed: parseBooleanArg(args.confirmed),
+  responseId: args.responseId,
+  action: args.action,
+  responsePath: args.responsePath,
+  conditions: parseJsonArg(args.conditions, "conditions"),
+  fields: parseJsonArg(args.fields, "fields"),
+  groupBy: args.groupBy,
+  offset: parseIntegerArg(args.offset, "offset"),
+  limit: parseIntegerArg(args.limit, "limit"),
 };
 
 const response = await fetch(url, {
@@ -78,4 +86,15 @@ function parseBooleanArg(value) {
     return undefined;
   }
   return value === "true" || value === "1" || value === "yes";
+}
+
+function parseIntegerArg(value, name) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!/^\d+$/.test(value)) {
+    console.error(`${name} 必须是非负整数。`);
+    process.exit(2);
+  }
+  return Number(value);
 }

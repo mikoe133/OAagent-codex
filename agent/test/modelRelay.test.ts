@@ -93,7 +93,7 @@ test("routes a project progress OpenRouter Agent through the HTTP/1.1 relay", as
     provider: "openrouter",
     apiBaseUrl: `http://127.0.0.1:${upstreamPort}/api/v1`,
     apiKey: "openrouter-secret",
-    model: "z-ai/glm-5.2",
+    model: "z-ai/glm-5.3",
     parameters: {},
   } satisfies ProjectProgressConfig["model"]);
   t.after(() => relay.close());
@@ -115,6 +115,46 @@ test("routes a project progress OpenRouter Agent through the HTTP/1.1 relay", as
     "{}",
   );
   assert.equal(unavailableProvider.status, 404);
+});
+
+test("removes Responses custom tools before forwarding to OpenRouter", async (t) => {
+  let receivedPayload: Record<string, unknown> | null = null;
+  const upstream = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) {
+      body += Buffer.from(chunk).toString("utf8");
+    }
+    receivedPayload = JSON.parse(body) as Record<string, unknown>;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("{}\n");
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => close(upstream));
+
+  const relay = await startModelRelay({
+    openrouter: {
+      ...openrouter,
+      baseUrl: `http://127.0.0.1:${upstreamPort}/api/v1`,
+    },
+  });
+  t.after(() => relay.close());
+
+  const result = await requestRelay(
+    `${relay.baseUrl}/openrouter/v1/responses`,
+    "Bearer openrouter-secret",
+    JSON.stringify({
+      model: "z-ai/glm-5.3",
+      tools: [
+        { type: "function", name: "exec_command" },
+        { type: "custom", name: "apply_patch" },
+      ],
+    }),
+  );
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(receivedPayload?.tools, [
+    { type: "function", name: "exec_command" },
+  ]);
 });
 
 test("rejects an invalid provider credential without contacting upstream", async (t) => {

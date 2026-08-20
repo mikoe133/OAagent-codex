@@ -15,6 +15,15 @@ type CustomModelDefinition = {
 };
 
 const CUSTOM_MODEL_DEFINITIONS = {
+  "z-ai/glm-5.3": {
+    baseSlug: "gpt-5.5",
+    displayName: "GLM 5.3",
+    description: "Z.ai GLM 5.3 served through OpenRouter.",
+    contextWindow: 1_048_576,
+    autoCompactTokenLimit: 996_147,
+    supportsParallelToolCalls: false,
+    supportVerbosity: false,
+  },
   "gpt-5.6-terra": {
     baseSlug: "gpt-5.5",
     displayName: "GPT-5.6 Terra",

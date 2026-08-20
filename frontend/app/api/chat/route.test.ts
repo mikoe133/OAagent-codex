@@ -31,7 +31,7 @@ test("POST forwards the selected model to the agent service", async () => {
         body: JSON.stringify({
           sessionId: "model-switch-session",
           provider: "openrouter",
-          model: "z-ai/glm-5.2",
+          model: "z-ai/glm-5.3",
           messages: [{ role: "user", content: "hello" }],
         }),
       }),
@@ -41,7 +41,7 @@ test("POST forwards the selected model to the agent service", async () => {
     assert.deepEqual(forwardedBody, {
       message: "hello",
       provider: "openrouter",
-      model: "z-ai/glm-5.2",
+      model: "z-ai/glm-5.3",
     })
     assert.equal(forwardedAuthorization, "Bearer test-session-token")
   } finally {
@@ -68,7 +68,7 @@ test("POST rejects an unknown provider before calling the agent service", async 
         body: JSON.stringify({
           sessionId: "model-switch-session",
           provider: "unknown",
-          model: "z-ai/glm-5.2",
+          model: "z-ai/glm-5.3",
           messages: [{ role: "user", content: "hello" }],
         }),
       }),

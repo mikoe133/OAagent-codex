@@ -66,7 +66,7 @@ test("protects public agent routes with a validated OA token", async () => {
           "gpt-5.6-terra",
         ],
         openrouter: [
-          "z-ai/glm-5.2",
+          "z-ai/glm-5.3",
           "moonshotai/kimi-k3",
           "openai/gpt-5.5",
           "openai/gpt-5.4",

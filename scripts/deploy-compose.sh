@@ -169,6 +169,88 @@ function restore_runtime_env() {
   fi
 }
 
+function protect_images_from_file() {
+  local env_file="$1"
+  local line
+
+  [[ -f "$env_file" ]] || return
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      AGENT_IMAGE=*|WEB_IMAGE=*)
+        protected_images+=("${line#*=}")
+        ;;
+    esac
+  done < "$env_file"
+}
+
+function image_is_protected() {
+  local candidate="$1"
+  local protected_image
+
+  for protected_image in "${protected_images[@]}"; do
+    if [[ "$candidate" == "$protected_image" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+function cleanup_stale_release_images() {
+  local deployment_root
+  local env_file
+  local repository
+  local repositories=()
+  local listed_images
+  local candidate
+  local candidate_repository
+  local candidate_tag
+
+  deployment_root="$(dirname "$deploy_dir")"
+  protected_images=("$agent_image" "$web_image")
+
+  shopt -s nullglob
+  for env_file in \
+    "$deployment_root"/*/.deploy.env \
+    "$deployment_root"/*/.deploy.env.previous; do
+    protect_images_from_file "$env_file"
+  done
+  shopt -u nullglob
+
+  repositories+=("${agent_image%:*}")
+  if [[ "${web_image%:*}" != "${agent_image%:*}" ]]; then
+    repositories+=("${web_image%:*}")
+  fi
+
+  for repository in "${repositories[@]}"; do
+    if ! listed_images="$(
+      docker image ls "$repository" --format '{{.Repository}}:{{.Tag}}'
+    )"; then
+      echo "[deploy] could not list old images for $repository; skipping cleanup" >&2
+      continue
+    fi
+
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      candidate_repository="${candidate%:*}"
+      candidate_tag="${candidate##*:}"
+
+      if [[ "$candidate_repository" != "$repository" ]] \
+        || [[ ! "$candidate_tag" =~ ^[0-9a-f]{40}$ ]] \
+        || image_is_protected "$candidate"; then
+        continue
+      fi
+
+      if docker image rm "$candidate"; then
+        echo "[deploy] removed stale image $candidate"
+      else
+        echo "[deploy] could not remove stale image $candidate; it may still be in use" >&2
+      fi
+    done <<< "$listed_images"
+  done
+}
+
 readonly deploy_dir="${1:?usage: deploy-compose.sh DEPLOY_DIR AGENT_IMAGE WEB_IMAGE}"
 readonly agent_image="${2:?agent image is required}"
 readonly web_image="${3:?web image is required}"
@@ -228,3 +310,4 @@ fi
 
 echo "[deploy] release is healthy"
 compose ps
+cleanup_stale_release_images

@@ -6,10 +6,13 @@ import test from "node:test";
 
 import { resolveCodexModelCatalogPath } from "../src/infrastructure/codex/modelMetadataCatalog.js";
 
-test("loads custom Codex metadata for Terra and Kimi only", () => {
+test("loads custom Codex metadata for GLM, Terra, and Kimi", () => {
+  const glmCatalogPath = resolveCodexModelCatalogPath("z-ai/glm-5.3");
   const terraCatalogPath = resolveCodexModelCatalogPath("gpt-5.6-terra");
   const kimiCatalogPath = resolveCodexModelCatalogPath("moonshotai/kimi-k3");
 
+  assert.ok(glmCatalogPath);
+  assert.equal(terraCatalogPath, glmCatalogPath);
   assert.ok(terraCatalogPath);
   assert.equal(kimiCatalogPath, terraCatalogPath);
   assert.equal(resolveCodexModelCatalogPath("gpt-5.5"), undefined);
@@ -36,7 +39,12 @@ test("loads custom Codex metadata for Terra and Kimi only", () => {
   assert.deepEqual(catalog.models.map((model) => model.slug).sort(), [
     "gpt-5.6-terra",
     "moonshotai/kimi-k3",
+    "z-ai/glm-5.3",
   ]);
+  assert.equal(metadata["z-ai/glm-5.3"]?.context_window, 1_048_576);
+  assert.equal(metadata["z-ai/glm-5.3"]?.auto_compact_token_limit, 996_147);
+  assert.equal(metadata["z-ai/glm-5.3"]?.supports_parallel_tool_calls, false);
+  assert.equal(metadata["z-ai/glm-5.3"]?.support_verbosity, false);
   assert.equal(metadata["gpt-5.6-terra"]?.context_window, 272_000);
   assert.equal(metadata["gpt-5.6-terra"]?.auto_compact_token_limit, 258_400);
   assert.equal(metadata["moonshotai/kimi-k3"]?.context_window, 1_048_576);

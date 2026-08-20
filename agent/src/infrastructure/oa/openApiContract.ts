@@ -2,12 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../../config/config.js";
+import { filterChatOpenApiDocument } from "./openApiChatPolicy.js";
 import {
   resolveOpenApiIndex,
   type OpenApiOperationIndex,
 } from "./openApiIndex.js";
 
 const OPENAPI_FETCH_TIMEOUT_MS = 5_000;
+export const OPENAPI_CONTRACT_CACHE_TTL_MS = 30 * 60 * 1000;
 
 export type ResolvedOpenApiContract = {
   document: unknown;
@@ -22,14 +24,55 @@ type OpenApiFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+type OpenApiContractCacheEntry = {
+  expiresAt: number;
+  promise: Promise<ResolvedOpenApiContract>;
+};
+
+const resolvedContractCache = new Map<string, OpenApiContractCacheEntry>();
+
 export async function resolveOpenApiContract(
   config: AppConfig,
   fetchImpl: OpenApiFetch = fetch,
+  now = Date.now(),
+): Promise<ResolvedOpenApiContract> {
+  const cacheKey = [
+    config.projectRoot,
+    config.openapiUrl,
+    config.openapiPath,
+  ].join("\u0000");
+  const cached = resolvedContractCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+  if (cached) {
+    resolvedContractCache.delete(cacheKey);
+  }
+
+  const promise = resolveOpenApiContractUncached(config, fetchImpl);
+  const entry: OpenApiContractCacheEntry = {
+    expiresAt: now + OPENAPI_CONTRACT_CACHE_TTL_MS,
+    promise,
+  };
+  resolvedContractCache.set(cacheKey, entry);
+  promise.catch(() => {
+    if (resolvedContractCache.get(cacheKey) === entry) {
+      resolvedContractCache.delete(cacheKey);
+    }
+  });
+  return promise;
+}
+
+async function resolveOpenApiContractUncached(
+  config: AppConfig,
+  fetchImpl: OpenApiFetch,
 ): Promise<ResolvedOpenApiContract> {
   try {
-    const document = await fetchRemoteContract(config.openapiUrl, fetchImpl);
+    const document = filterChatOpenApiDocument(
+      await fetchRemoteContract(config.openapiUrl, fetchImpl),
+    );
     const [contractPath, index] = await Promise.all([
-      materializeRemoteContract(config.projectRoot, document),
+      materializeContract(config.projectRoot, document),
       resolveOpenApiIndex(config.projectRoot, document),
     ]);
     return {
@@ -39,14 +82,20 @@ export async function resolveOpenApiContract(
       source: "remote",
     };
   } catch (error) {
-    const document = parseOpenApiDocument(
-      await readFile(config.openapiPath, "utf8"),
-      `本地 OpenAPI 文件 ${config.openapiPath}`,
+    const document = filterChatOpenApiDocument(
+      parseOpenApiDocument(
+        await readFile(config.openapiPath, "utf8"),
+        `本地 OpenAPI 文件 ${config.openapiPath}`,
+      ),
     );
+    const [contractPath, index] = await Promise.all([
+      materializeContract(config.projectRoot, document),
+      resolveOpenApiIndex(config.projectRoot, document),
+    ]);
     return {
       document,
-      index: await resolveOpenApiIndex(config.projectRoot, document),
-      path: config.openapiPath,
+      index,
+      path: contractPath,
       source: "local",
       fallbackReason: error instanceof Error ? error.message : String(error),
     };
@@ -74,7 +123,7 @@ async function fetchRemoteContract(
   }
 }
 
-async function materializeRemoteContract(
+async function materializeContract(
   projectRoot: string,
   document: unknown,
 ): Promise<string> {

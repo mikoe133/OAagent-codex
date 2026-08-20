@@ -1,10 +1,24 @@
 import type { AppConfig } from "../../config/config.js";
 import { resolveOpenApiContract } from "./openApiContract.js";
 import {
+  cacheOaApiResult,
+  clearCachedOaApiResult,
+  getCachedOaApiResult,
   getActiveOaQueryPolicy,
+  getStoredOaResponse,
   recordOaApiCallResult,
   reserveOaApiCall,
+  storeOaResponse,
+  type OaIdentityMatch,
 } from "./oaQueryPolicy.js";
+import {
+  canStoreProgressiveResponse,
+  inferOaResponseCoverage,
+  inspectOaResponse,
+  requiresProgressiveInspection,
+  runOaResponseAction,
+  type OaResponseCoverage,
+} from "./oaResponseNavigator.js";
 
 export type OaApiToolInput = {
   sessionId?: unknown;
@@ -15,6 +29,14 @@ export type OaApiToolInput = {
   query?: unknown;
   body?: unknown;
   confirmed?: unknown;
+  responseId?: unknown;
+  action?: unknown;
+  responsePath?: unknown;
+  conditions?: unknown;
+  fields?: unknown;
+  groupBy?: unknown;
+  offset?: unknown;
+  limit?: unknown;
 };
 
 export type OaApiToolResult = {
@@ -23,6 +45,9 @@ export type OaApiToolResult = {
   operationId?: string;
   method?: string;
   path?: string;
+  responseId?: string;
+  coverage?: OaResponseCoverage;
+  identityMatch?: OaIdentityMatch;
   warnings?: string[];
   data?: unknown;
   error?: {
@@ -61,6 +86,11 @@ export async function callOaApiTool(
       "oa_not_configured",
       "缺少 OA_API_BASE_URL 或 OA 登录态,无法调用 OA 后端。",
     );
+  }
+
+  const responseId = stringField(input.responseId);
+  if (responseId) {
+    return navigateStoredResponse(sessionId, responseId, input);
   }
 
   const { document: openapi } = await resolveOpenApiContract(config);
@@ -103,6 +133,17 @@ export async function callOaApiTool(
   }
 
   const normalizedQuery = normalizeQueryForTool(query);
+  const requestKey = buildOaRequestKey(
+    operation,
+    path.value,
+    normalizedQuery.value,
+    input.body,
+  );
+  const cachedResult = getCachedOaApiResult(sessionId, requestKey);
+  if (cachedResult !== undefined) {
+    return (await cachedResult) as OaApiToolResult;
+  }
+
   const reservation = reserveOaApiCall(sessionId);
   if (!reservation.allowed) {
     return toolError(
@@ -110,38 +151,176 @@ export async function callOaApiTool(
       "当前查询的首次结果完整,本 turn 不再执行额外 OA 查询。请直接基于已有结果回答。",
     );
   }
+  const resultPromise = executeOaRequest(
+    config,
+    operation,
+    path.value,
+    normalizedQuery.value,
+    normalizedQuery.warnings,
+    input.body,
+    sessionId,
+    sessionOaApiToken,
+  );
+  cacheOaApiResult(sessionId, requestKey, resultPromise);
+  try {
+    return await resultPromise;
+  } catch (error) {
+    clearCachedOaApiResult(sessionId, requestKey);
+    throw error;
+  }
+}
+
+async function executeOaRequest(
+  config: AppConfig,
+  operation: OpenApiOperation,
+  renderedPath: string,
+  query: Record<string, unknown>,
+  queryWarnings: string[],
+  body: unknown,
+  sessionId: string | null,
+  sessionOaApiToken: string,
+): Promise<OaApiToolResult> {
   const response = await requestOa(config, {
     method: operation.method.toUpperCase(),
-    path: path.value,
-    query: normalizedQuery.value,
-    body: input.body,
+    path: renderedPath,
+    query,
+    body,
     oaApiToken: sessionOaApiToken,
   });
   const exactPersonName = getActiveOaQueryPolicy(sessionId)?.exactPersonName;
-  const focusedData = exactPersonName
+  const focusedResult = exactPersonName
     ? focusExactPersonResult(response.data, exactPersonName)
-    : response.data;
+    : null;
+  const focusedData = focusedResult?.data ?? response.data;
+  const coverage = inferOaResponseCoverage(
+    focusedData,
+    operationDeclaresPagination(operation),
+  );
+  const progressive = (coverage.status === "partial" ||
+    requiresProgressiveInspection(focusedData)) &&
+    canStoreProgressiveResponse(focusedData);
+  const responseId = progressive
+    ? storeOaResponse(sessionId, {
+        operationId: operation.operationId,
+        method: operation.method.toUpperCase(),
+        path: operation.pathTemplate,
+        data: focusedData,
+        coverage,
+      })
+    : null;
+  if (responseId) {
+    const result: OaApiToolResult = {
+      ok: response.ok,
+      status: response.status,
+      operationId: operation.operationId,
+      method: operation.method.toUpperCase(),
+      path: operation.pathTemplate,
+      responseId,
+      coverage,
+      ...(focusedResult ? { identityMatch: focusedResult.identityMatch } : {}),
+      ...(queryWarnings.length > 0 ? { warnings: queryWarnings } : {}),
+      data: inspectOaResponse(focusedData),
+    };
+    recordOaApiCallResult(sessionId, result);
+    return result;
+  }
   const limitedData = limitToolOutput(focusedData);
   const warnings = [
-    ...normalizedQuery.warnings,
+    ...queryWarnings,
     ...(limitedData.truncated
       ? [
-          `响应过大,已截断数组超过 ${MAX_TOOL_ARRAY_ITEMS} 项、对象超过 ${MAX_TOOL_OBJECT_KEYS} 个字段或字符串超过 ${MAX_TOOL_STRING_LENGTH} 字符的部分。需要更多数据时请缩小查询条件或分页继续查询。`,
+          "响应过大,已缩小展示范围;源数据仍然完整。需要更多细节时请缩小查询条件后查看。",
         ]
       : []),
   ];
-
   const result: OaApiToolResult = {
     ok: response.ok,
     status: response.status,
     operationId: operation.operationId,
     method: operation.method.toUpperCase(),
     path: operation.pathTemplate,
+    coverage,
+    ...(focusedResult ? { identityMatch: focusedResult.identityMatch } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
     data: limitedData.value,
   };
   recordOaApiCallResult(sessionId, result);
   return result;
+}
+
+function navigateStoredResponse(
+  sessionId: string | null,
+  responseId: string,
+  input: OaApiToolInput,
+): OaApiToolResult {
+  if (!sessionId) {
+    return toolError(
+      "response_session_required",
+      "渐进式响应读取必须提供当前 sessionId。",
+    );
+  }
+  const stored = getStoredOaResponse(sessionId, responseId);
+  if (!stored) {
+    return toolError(
+      "response_not_found",
+      "responseId 不存在、已过期或不属于当前 turn。请重新调用原 OA 接口。",
+    );
+  }
+  const actionResult = runOaResponseAction(stored, input);
+  if (!actionResult.ok) {
+    return toolError(actionResult.code, actionResult.message, actionResult.details);
+  }
+  const limitedData = limitToolOutput(actionResult.data);
+  return {
+    ok: true,
+    operationId: stored.operationId,
+    method: stored.method,
+    path: stored.path,
+    responseId,
+    coverage: actionResult.coverage,
+    ...(limitedData.truncated
+      ? { warnings: ["渐进式分析结果过大,已缩小展示范围;请缩小 fields、conditions 或 read 范围。"] }
+      : {}),
+    data: limitedData.value,
+  };
+}
+
+function buildOaRequestKey(
+  operation: OpenApiOperation,
+  renderedPath: string,
+  query: Record<string, unknown>,
+  body: unknown,
+): string {
+  return JSON.stringify({
+    operationId: operation.operationId,
+    method: operation.method.toUpperCase(),
+    path: renderedPath,
+    query: canonicalizeQuery(query),
+    body: canonicalizeRequestValue(body),
+  });
+}
+
+function canonicalizeQuery(query: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.keys(query)
+      .sort()
+      .filter((key) => query[key] !== null && query[key] !== undefined)
+      .map((key) => [key, String(query[key])]),
+  );
+}
+
+function canonicalizeRequestValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeRequestValue(item));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalizeRequestValue(value[key])]),
+    );
+  }
+  return value;
 }
 
 function resolveOperation(
@@ -492,15 +671,51 @@ function isPaginationSizeKey(key: string): boolean {
   return /^(size|limit|pageSize|page_size|perPage|per_page)$/i.test(key);
 }
 
-function focusExactPersonResult(value: unknown, exactName: string): unknown {
-  const matches: Record<string, unknown>[] = [];
+function operationDeclaresPagination(operation: OpenApiOperation): boolean {
+  const parameters = Array.isArray(operation.operation.parameters)
+    ? operation.operation.parameters
+    : [];
+  return parameters.some(
+    (parameter) =>
+      isRecord(parameter) &&
+      stringField(parameter.in) === "query" &&
+      Boolean(stringField(parameter.name)?.match(/^(?:page|cursor|offset|size|limit|pageSize|page_size|perPage|per_page)$/i)),
+  );
+}
+
+function focusExactPersonResult(
+  value: unknown,
+  exactName: string,
+): { data: unknown; identityMatch: OaIdentityMatch } {
+  const matches: Array<{ item: Record<string, unknown>; fields: string[] }> = [];
   const seen = new Set<object>();
-  collectExactPersonMatches(value, normalizePersonName(exactName), matches, seen);
+  const scannedCandidates = collectExactPersonMatches(
+    value,
+    normalizePersonName(exactName),
+    matches,
+    seen,
+  );
   if (matches.length === 0) {
-    return value;
+    return {
+      data: value,
+      identityMatch: {
+        query: exactName,
+        status: scannedCandidates > 0 ? "not_found" : "insufficient",
+        scannedCandidates,
+        matched: 0,
+      },
+    };
   }
+  const matchedItems = matches.map(({ item }) => item);
+  const identityMatch: OaIdentityMatch = {
+    query: exactName,
+    status: "matched",
+    scannedCandidates,
+    matched: matches.length,
+    matchedBy: matches.map(({ fields }, itemIndex) => ({ itemIndex, fields })),
+  };
   if (!isRecord(value)) {
-    return matches;
+    return { data: matchedItems, identityMatch };
   }
 
   const metadata = Object.fromEntries(
@@ -512,16 +727,16 @@ function focusExactPersonResult(value: unknown, exactName: string): unknown {
         ),
     ),
   );
-  return { ...metadata, data: matches };
+  return { data: { ...metadata, data: matchedItems }, identityMatch };
 }
 
 function collectExactPersonMatches(
   value: unknown,
   exactName: string,
-  matches: Record<string, unknown>[],
+  matches: Array<{ item: Record<string, unknown>; fields: string[] }>,
   seen: Set<object>,
   depth = 0,
-): void {
+): number {
   if (
     depth > MAX_TOOL_OUTPUT_DEPTH ||
     value === null ||
@@ -529,34 +744,65 @@ function collectExactPersonMatches(
     matches.length >= MAX_TOOL_ARRAY_ITEMS ||
     seen.has(value)
   ) {
-    return;
+    return 0;
   }
   seen.add(value);
 
   if (Array.isArray(value)) {
+    let scannedCandidates = 0;
     for (const item of value) {
-      collectExactPersonMatches(item, exactName, matches, seen, depth + 1);
+      scannedCandidates += collectExactPersonMatches(
+        item,
+        exactName,
+        matches,
+        seen,
+        depth + 1,
+      );
     }
-    return;
+    return scannedCandidates;
   }
 
   const record = value as Record<string, unknown>;
-  const hasExactName = Object.entries(record).some(
-    ([key, item]) =>
-      /^(?:full_?name|real_?name|display_?name|employee_?name|chinese_?name|name)$/i.test(
-        key,
-      ) &&
-      typeof item === "string" &&
-      normalizePersonName(item) === exactName,
+  const identityEntries = Object.entries(record).filter(
+    ([key, item]) => isPersonIdentityField(key, record) && typeof item === "string",
   );
-  if (hasExactName) {
-    matches.push(record);
-    return;
+  if (identityEntries.length > 0) {
+    const matchedFields = identityEntries
+      .filter(([, item]) => normalizePersonName(item as string) === exactName)
+      .map(([key]) => key);
+    if (matchedFields.length > 0) {
+      matches.push({ item: record, fields: matchedFields });
+    }
+    return 1;
   }
 
+  let scannedCandidates = 0;
   for (const item of Object.values(record)) {
-    collectExactPersonMatches(item, exactName, matches, seen, depth + 1);
+    scannedCandidates += collectExactPersonMatches(
+      item,
+      exactName,
+      matches,
+      seen,
+      depth + 1,
+    );
   }
+  return scannedCandidates;
+}
+
+function isPersonIdentityField(
+  key: string,
+  record: Record<string, unknown>,
+): boolean {
+  if (
+    /^(?:full_?name|real_?name|display_?name|employee_?name|chinese_?name|user_?name|wx_?name|qq_?name|email|alias)$/i.test(
+      key,
+    )
+  ) {
+    return true;
+  }
+  return key.toLowerCase() === "name" && Object.keys(record).some((field) =>
+    /^(?:user|employee|staff|member)_?id$/i.test(field),
+  );
 }
 
 function normalizePersonName(value: string): string {
@@ -579,7 +825,7 @@ function limitToolOutput(value: unknown, depth = 0): {
   truncated: boolean;
 } {
   if (depth > MAX_TOOL_OUTPUT_DEPTH) {
-    return { value: "[TRUNCATED: max depth]", truncated: true };
+    return { value: "[DISPLAY_TRUNCATED: max depth]", truncated: true };
   }
 
   if (typeof value === "string") {
@@ -612,7 +858,7 @@ function limitToolOutput(value: unknown, depth = 0): {
 
     if (value.length > MAX_TOOL_ARRAY_ITEMS) {
       items.push({
-        __truncated: true,
+        __display_truncated: true,
         omittedItems: value.length - MAX_TOOL_ARRAY_ITEMS,
       });
     }
@@ -633,7 +879,7 @@ function limitToolOutput(value: unknown, depth = 0): {
     const result: Record<string, unknown> = Object.fromEntries(limitedEntries);
 
     if (entries.length > MAX_TOOL_OBJECT_KEYS) {
-      result.__truncated = true;
+      result.__display_truncated = true;
       result.omittedFields = entries.length - MAX_TOOL_OBJECT_KEYS;
     }
 

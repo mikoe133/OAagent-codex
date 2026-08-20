@@ -387,6 +387,7 @@ function scoreOperation(
   }
 
   score += scoreBusinessResource(operation, normalizedTask, writeIntent);
+  score += scoreFieldCoverage(operation, normalizedTask);
 
   if (adminIntent) {
     score += operation.permissionLevel === "admin" ? 32 : 0;
@@ -441,6 +442,25 @@ function scoreBusinessResource(
       score -= 10;
     }
   }
+  if (hasNamedPersonLookupIntent(task)) {
+    if (/^\/user\/user-list$/i.test(operation.path)) {
+      score += 42;
+    } else if (/^\/user\/user$/i.test(operation.path)) {
+      score += 18;
+    }
+    if (/技能|能力|擅长|专长|技术栈/i.test(task)) {
+      if (/^\/user\/user-skill-list$/i.test(operation.path)) {
+        score += 34;
+      } else if (/^\/user\/user-skill$/i.test(operation.path)) {
+        score += 20;
+      } else if (/^\/user\/skills$/i.test(operation.path)) {
+        score -= 22;
+      }
+    }
+    if (/^\/user\/(?:skills|groups|image-list|user-category-list)$/i.test(operation.path)) {
+      score -= 18;
+    }
+  }
   if (/周报/.test(task)) {
     if (/^\/weekly-report\/(?:report|report-list)$/i.test(operation.path)) {
       score += 16;
@@ -456,6 +476,201 @@ function scoreBusinessResource(
     }
   }
   return score;
+}
+
+function scoreFieldCoverage(
+  operation: OpenApiOperationIndexEntry,
+  task: string,
+): number {
+  const requirements = inferFieldRequirements(task);
+  if (requirements.length === 0) {
+    return 0;
+  }
+
+  const fieldNames = buildOperationFieldNames(operation);
+  return requirements.reduce((score, requirement) => {
+    const matched = requirement.fields.some((field) => fieldNames.has(field));
+    return score + (matched ? requirement.weight : -requirement.missingPenalty);
+  }, 0);
+}
+
+type FieldRequirement = {
+  fields: string[];
+  weight: number;
+  missingPenalty: number;
+};
+
+function inferFieldRequirements(task: string): FieldRequirement[] {
+  const requirements: FieldRequirement[] = [];
+  const personIntent = hasPersonLookupIntent(task);
+  const skillIntent = /技能|能力|擅长|专长|技术栈/i.test(task);
+
+  if (personIntent) {
+    requirements.push(
+      {
+        fields: ["user_id", "id", "employee_id", "staff_id", "member_id"],
+        weight: 18,
+        missingPenalty: 4,
+      },
+      {
+        fields: [
+          "full_name",
+          "real_name",
+          "display_name",
+          "username",
+          "wx_name",
+          "name",
+        ],
+        weight: 30,
+        missingPenalty: 10,
+      },
+    );
+  }
+
+  if (personIntent && /信息|资料|情况|是谁|部门|职位|岗位|mbti|mbit|联系方式|邮箱|微信|技术栈/i.test(task)) {
+    requirements.push(
+      {
+        fields: ["department", "employee_title", "title", "position"],
+        weight: 12,
+        missingPenalty: 2,
+      },
+      {
+        fields: ["email", "wx_name", "wechat", "phone", "mobile"],
+        weight: 8,
+        missingPenalty: 1,
+      },
+      {
+        fields: ["mbit", "mbti", "tech_stack", "intro"],
+        weight: 8,
+        missingPenalty: 1,
+      },
+    );
+  }
+
+  if (skillIntent) {
+    requirements.push({
+      fields: ["skills", "skill_name", "skill_id", "description"],
+      weight: 24,
+      missingPenalty: 2,
+    });
+    if (personIntent) {
+      requirements.push({
+        fields: ["user_id", "employee_id", "staff_id", "member_id"],
+        weight: 16,
+        missingPenalty: 6,
+      });
+    }
+  }
+
+  return requirements;
+}
+
+function hasPersonLookupIntent(task: string): boolean {
+  if (/个人信息|用户信息|员工信息|人员信息|同事|姓名|邮箱|联系方式|联系信息|手机号|电话|微信|mbti|mbit/i.test(task)) {
+    return true;
+  }
+  if (/项目|仓库|周报|日报|月报|考勤|工时|审批|假期|请假|报表|统计|趋势/i.test(task)) {
+    return false;
+  }
+  return hasNamedPersonLookupIntent(task);
+}
+
+function hasNamedPersonLookupIntent(task: string): boolean {
+  return /[\p{Script=Han}·]{2,6}(?:的)?(?:信息|资料|情况|是谁|技能|能力|擅长|专长|技术栈)/u.test(
+    task,
+  );
+}
+
+function buildOperationFieldNames(
+  operation: OpenApiOperationIndexEntry,
+): Set<string> {
+  const fields = [
+    ...operation.parameters.map((parameter) => parameter.name),
+    ...operation.requestBodyFields,
+    ...operation.mainResponseFields,
+    ...inferOperationFieldHints(operation),
+  ];
+  return new Set(fields.flatMap(normalizeFieldPath));
+}
+
+function inferOperationFieldHints(
+  operation: OpenApiOperationIndexEntry,
+): string[] {
+  const descriptor = `${operation.path} ${operation.operationId} ${operation.summary ?? ""}`.toLowerCase();
+
+  if (/^\/user\/user-list$/i.test(operation.path)) {
+    return [
+      "data[].user_id",
+      "data[].username",
+      "data[].full_name",
+      "data[].wx_name",
+      "data[].email",
+      "data[].department",
+      "data[].employee_title",
+      "data[].employee_type",
+      "data[].employee_status",
+      "data[].intro",
+      "data[].mbit",
+      "data[].tech_stack",
+    ];
+  }
+  if (/^\/user\/user$/i.test(operation.path)) {
+    return [
+      "data.user_id",
+      "data.username",
+      "data.full_name",
+      "data.wx_name",
+      "data.email",
+      "data.department",
+      "data.employee_title",
+      "data.employee_type",
+      "data.employee_status",
+      "data.intro",
+      "data.mbit",
+      "data.tech_stack",
+    ];
+  }
+  if (/^\/user\/user-skill-list$/i.test(operation.path)) {
+    return [
+      "data[].user_id",
+      "data[].skills",
+      "data[].skills[].skill_id",
+      "data[].skills[].skill_name",
+      "data[].skills[].description",
+    ];
+  }
+  if (/^\/user\/user-skill$/i.test(operation.path)) {
+    return [
+      "data.user_id",
+      "data.user_skill_id",
+      "data.skill_id",
+      "data.skill_name",
+      "data.description",
+    ];
+  }
+  if (/^\/user\/skills$/i.test(operation.path)) {
+    return ["data[].skill_id", "data[].skill_name", "data[].description"];
+  }
+  if (/^\/user\/user-intro$/i.test(operation.path)) {
+    return ["data[].user_id", "data[].content", "data[].intro"];
+  }
+  if (/^\/user\/user-category-list$/i.test(operation.path)) {
+    return ["data[].category", "data[].user_id_list"];
+  }
+  if (/user.*(?:list|info|profile)|employee|staff|member/.test(descriptor)) {
+    return ["user_id", "full_name", "username", "email"];
+  }
+  return [];
+}
+
+function normalizeFieldPath(fieldPath: string): string[] {
+  const pathSegments = fieldPath
+    .replace(/\[\]/g, "")
+    .split(/[.[\]/]+/)
+    .map((segment) => segment.trim().toLowerCase())
+    .filter(Boolean);
+  const lastSegment = pathSegments.at(-1);
+  return lastSegment ? [fieldPath.toLowerCase(), lastSegment] : [];
 }
 
 function isCompanyProjectInventoryIntent(task: string): boolean {

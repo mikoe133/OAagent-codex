@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import type { StoredOaResponse } from "./oaResponseNavigator.js";
+
 export type OaQueryMode = "single_step" | "multi_step" | "unknown";
 
 export type OaQueryPolicy = {
@@ -5,10 +8,25 @@ export type OaQueryPolicy = {
   exactPersonName: string | null;
 };
 
+export type OaIdentityMatch = {
+  query: string;
+  status: "matched" | "not_found" | "insufficient";
+  scannedCandidates: number;
+  matched: number;
+  matchedBy?: Array<{
+    itemIndex: number;
+    fields: string[];
+  }>;
+};
+
 type OaToolResultLike = {
   ok: boolean;
+  coverage?: {
+    status?: string;
+  };
   warnings?: string[];
   data?: unknown;
+  identityMatch?: OaIdentityMatch;
   error?: {
     code: string;
     message: string;
@@ -18,7 +36,9 @@ type OaToolResultLike = {
 type OaTurnState = {
   policy: OaQueryPolicy;
   callCount: number;
-  upgraded: boolean;
+  requiresAdditionalCall: boolean;
+  requestResults: Map<string, Promise<unknown>>;
+  responses: Map<string, StoredOaResponse>;
 };
 
 const WRITE_PATTERN =
@@ -58,6 +78,7 @@ const GENERIC_PERSON_TERMS = new Set([
   "工时",
   "假期",
 ]);
+const MAX_SINGLE_STEP_OA_CALLS = 3;
 const turnStates = new Map<string, OaTurnState>();
 
 export function resolveOaQueryPolicy(task: string): OaQueryPolicy {
@@ -86,7 +107,9 @@ export function beginOaTurn(sessionId: string, policy: OaQueryPolicy): void {
   turnStates.set(sessionId, {
     policy,
     callCount: 0,
-    upgraded: false,
+    requiresAdditionalCall: true,
+    requestResults: new Map(),
+    responses: new Map(),
   });
 }
 
@@ -100,6 +123,52 @@ export function getActiveOaQueryPolicy(
   return sessionId ? turnStates.get(sessionId)?.policy ?? null : null;
 }
 
+export function getCachedOaApiResult(
+  sessionId: string | null | undefined,
+  requestKey: string,
+): Promise<unknown> | undefined {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  return state?.requestResults.get(requestKey);
+}
+
+export function cacheOaApiResult(
+  sessionId: string | null | undefined,
+  requestKey: string,
+  result: Promise<unknown>,
+): void {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  state?.requestResults.set(requestKey, result);
+}
+
+export function clearCachedOaApiResult(
+  sessionId: string | null | undefined,
+  requestKey: string,
+): void {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  state?.requestResults.delete(requestKey);
+}
+
+export function storeOaResponse(
+  sessionId: string | null | undefined,
+  response: StoredOaResponse,
+): string | null {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  if (!state) {
+    return null;
+  }
+  const responseId = `oa_resp_${randomUUID()}`;
+  state.responses.set(responseId, response);
+  return responseId;
+}
+
+export function getStoredOaResponse(
+  sessionId: string | null | undefined,
+  responseId: string,
+): StoredOaResponse | null {
+  const state = sessionId ? turnStates.get(sessionId) : null;
+  return state?.responses.get(responseId) ?? null;
+}
+
 export function reserveOaApiCall(sessionId: string | null | undefined): {
   allowed: boolean;
   mode: OaQueryMode | null;
@@ -109,12 +178,15 @@ export function reserveOaApiCall(sessionId: string | null | undefined): {
     return { allowed: true, mode: null };
   }
 
-  if (state.policy.mode !== "single_step" || state.upgraded) {
+  if (state.policy.mode !== "single_step") {
     state.callCount += 1;
     return { allowed: true, mode: state.policy.mode };
   }
 
-  if (state.callCount >= 1) {
+  if (
+    state.callCount >= MAX_SINGLE_STEP_OA_CALLS ||
+    (state.callCount >= 1 && !state.requiresAdditionalCall)
+  ) {
     return { allowed: false, mode: state.policy.mode };
   }
 
@@ -127,23 +199,48 @@ export function recordOaApiCallResult(
   result: OaToolResultLike,
 ): void {
   const state = sessionId ? turnStates.get(sessionId) : null;
-  if (
-    !state ||
-    state.policy.mode !== "single_step" ||
-    state.upgraded
-  ) {
+  if (!state || state.policy.mode !== "single_step") {
     return;
   }
 
-  if (
-    requiresAdditionalOaCall(result) ||
-    containsIdentityOnlyRecord(result.data)
-  ) {
-    state.upgraded = true;
+  if (state.policy.exactPersonName) {
+    state.requiresAdditionalCall = exactIdentityLookupNeedsMore(result);
+    return;
   }
+
+  state.requiresAdditionalCall =
+    requiresAdditionalOaCall(result) || containsIdentityOnlyRecord(result.data);
+}
+
+function exactIdentityLookupNeedsMore(result: OaToolResultLike): boolean {
+  if (!result.ok) {
+    return true;
+  }
+
+  if (result.identityMatch?.status === "matched") {
+    return (
+      requiresAdditionalOaCall(result) || containsIdentityOnlyRecord(result.data)
+    );
+  }
+  if (result.identityMatch?.status === "not_found") {
+    return true;
+  }
+  if (result.identityMatch?.status === "insufficient") {
+    return true;
+  }
+
+  return (
+    requiresAdditionalOaCall(result) || containsIdentityOnlyRecord(result.data)
+  );
 }
 
 export function requiresAdditionalOaCall(result: OaToolResultLike): boolean {
+  if (
+    result.coverage?.status === "partial" ||
+    result.coverage?.status === "unknown"
+  ) {
+    return true;
+  }
   if (
     result.warnings?.some((warning) =>
       /截断|分页|继续查询|更多数据|超过\s*\d+\s*项/i.test(warning),
@@ -183,6 +280,14 @@ function isExactSelfLookup(task: string): boolean {
 }
 
 function extractExactPersonName(task: string): string | null {
+  const explicitIdentityMatch =
+    task.match(/^谁是\s*(.+?)[？?。.]?$/iu) ??
+    task.match(/^(.+?)\s*是谁[？?。.]?$/iu);
+  const explicitIdentity = explicitIdentityMatch?.[1]?.trim() ?? "";
+  if (isExactIdentityValue(explicitIdentity)) {
+    return explicitIdentity;
+  }
+
   const match =
     task.match(
       new RegExp(
@@ -195,9 +300,31 @@ function extractExactPersonName(task: string): string | null {
         `^([\\p{Script=Han}·]{2,4}?)${PERSON_INFO_SUFFIX}(?:是什么|有哪些)?[？?。.]?$`,
         "iu",
       ),
+    ) ??
+    task.match(
+      new RegExp(
+        `^(.+?)(?:的)?${PERSON_INFO_SUFFIX}(?:是什么|有哪些)?[？?。.]?$`,
+        "iu",
+      ),
     );
-  const name = match?.[1]?.trim() ?? "";
-  return name && !GENERIC_PERSON_TERMS.has(name) ? name : null;
+  const identity = match?.[1]?.trim() ?? "";
+  return isExactIdentityValue(identity) ? identity : null;
+}
+
+function isExactIdentityValue(value: string): boolean {
+  if (!value || GENERIC_PERSON_TERMS.has(value)) {
+    return false;
+  }
+  if (/^[\p{Script=Han}·]{2,4}$/u.test(value)) {
+    return true;
+  }
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value)) {
+    return value.length <= 254;
+  }
+  return (
+    value.length <= 64 &&
+    /^[A-Za-z][A-Za-z0-9._+@ -]*[A-Za-z0-9]$/u.test(value)
+  );
 }
 
 function containsIncompleteResult(value: unknown, depth = 0): boolean {
