@@ -16,7 +16,7 @@ export function filterChatOpenApiDocument(document: unknown): unknown {
 
   const filteredPaths: Record<string, unknown> = {};
   for (const [operationPath, rawPathItem] of Object.entries(document.paths)) {
-    if (pathContainsAdminSegment(operationPath)) {
+    if (pathContainsRestrictedSegment(operationPath)) {
       continue;
     }
     if (!isRecord(rawPathItem)) {
@@ -58,38 +58,41 @@ export function isChatOpenApiOperationAllowed(
   operationPath: string,
   operation: Record<string, unknown>,
 ): boolean {
-  if (pathContainsAdminSegment(operationPath)) {
+  if (pathContainsRestrictedSegment(operationPath)) {
     return false;
   }
   if (
     Array.isArray(operation.tags) &&
     operation.tags.some(
-      (tag) => typeof tag === "string" && containsAdminToken(tag),
+      (tag) => typeof tag === "string" && containsRestrictedToken(tag),
     )
   ) {
     return false;
   }
-  return !containsAdminToken(operation.operationId);
+  return !containsRestrictedToken(operation.operationId);
 }
 
-function pathContainsAdminSegment(operationPath: string): boolean {
+function pathContainsRestrictedSegment(operationPath: string): boolean {
   return operationPath.split("/").some((segment) => {
     try {
-      return decodeURIComponent(segment).toLowerCase().includes("admin");
+      return containsRestrictedToken(decodeURIComponent(segment));
     } catch {
-      return segment.toLowerCase().includes("admin");
+      return containsRestrictedToken(segment);
     }
   });
 }
 
-function containsAdminToken(value: unknown): boolean {
+function containsRestrictedToken(value: unknown): boolean {
   if (typeof value !== "string") {
     return false;
   }
   return value
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(/[^A-Za-z0-9]+/)
-    .some((token) => token.toLowerCase() === "admin");
+    .some((token) => {
+      const normalized = token.toLowerCase();
+      return normalized === "admin" || normalized === "internal";
+    });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

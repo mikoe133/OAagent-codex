@@ -83,7 +83,7 @@ Environment Variables:
 | 两者可选 | `PROJECT_PROGRESS_AGENT_CONCURRENCY` | 同时运行的仓库 Codex Thread 数，默认 `2` |
 | 两者可选 | `PROJECT_PROGRESS_OA_WRITE_CONCURRENCY` | OA mutation 并发，当前固定为 `1` |
 | 两者可选 | `AUTOMATION_MIGRATE_ON_START` | 默认 `true`；启动 Agent 前执行幂等 baseline/seed |
-| 两者可选 | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `false`；正式切流后必须显式改为 `true` |
+| 两者可选 | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `true`；仅在需要暂停自动调度时显式设为 `false` |
 | 两者可选 | `AUTOMATION_MAINTENANCE_INTERVAL_SECONDS` | 默认 `30` |
 | 两者可选 | `OA_SESSION_VERIFY_MAX_AGE` | 默认 `0`，只验签不限制年龄 |
 

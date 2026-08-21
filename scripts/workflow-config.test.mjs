@@ -82,7 +82,7 @@ test("passes automation maintenance controls into both deployment environments",
   for (const [name, fallback] of [
     ["OA_SESSION_VERIFY_MAX_AGE", "0"],
     ["AUTOMATION_MIGRATE_ON_START", "true"],
-    ["AUTOMATION_MAINTENANCE_ENABLED", "false"],
+    ["AUTOMATION_MAINTENANCE_ENABLED", "true"],
     ["AUTOMATION_MAINTENANCE_INTERVAL_SECONDS", "30"],
     ["AUTOMATION_MODEL_CATALOG_TTL_SECONDS", "300"],
     ["AUTOMATION_MODEL_CATALOG_STALE_SECONDS", "86400"],
@@ -102,6 +102,10 @@ test("allows the server env to isolate Compose projects", async () => {
   const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
   assert.match(compose, /^name: \$\{COMPOSE_PROJECT_NAME:-oa-agent\}$/m)
   assert.match(compose, /\$\{AGENT_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{AGENT_PORT:-3001\}:3000/)
+  assert.match(
+    compose,
+    /^      AUTOMATION_MAINTENANCE_ENABLED: \$\{AUTOMATION_MAINTENANCE_ENABLED:-true\}$/m,
+  )
 })
 
 test("injects SSO configuration into the web container at runtime", async () => {

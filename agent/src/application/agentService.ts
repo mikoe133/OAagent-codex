@@ -22,7 +22,7 @@ import type {
   SessionStore,
 } from "../infrastructure/persistence/sessionStore.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
-import { selectOpenApiCandidates } from "../infrastructure/oa/openApiIndex.js";
+import { routeOpenApiCandidates } from "../infrastructure/oa/openApiRouter.js";
 import {
   beginOaTurn,
   finishOaTurn,
@@ -156,14 +156,15 @@ export class AgentService {
   }
 
   private async runMessage(input: SendMessageInput): Promise<SendMessageResult> {
+    const session = await this.prepareSession(input);
     const resolvedRun = await resolveRunConfig(
       this.config,
       input.provider,
       input.model,
       input.message,
+      session.summary,
     );
     const runConfig = resolvedRun.config;
-    const session = await this.prepareSession(input);
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
       openApiCandidates: resolvedRun.openApiCandidates,
@@ -229,14 +230,16 @@ export class AgentService {
     throwIfAborted(signal);
     await emit({ type: "run.started", sessionId: input.sessionId });
 
+    const session = await this.prepareSession(input);
     const resolvedRun = await resolveRunConfig(
       this.config,
       input.provider,
       input.model,
       input.message,
+      session.summary,
+      signal,
     );
     const runConfig = resolvedRun.config;
-    const session = await this.prepareSession(input);
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
       openApiCandidates: resolvedRun.openApiCandidates,
@@ -650,15 +653,22 @@ async function resolveRunConfig(
   requestedProvider: string | null | undefined,
   requestedModel: string | null | undefined,
   task: string,
+  conversationMemory: string | null,
+  signal?: AbortSignal,
 ) {
   const modelProvider = resolveRequestedProvider(requestedProvider, config.modelProvider);
   const fallbackModel =
     modelProvider === config.modelProvider ? config.model : getDefaultModel(modelProvider);
   const model = resolveRequestedModel(modelProvider, requestedModel, fallbackModel);
   const openapi = await resolveOpenApiContract(config);
+  const runConfig = { ...config, modelProvider, model, openapiPath: openapi.path };
   return {
-    config: { ...config, modelProvider, model, openapiPath: openapi.path },
-    openApiCandidates: selectOpenApiCandidates(openapi.index, task),
+    config: runConfig,
+    openApiCandidates: await routeOpenApiCandidates(
+      runConfig,
+      openapi.index,
+      { task, conversationMemory, signal },
+    ),
     reasoningEffort: resolveTaskReasoningEffort(task),
     oaQueryPolicy: resolveOaQueryPolicy(task),
   };

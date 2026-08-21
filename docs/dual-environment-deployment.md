@@ -143,7 +143,7 @@ GitHub 仓库 -> Settings -> Environments
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_PREFIX` | 通常为 `Bearer`；session 测试可填 `sessionid=` |
 | `test` / `production` | `PROJECT_PROGRESS_HEARTBEAT_SECONDS` | 填 `10`，使取消请求及时传给 Worker |
 | `test` / `production` | `AUTOMATION_MIGRATE_ON_START` | 首次部署保持 `true` |
-| `test` / `production` | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `false`；切流确认后显式改为 `true` 并重新部署 |
+| `test` / `production` | `AUTOMATION_MAINTENANCE_ENABLED` | 可选；默认 `true`，仅在需要暂停自动调度时显式设为 `false` |
 
 再分别为两个 Environment 添加以下 Secret：
 

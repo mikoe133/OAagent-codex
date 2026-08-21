@@ -36,7 +36,7 @@ export function parseAutomationConfig(env: Environment): AutomationConfig {
     maintenanceEnabled: booleanSetting(
       env,
       "AUTOMATION_MAINTENANCE_ENABLED",
-      false,
+      true,
     ),
     migrateOnStart: booleanSetting(
       env,
@@ -154,4 +154,3 @@ function optionalString(value: string | undefined): string | null {
   const normalized = value?.trim();
   return normalized || null;
 }
-

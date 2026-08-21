@@ -94,6 +94,7 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^OA_AGENT_SSO_SHARED_SECRET=test-sso-secret$/m)
   assert.match(content, /^OA_AGENT_SSO_TTL_SECONDS=300$/m)
   assert.match(content, /^OA_AGENT_AUTOMATION_TOKEN=test-automation-secret$/m)
+  assert.match(content, /^AUTOMATION_MAINTENANCE_ENABLED=true$/m)
   assert.match(content, /^AUTOMATION_MODEL_CATALOG_TTL_SECONDS=300$/m)
   assert.match(content, /^AUTOMATION_MODEL_CATALOG_STALE_SECONDS=86400$/m)
   assert.match(content, /^OA_API_TOKEN_HEADER=Cookie$/m)
