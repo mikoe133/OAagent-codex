@@ -52,7 +52,7 @@ test("removes a session from memory, persisted metadata, and token bindings", as
   const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-session-store-"));
   const filePath = path.join(directory, "sessions.json");
   const store = new SessionStore(filePath) as RemovableSessionStore;
-  await store.bindOaToken("delete-me", "secret-token");
+  await store.bindOaToken("delete-me", "secret-token", undefined, "19");
 
   try {
     assert.equal(typeof store.remove, "function");
@@ -62,10 +62,41 @@ test("removes a session from memory, persisted metadata, and token bindings", as
 
     assert.equal(await store.remove("delete-me"), true);
     assert.equal(store.getOaToken("delete-me"), null);
+    assert.equal(store.getOaUserId("delete-me"), null);
     assert.deepEqual(await store.list(), []);
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as { sessions: unknown[] };
     assert.deepEqual(persisted.sessions, []);
     assert.equal(await store.remove("delete-me"), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("keeps the validated OA user id with the in-memory token binding", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-session-store-"));
+  const store = new SessionStore(path.join(directory, "sessions.json"));
+
+  try {
+    await store.bindOaToken("knowledge-session", "secret-token", undefined, "19");
+
+    assert.equal(store.getOaUserId("knowledge-session"), "19");
+    const persisted = await readFile(path.join(directory, "sessions.json"), "utf8");
+    assert.doesNotMatch(persisted, /secret-token|\"19\"/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("clears a stale OA user id when token validation cannot provide one", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-session-store-"));
+  const store = new SessionStore(path.join(directory, "sessions.json"));
+
+  try {
+    await store.bindOaToken("knowledge-session", "first-token", undefined, "19");
+    await store.bindOaToken("knowledge-session", "second-token", undefined, null);
+
+    assert.equal(store.getOaToken("knowledge-session"), "second-token");
+    assert.equal(store.getOaUserId("knowledge-session"), null);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

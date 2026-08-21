@@ -8,6 +8,7 @@ code, prompts, controlled OA API helper script, and OpenAPI contract.
 ```text
 agent/
   openapi/openapi.json     Local fallback for the OA OpenAPI contract
+  knowledgebaseapi/        Knowledge-base read contract, guide, and write placeholder
   prompts/                 Agent prompt files loaded in deterministic order
   scripts/                 Backend maintenance and controlled tool scripts
   src/
@@ -53,3 +54,10 @@ For each agent task and controlled OA API call, the backend first requests
 remote OpenAPI document is materialized under `agent/.context/openapi/` for the
 Codex subprocess. Network errors, non-2xx responses, and invalid OpenAPI JSON
 fall back to `agent/openapi/openapi.json`.
+
+Knowledge-document questions route separately through
+`agent/knowledgebaseapi/knowledgebaseapi.yaml`. Configure
+`OA_KNOWLEDGE_API_KEY` (and optionally `OA_KNOWLEDGE_API_BASE_URL`) to enable
+real reads. The reserved write contract is
+`agent/knowledgebaseapi/knowledgebase-write-api.yaml`; until it exists, the
+router will not substitute an OA operation for a knowledge-base mutation.

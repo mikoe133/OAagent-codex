@@ -20,6 +20,7 @@ type StoredAgentSession = AgentSession & {
 export class SessionStore {
   private readonly sessions = new Map<string, StoredAgentSession>();
   private readonly oaTokens = new Map<string, string>();
+  private readonly oaUserIds = new Map<string, string>();
   private loaded = false;
   private writeQueue: Promise<void> = Promise.resolve();
 
@@ -72,6 +73,7 @@ export class SessionStore {
     sessionId: string,
     token: string,
     ownerId?: string,
+    oaUserId?: string | null,
   ): Promise<boolean> {
     await this.getOrCreate(sessionId);
     const session = this.sessions.get(sessionId)!;
@@ -83,11 +85,20 @@ export class SessionStore {
       await this.persist();
     }
     this.oaTokens.set(sessionId, token);
+    if (oaUserId) {
+      this.oaUserIds.set(sessionId, oaUserId);
+    } else if (oaUserId === null) {
+      this.oaUserIds.delete(sessionId);
+    }
     return true;
   }
 
   getOaToken(sessionId: string): string | null {
     return this.oaTokens.get(sessionId) ?? null;
+  }
+
+  getOaUserId(sessionId: string): string | null {
+    return this.oaUserIds.get(sessionId) ?? null;
   }
 
   async list(): Promise<AgentSession[]> {
@@ -106,6 +117,7 @@ export class SessionStore {
     await this.load();
     const removed = this.sessions.delete(sessionId);
     this.oaTokens.delete(sessionId);
+    this.oaUserIds.delete(sessionId);
     if (removed) {
       await this.persist();
     }

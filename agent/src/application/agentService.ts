@@ -22,7 +22,11 @@ import type {
   SessionStore,
 } from "../infrastructure/persistence/sessionStore.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
-import { routeOpenApiCandidates } from "../infrastructure/oa/openApiRouter.js";
+import {
+  routeOpenApiRequest,
+} from "../infrastructure/oa/openApiRouter.js";
+import { mergeOpenApiIndexes } from "../infrastructure/oa/openApiIndex.js";
+import { resolveKnowledgeBaseContracts } from "../infrastructure/knowledgebase/knowledgeBaseContract.js";
 import {
   beginOaTurn,
   finishOaTurn,
@@ -36,6 +40,7 @@ export type SendMessageInput = {
   provider?: string | null;
   model?: string | null;
   oaApiToken?: string | null;
+  oaUserId?: string | null;
 };
 
 export type SendMessageResult = {
@@ -168,6 +173,9 @@ export class AgentService {
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
       openApiCandidates: resolvedRun.openApiCandidates,
+      selectedApiCatalogs: resolvedRun.selectedApiCatalogs,
+      knowledgeBaseWriteContractAvailable:
+        resolvedRun.knowledgeBaseWriteContractAvailable,
       oaQueryPolicy: resolvedRun.oaQueryPolicy,
     };
     const codex = createCodexClient(runConfig, input.sessionId);
@@ -243,6 +251,9 @@ export class AgentService {
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
       openApiCandidates: resolvedRun.openApiCandidates,
+      selectedApiCatalogs: resolvedRun.selectedApiCatalogs,
+      knowledgeBaseWriteContractAvailable:
+        resolvedRun.knowledgeBaseWriteContractAvailable,
       oaQueryPolicy: resolvedRun.oaQueryPolicy,
     };
     const codex = createCodexClient(runConfig, input.sessionId);
@@ -578,7 +589,12 @@ export class AgentService {
   private async prepareSession(input: SendMessageInput): Promise<AgentSession> {
     const session = await this.sessions.getOrCreate(input.sessionId);
     if (input.oaApiToken) {
-      await this.sessions.bindOaToken(input.sessionId, input.oaApiToken);
+      await this.sessions.bindOaToken(
+        input.sessionId,
+        input.oaApiToken,
+        undefined,
+        input.oaUserId,
+      );
     }
     return session;
   }
@@ -587,9 +603,11 @@ export class AgentService {
     sessionOaApiToken: string | null;
   } {
     const sessionOaApiToken = this.sessions.getOaToken(sessionId);
+    const sessionOaUserId = this.sessions.getOaUserId(sessionId);
     return {
       sessionId,
       hasSessionOaApiToken: Boolean(sessionOaApiToken),
+      hasSessionOaUserId: Boolean(sessionOaUserId),
       sessionOaApiToken,
     };
   }
@@ -599,6 +617,7 @@ export class AgentService {
       ...Object.values(this.config.modelProviders).map((provider) => provider.apiKey),
       sessionOaApiToken ?? "",
       this.config.oaApiToolToken,
+      this.config.knowledgeBaseApiToken ?? "",
     ];
   }
 }
@@ -660,15 +679,25 @@ async function resolveRunConfig(
   const fallbackModel =
     modelProvider === config.modelProvider ? config.model : getDefaultModel(modelProvider);
   const model = resolveRequestedModel(modelProvider, requestedModel, fallbackModel);
-  const openapi = await resolveOpenApiContract(config);
+  const [openapi, knowledgeBase] = await Promise.all([
+    resolveOpenApiContract(config),
+    resolveKnowledgeBaseContracts(config),
+  ]);
   const runConfig = { ...config, modelProvider, model, openapiPath: openapi.path };
+  const route = await routeOpenApiRequest(
+    runConfig,
+    mergeOpenApiIndexes([
+      openapi.index,
+      knowledgeBase.read.index,
+      ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
+    ]),
+    { task, conversationMemory, signal },
+  );
   return {
     config: runConfig,
-    openApiCandidates: await routeOpenApiCandidates(
-      runConfig,
-      openapi.index,
-      { task, conversationMemory, signal },
-    ),
+    openApiCandidates: route.candidates,
+    selectedApiCatalogs: route.catalogs,
+    knowledgeBaseWriteContractAvailable: knowledgeBase.write !== null,
     reasoningEffort: resolveTaskReasoningEffort(task),
     oaQueryPolicy: resolveOaQueryPolicy(task),
   };

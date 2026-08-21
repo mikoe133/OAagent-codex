@@ -45,6 +45,17 @@ describe("OA agent prompt policy", () => {
     assert.match(systemPrompt, /GitHub.*github_urls/);
     assert.match(systemPrompt, /写入后.*回查.*不属于.*重复调用/);
   });
+
+  it("separates structured OA data from knowledge document content", async () => {
+    const prompts = `${await readPrompt("system.md")}\n${await readPrompt("document-policy.md")}`;
+
+    assert.match(prompts, /结构化 OA 数据/);
+    assert.match(prompts, /知识库.*文档内容/);
+    assert.match(prompts, /knowledge_base_read/);
+    assert.match(prompts, /knowledge_base_write/);
+    assert.match(prompts, /知识库写操作.*用户确认/);
+    assert.match(prompts, /不得.*改用.*OA 接口/);
+  });
 });
 
 function readPrompt(fileName: string): Promise<string> {

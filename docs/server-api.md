@@ -26,6 +26,8 @@
 | `CODEX_SANDBOX_MODE` | 自动 | Codex 命令沙箱。未配置时,无 OA 工具使用 `read-only`,启用 OA 工具使用 `workspace-write`;`danger-full-access` 仅用于已有独立外部沙箱的进程 |
 | `OA_OPENAPI_URL` | `https://api-oa.rwkvos.com/openapi_json` | 优先读取的 OA OpenAPI 地址。请求失败、非 2xx 或内容非法时回退本地契约 |
 | `OA_API_BASE_URL` | 空 | OA 后端地址。HTTP 服务用它验证用户 OA token,受控工具也通过该地址调用 OA |
+| `OA_KNOWLEDGE_API_BASE_URL` | `https://oa-kb.rwkvos.com/api/agent/v1` | 知识库 Agent API 地址 |
+| `OA_KNOWLEDGE_API_KEY` | 空 | OA 后端调用知识库的固定服务 Token；只保存在 agent 服务端 |
 | `OA_AUTH_ALIAS` | `default` | OA 登录和 token 验证使用的数据源 alias |
 | `OA_API_TOKEN_HEADER` | `Cookie` | 受控 OA 工具调用时的 token header 名称 |
 | `OA_API_TOKEN_PREFIX` | `sessionid=` | 受控 OA 工具调用时的 token header 值前缀。设为空时直接发送 token |

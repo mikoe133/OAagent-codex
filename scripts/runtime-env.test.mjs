@@ -54,6 +54,8 @@ test("renders a private runtime env for one isolated Compose environment", async
     OPENROUTER_API_KEY: "test-openrouter-secret",
     OPENROUTER_API_BASE_URL: "https://openrouter.ai/api/v1",
     OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
+    OA_KNOWLEDGE_API_BASE_URL: "https://kb-test.example.com/api/agent/v1",
+    OA_KNOWLEDGE_API_KEY: "test-knowledge-secret",
     OA_AGENT_SSO_SHARED_SECRET: "test-sso-secret",
     OA_AGENT_SSO_TTL_SECONDS: "300",
     OA_AGENT_AUTOMATION_TOKEN: "test-automation-secret",
@@ -72,6 +74,8 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^OPENROUTER_API_KEY=test-openrouter-secret$/m)
   assert.match(content, /^OPENROUTER_API_BASE_URL=https:\/\/openrouter\.ai\/api\/v1$/m)
   assert.match(content, /^OA_DOCKER_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
+  assert.match(content, /^OA_KNOWLEDGE_API_BASE_URL=https:\/\/kb-test\.example\.com\/api\/agent\/v1$/m)
+  assert.match(content, /^OA_KNOWLEDGE_API_KEY=test-knowledge-secret$/m)
   assert.match(content, /^AUTOMATION_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
   assert.match(content, /^PROJECT_SYNC_API_BASE_URL=https:\/\/oa-test\.example\.com$/m)
   assert.match(content, /^OA_PROJECT_SYNC_TOKEN=test-worker-secret$/m)
@@ -284,6 +288,7 @@ function runRender(outputPath, overrides) {
     env: {
       PATH: process.env.PATH,
       OA_AUTH_ALIAS: "default",
+      OA_KNOWLEDGE_API_KEY: "test-knowledge-secret",
       OA_PROJECT_SYNC_TOKEN: "test-worker-secret",
       OA_PROJECT_SYNC_TOKEN_HEADER: "Authorization",
       OA_PROJECT_SYNC_TOKEN_PREFIX: "Bearer",

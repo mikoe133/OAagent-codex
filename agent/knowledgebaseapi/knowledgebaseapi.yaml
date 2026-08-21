@@ -1,0 +1,259 @@
+openapi: 3.1.0
+info:
+  title: 元始知识库 OA Agent API
+  version: 1.0.0
+  description: OA 后端使用固定服务 Token 调用，并通过 X-OA-User-Id 指定权限用户的只读知识库接口。
+servers:
+  - url: https://oa-kb.rwkvos.com/api/agent/v1
+    description: 生产环境（以接口提供方确认上线为准）
+security:
+  - agentApiToken: []
+paths:
+  /search:
+    get:
+      operationId: searchKnowledgeBase
+      summary: 搜索当前用户可见页面
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/Query'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 搜索结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /pages:
+    get:
+      operationId: listKnowledgeBasePages
+      summary: 浏览根节点或指定目录
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - name: parentId
+          in: query
+          schema: { type: string }
+        - name: space
+          in: query
+          schema: { type: string, enum: [public, private], default: public }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 页面或目录列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageListResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /pages/{id}:
+    get:
+      operationId: getKnowledgeBasePage
+      summary: 读取页面正文
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+        - name: format
+          in: query
+          schema: { type: string, enum: [markdown, text, tiptap-json], default: markdown }
+      responses:
+        '200':
+          description: 页面正文与元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /pages/{id}/children:
+    get:
+      operationId: listKnowledgeBasePageChildren
+      summary: 浏览目录子节点
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 子节点列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageListResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+components:
+  securitySchemes:
+    agentApiToken:
+      type: http
+      scheme: bearer
+      bearerFormat: fixed service token
+      description: OA 后端与知识库预先配置的固定高熵 Token；不得下发到浏览器或写入日志。
+  parameters:
+    OaUserId:
+      name: X-OA-User-Id
+      in: header
+      required: true
+      description: 当前终端用户的 OA ID；必须存在于知识库同步的 OA 活跃用户目录中，用户无需亲自登录过知识库。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 120
+        pattern: '^[a-zA-Z0-9][a-zA-Z0-9._:-]*$'
+    Query:
+      name: q
+      in: query
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 100 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    PageId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  schemas:
+    Envelope:
+      type: object
+      required: [requestId]
+      properties:
+        requestId: { type: string }
+    PageSummary:
+      type: object
+      required: [id, title, parentId, kind, space, permission, revision, updatedAt, updatedBy, updatedByOaUserId, sourceUrl]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        parentId: { type: [string, 'null'] }
+        kind: { type: string, enum: [page, folder] }
+        space: { type: string, enum: [public, private] }
+        permission: { type: string, enum: [viewer, editor, manager] }
+        revision: { type: integer }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        updatedByOaUserId:
+          type: [string, 'null']
+          description: 最后更新者的稳定 OA user id；系统更新或历史姓名无法唯一匹配时为 null。
+        sourceUrl: { type: string, format: uri }
+    PageListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [data, nextCursor]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/PageSummary' }
+            nextCursor: { type: [string, 'null'] }
+    SearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [data, nextCursor]
+          properties:
+            data:
+              type: array
+              items:
+                allOf:
+                  - $ref: '#/components/schemas/PageSummary'
+                  - type: object
+                    required: [icon, excerpt, path, titleMatch, excerptMatch]
+                    properties:
+                      icon: { type: [string, 'null'] }
+                      excerpt: { type: string }
+                      path: { type: array, items: { type: string } }
+                      titleMatch:
+                        type: [object, 'null']
+                        properties:
+                          start: { type: integer, minimum: 0 }
+                          end: { type: integer, minimum: 0 }
+                      excerptMatch:
+                        type: [object, 'null']
+                        properties:
+                          start: { type: integer, minimum: 0 }
+                          end: { type: integer, minimum: 0 }
+            nextCursor: { type: [string, 'null'] }
+    PageResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/PageSummary'
+                - type: object
+                  required: [format, content, createdAt]
+                  properties:
+                    format: { type: string, enum: [markdown, text, tiptap-json] }
+                    content:
+                      oneOf:
+                        - type: string
+                        - type: object
+                          additionalProperties: true
+                    createdAt: { type: string, format: date-time }
+    Error:
+      type: object
+      required: [error, requestId]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+        requestId: { type: string }
+  responses:
+    BadRequest:
+      description: 请求参数不正确
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthorized:
+      description: Token 缺失或无效
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: OA user id 不在已同步的活跃用户目录中
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: 资源不存在或当前用户不可见
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    RateLimited:
+      description: 超过当前分钟限额
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    InternalError:
+      description: 知识库内部临时错误
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    ServiceUnavailable:
+      description: Agent API 固定 Token 未正确配置
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }

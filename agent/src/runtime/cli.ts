@@ -2,7 +2,9 @@ import { runCodexAgent } from "../application/runCodexAgent.js";
 import { loadConfig } from "../config/config.js";
 import { startModelRelay } from "../infrastructure/codex/modelRelay.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
-import { routeOpenApiCandidates } from "../infrastructure/oa/openApiRouter.js";
+import { routeOpenApiRequest } from "../infrastructure/oa/openApiRouter.js";
+import { mergeOpenApiIndexes } from "../infrastructure/oa/openApiIndex.js";
+import { resolveKnowledgeBaseContracts } from "../infrastructure/knowledgebase/knowledgeBaseContract.js";
 
 async function main(): Promise<void> {
   const userTask = process.argv.slice(2).join(" ").trim();
@@ -24,7 +26,10 @@ async function main(): Promise<void> {
   console.error(`[agent] provider=${baseConfig.modelProvider} model=${baseConfig.model}`);
   console.error("[agent] 当前未注册 OA 调用工具;本次只做接口分析,不执行真实 OA 请求。");
 
-  const openapi = await resolveOpenApiContract(baseConfig);
+  const [openapi, knowledgeBase] = await Promise.all([
+    resolveOpenApiContract(baseConfig),
+    resolveKnowledgeBaseContracts(baseConfig),
+  ]);
   console.error(
     openapi.source === "remote"
       ? `[agent] OpenAPI 使用远程地址:${baseConfig.openapiUrl}`
@@ -34,16 +39,22 @@ async function main(): Promise<void> {
   const config = { ...baseConfig, modelRelayBaseUrl: modelRelay.baseUrl };
   let result;
   try {
-    const openApiCandidates = await routeOpenApiCandidates(
+    const route = await routeOpenApiRequest(
       config,
-      openapi.index,
+      mergeOpenApiIndexes([
+        openapi.index,
+        knowledgeBase.read.index,
+        ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
+      ]),
       { task: userTask, conversationMemory: null },
     );
     result = await runCodexAgent(
       { ...config, openapiPath: openapi.path },
       userTask,
       {
-        openApiCandidates,
+        openApiCandidates: route.candidates,
+        selectedApiCatalogs: route.catalogs,
+        knowledgeBaseWriteContractAvailable: knowledgeBase.write !== null,
       },
     );
   } finally {

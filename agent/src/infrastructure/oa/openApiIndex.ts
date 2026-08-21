@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const INDEX_VERSION = 2;
+const INDEX_VERSION = 3;
 const INDEX_FILE_NAME = "openapi-index.json";
 const OPENAPI_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 const MAX_RESPONSE_FIELDS = 32;
@@ -11,6 +11,10 @@ const MAX_RESPONSE_DEPTH = 4;
 type JsonRecord = Record<string, unknown>;
 
 export type OpenApiPermissionLevel = "public" | "user" | "admin" | "unknown";
+export type OpenApiCatalog =
+  | "oa"
+  | "knowledge_base_read"
+  | "knowledge_base_write";
 
 export type OpenApiIndexParameter = {
   name: string;
@@ -20,6 +24,7 @@ export type OpenApiIndexParameter = {
 };
 
 export type OpenApiOperationIndexEntry = {
+  catalog: OpenApiCatalog;
   operationId: string;
   method: string;
   path: string;
@@ -40,7 +45,10 @@ export type OpenApiOperationIndex = {
 
 const resolvedIndexCache = new Map<string, Promise<OpenApiOperationIndex>>();
 
-export function buildOpenApiIndex(document: unknown): OpenApiOperationIndex {
+export function buildOpenApiIndex(
+  document: unknown,
+  catalog: OpenApiCatalog = "oa",
+): OpenApiOperationIndex {
   const documentHash = hashOpenApiDocument(document);
   const root = toRecord(document) ?? {};
   const paths = toRecord(root.paths);
@@ -62,6 +70,7 @@ export function buildOpenApiIndex(document: unknown): OpenApiOperationIndex {
       const summary = stringValue(operation.summary);
       const tags = stringArray(operation.tags);
       operations.push({
+        catalog,
         operationId,
         method: method.toUpperCase(),
         path: operationPath,
@@ -88,6 +97,26 @@ export function buildOpenApiIndex(document: unknown): OpenApiOperationIndex {
     operations: operations.sort((left, right) =>
       left.operationId.localeCompare(right.operationId),
     ),
+  };
+}
+
+export function mergeOpenApiIndexes(
+  indexes: OpenApiOperationIndex[],
+): OpenApiOperationIndex {
+  const operations = indexes
+    .flatMap((index) => index.operations)
+    .sort(
+      (left, right) =>
+        left.catalog.localeCompare(right.catalog) ||
+        left.operationId.localeCompare(right.operationId),
+    );
+  return {
+    version: INDEX_VERSION,
+    documentHash: createHash("sha256")
+      .update(indexes.map((index) => index.documentHash).join("\u0000"))
+      .digest("hex"),
+    generatedAt: new Date().toISOString(),
+    operations,
   };
 }
 
