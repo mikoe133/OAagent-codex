@@ -34,6 +34,7 @@
     "dotenv": "^16.4.5",
     "kysely": "^0.29.5",
     "mysql2": "^3.23.3",
+    "yaml": "^2.8.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {

@@ -27,6 +27,30 @@ describe("chat OpenAPI safety", () => {
       }),
       true,
     );
+    assert.equal(
+      isChatOpenApiOperationAllowed("/internalization-guides", {
+        operationId: "internalization_guides_get",
+        tags: ["internationalization"],
+      }),
+      true,
+    );
+  });
+
+  it("hides internal service operations from chat", () => {
+    assert.equal(
+      isChatOpenApiOperationAllowed("/internal/project-sync/projects", {
+        operationId: "project_sync_projects_get",
+        tags: ["projects"],
+      }),
+      false,
+    );
+    assert.equal(
+      isChatOpenApiOperationAllowed("/project-sync/projects", {
+        operationId: "project_sync_projects_get",
+        tags: ["project-sync-internal"],
+      }),
+      false,
+    );
   });
 
   it("materializes and indexes a contract without administrator operations", async () => {
@@ -104,6 +128,14 @@ describe("chat OpenAPI safety", () => {
         { operationId: "role_admin_list_get", query: {} },
         "user-session-token",
       );
+      const internalService = await callOaApiTool(
+        fixture.config,
+        {
+          operationId: "project_sync_projects_internal_get",
+          query: {},
+        },
+        "user-session-token",
+      );
       const allowed = await callOaApiTool(
         fixture.config,
         { operationId: "user_info_user_user_list_get", query: {} },
@@ -118,6 +150,8 @@ describe("chat OpenAPI safety", () => {
       assert.equal(taggedAdmin.error?.code, "operation_not_found");
       assert.equal(operationIdAdmin.ok, false);
       assert.equal(operationIdAdmin.error?.code, "operation_not_found");
+      assert.equal(internalService.ok, false);
+      assert.equal(internalService.error?.code, "operation_not_found");
       assert.equal(allowed.ok, true);
       assert.equal(oaRequestCount, 1);
     } finally {
@@ -190,6 +224,20 @@ function createContract() {
         get: {
           operationId: "weekly_admin_report_list_get",
           tags: ["weekly-report"],
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      "/internal/project-sync/projects": {
+        get: {
+          operationId: "project_sync_projects_internal_get",
+          tags: ["project-sync-internal"],
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      "/project-sync/projects": {
+        get: {
+          operationId: "project_sync_projects_get",
+          tags: ["project-sync-internal"],
           responses: { "200": { description: "ok" } },
         },
       },

@@ -38,6 +38,7 @@ Repository Secrets:
 | `DEPLOY_KNOWN_HOSTS` | 已核对的服务器 SSH Host Key |
 | `NEXTTOKEN_API_KEY` | Agent 模型服务凭证 |
 | `OPENROUTER_API_KEY` | OpenRouter 模型服务凭证 |
+| `OA_KNOWLEDGE_BASE_API_KEY` | 测试和生产共用的知识库服务端凭证；只配置一次 |
 | `PROJECT_PROGRESS_GITHUB_TOKEN` | AI GitHub 账号的只读 fine-grained PAT |
 
 Repository Variables:
@@ -59,7 +60,7 @@ Environment Secrets:
 | `test` / `production` | `DATABASE_URL` | 对应环境的 Node 自动任务 MySQL Secret |
 | `test` / `production` | `OA_SESSION_SECRET` | 与对应原 OA 一致的 sessionid 签名 Secret |
 
-以上五类 Secret 应在 `test` 和 `production` 分别配置，不能用同一个 Repository Secret 同时覆盖两个环境。模型 Key、部署 SSH 凭证和只读 GitHub PAT 可以在两个环境确实共用时保留为 Repository Secret。
+以上五类 Secret 应在 `test` 和 `production` 分别配置，不能用同一个 Repository Secret 同时覆盖两个环境。模型 Key、知识库 Key、部署 SSH 凭证和只读 GitHub PAT 可以在两个环境确实共用时保留为 Repository Secret。
 
 Environment Variables:
 
@@ -67,6 +68,7 @@ Environment Variables:
 | --- | --- | --- |
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
+| 两者可选 | `OA_KNOWLEDGE_API_BASE_URL` | 知识库 Agent API 地址，默认使用生产地址 |
 | 两者 | `AUTOMATION_API_BASE_URL` | Compose 内固定为 `http://agent:3000`，无需配置 |
 | 两者可选 | `PROJECT_SYNC_API_BASE_URL` | 原 OA 项目同步服务地址；未配置时继承 `OA_DOCKER_API_BASE_URL` |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),必须是正整数 |
@@ -83,11 +85,13 @@ Environment Variables:
 | 两者可选 | `PROJECT_PROGRESS_AGENT_CONCURRENCY` | 同时运行的仓库 Codex Thread 数，默认 `2` |
 | 两者可选 | `PROJECT_PROGRESS_OA_WRITE_CONCURRENCY` | OA mutation 并发，当前固定为 `1` |
 | 两者可选 | `AUTOMATION_MIGRATE_ON_START` | 默认 `true`；启动 Agent 前执行幂等 baseline/seed |
-| 两者可选 | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `false`；正式切流后必须显式改为 `true` |
+| 两者可选 | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `true`；仅在需要暂停自动调度时显式设为 `false` |
 | 两者可选 | `AUTOMATION_MAINTENANCE_INTERVAL_SECONDS` | 默认 `30` |
 | 两者可选 | `OA_SESSION_VERIFY_MAX_AGE` | 默认 `0`，只验签不限制年龄 |
 
 Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份,同时通过私有 Artifact 和 SSH 把镜像加载到服务器。服务器不登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
+
+两个部署 Job 都通过 `${{ secrets.OA_KNOWLEDGE_BASE_API_KEY }}` 读取同一个 Repository Secret。Secret 仅在部署 Job 中生成服务器运行时 `.env`，再由 Compose 注入 `agent` 容器，不会写入 Docker 镜像，也不会提供给 PR、构建镜像 Job、Web 或 Worker 容器。
 
 当前单 `agent` 实例使用进程内手动触发限流，不读取 `REDIS_URL`。在代码接入共享 Redis 前不要新增一个看似生效但实际未使用的 Redis Secret。
 

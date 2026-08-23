@@ -3,12 +3,25 @@ import test from "node:test";
 
 import { parseAutomationConfig } from "../src/config/automationConfig.js";
 
-test("disables storage cleanly when DATABASE_URL is absent", () => {
-  const config = parseAutomationConfig({});
+test("enables automatic maintenance by default", () => {
+  const config = parseAutomationConfig({
+    DATABASE_URL: "mysql://oagent:password@localhost:3306/oagent_test",
+    OA_SESSION_SECRET: "shared-secret",
+  });
 
-  assert.equal(config.databaseUrl, null);
-  assert.equal(config.maintenanceEnabled, false);
+  assert.equal(config.databaseUrl?.pathname, "/oagent_test");
+  assert.equal(config.maintenanceEnabled, true);
   assert.equal(config.sessionVerifyMaxAgeSeconds, 0);
+});
+
+test("allows automatic maintenance to be disabled explicitly", () => {
+  const config = parseAutomationConfig({
+    DATABASE_URL: "mysql://oagent:password@localhost:3306/oagent_test",
+    OA_SESSION_SECRET: "shared-secret",
+    AUTOMATION_MAINTENANCE_ENABLED: "false",
+  });
+
+  assert.equal(config.maintenanceEnabled, false);
 });
 
 test("parses the Node automation runtime settings", () => {
@@ -59,4 +72,3 @@ test("rejects unsupported database protocols and invalid booleans", () => {
     /AUTOMATION_MAINTENANCE_ENABLED/,
   );
 });
-

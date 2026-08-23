@@ -13,25 +13,29 @@ import {
   ExternalLink,
   GitCompareArrows,
   Globe2,
+  Library,
   LoaderCircle,
   MessageSquareText,
   Plus,
   SearchCode,
-  Terminal,
+  SquareTerminal,
   ThumbsDown,
   ThumbsUp,
+  UserRoundSearch,
   Wrench,
 } from "lucide-react"
 
 import { Accordion, AccordionContent, AccordionItem } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { copyText } from "@/lib/copy-text"
 import { formatResponseDuration } from "@/lib/response-duration"
 import { cn } from "@/lib/utils"
 import type { Message } from "./chat-shell"
 import type { ToolStep, ToolStepStatus, TraceMessage } from "./chat-stream"
 import { MarkdownRenderer } from "./markdown-renderer"
 import { AnimatedOrb } from "./animated-orb"
+import { KnowledgeSourceShowcase } from "./knowledge-source-showcase"
 
 interface MessageBubbleProps {
   message: Message
@@ -128,6 +132,9 @@ export function MessageBubble({
                 <MarkdownRenderer content={message.content} className={cn(toolSteps.length > 0 && "mt-4")} />
               </div>
             )}
+            {!assistantIsStreaming && message.knowledgeSources?.length ? (
+              <KnowledgeSourceShowcase sources={message.knowledgeSources} />
+            ) : null}
             {message.status === "failed" && (
               <div className="mt-3 flex max-w-2xl items-start gap-2 rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs leading-5 text-rose-700 theme-dark:border-rose-900 theme-dark:bg-rose-950/40 theme-dark:text-rose-300">
                 <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -548,21 +555,46 @@ function StreamingMessageTrace({
 
 function ToolTimelineItem({ step }: { step: ToolStep }) {
   const hasDetails = Boolean(step.input || step.output)
+  const apiTraceType = resolveApiTraceType(step)
 
   return (
     <div className="relative grid grid-cols-[1.75rem_minmax(0,1fr)] gap-2.5">
       <span
         data-slot="trace-tool-icon"
-        className="relative z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white theme-dark:bg-zinc-950"
+        data-trace-tool-type={apiTraceType || step.type}
+        className={cn(
+          "relative z-10 flex h-7 w-7 items-center justify-center rounded-md",
+          apiTraceType === "oa_api"
+            ? "bg-sky-50 theme-dark:bg-sky-950/40"
+            : apiTraceType === "knowledge_base_api"
+              ? "bg-amber-50 theme-dark:bg-amber-950/40"
+              : "bg-white theme-dark:bg-zinc-950",
+        )}
       >
-        <ToolIcon step={step} />
+        <ToolIcon step={step} apiTraceType={apiTraceType} />
       </span>
       <div className="min-w-0 pt-0.5">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-xs font-semibold text-stone-800 theme-dark:text-zinc-200">{step.title}</span>
+          <span
+            className={cn(
+              "text-xs font-semibold",
+              apiTraceType === "oa_api"
+                ? "text-sky-600/75 theme-dark:text-sky-400/80"
+                : apiTraceType === "knowledge_base_api"
+                  ? "text-amber-700/75 theme-dark:text-amber-400/80"
+                  : step.type === "command_execution"
+                    ? "text-stone-500 theme-dark:text-zinc-400"
+                    : "text-stone-800 theme-dark:text-zinc-200",
+            )}
+          >
+            {step.title}
+          </span>
           <span
             data-slot="trace-tool-status"
-            className={cn("text-[0.625rem] font-medium uppercase", statusClass(step.status))}
+            className={cn(
+              "text-[0.625rem] font-medium uppercase",
+              statusClass(step.status, apiTraceType, step.type),
+            )}
           >
             {statusLabel(step.status)}
           </span>
@@ -596,7 +628,50 @@ function ToolDetail({ label, value }: { label: string; value: string }) {
   )
 }
 
-function ToolIcon({ step }: { step: ToolStep }) {
+type ApiTraceType = "oa_api" | "knowledge_base_api" | null
+
+function resolveApiTraceType(step: ToolStep): ApiTraceType {
+  if (step.type === "oa_api" || step.title === "OA API" || step.input?.includes("callOaApi.mjs")) {
+    return "oa_api"
+  }
+  if (
+    step.type === "knowledge_base_api" ||
+    step.title === "OA 知识库" ||
+    step.input?.includes("callKnowledgeBaseApi.mjs")
+  ) {
+    return "knowledge_base_api"
+  }
+  return null
+}
+
+function ToolIcon({ step, apiTraceType }: { step: ToolStep; apiTraceType: ApiTraceType }) {
+  if (apiTraceType === "oa_api") {
+    return (
+      <UserRoundSearch
+        className={cn("h-3.5 w-3.5 text-sky-600 theme-dark:text-sky-400", step.status === "running" && "animate-pulse")}
+        aria-hidden="true"
+      />
+    )
+  }
+  if (apiTraceType === "knowledge_base_api") {
+    return (
+      <Library
+        className={cn("h-3.5 w-3.5 text-amber-700 theme-dark:text-amber-400", step.status === "running" && "animate-pulse")}
+        aria-hidden="true"
+      />
+    )
+  }
+  if (step.type === "command_execution") {
+    return (
+      <SquareTerminal
+        className={cn(
+          "h-3.5 w-3.5 text-stone-700 theme-dark:text-zinc-300",
+          step.status === "running" && "animate-pulse",
+        )}
+        aria-hidden="true"
+      />
+    )
+  }
   if (step.status === "running") {
     return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[#b4fbde]" aria-hidden="true" />
   }
@@ -605,9 +680,6 @@ function ToolIcon({ step }: { step: ToolStep }) {
   }
   if (step.status === "failed") {
     return <CircleAlert className="h-3.5 w-3.5 text-rose-600 theme-dark:text-rose-400" aria-hidden="true" />
-  }
-  if (step.type === "command_execution") {
-    return <Terminal className="h-3.5 w-3.5 text-stone-500 theme-dark:text-zinc-400" aria-hidden="true" />
   }
   if (step.type === "web_search") {
     return <Globe2 className="h-3.5 w-3.5 text-stone-500 theme-dark:text-zinc-400" aria-hidden="true" />
@@ -625,33 +697,22 @@ function statusLabel(status: ToolStepStatus): string {
   return "Update"
 }
 
-function statusClass(status: ToolStepStatus): string {
+function statusClass(
+  status: ToolStepStatus,
+  apiTraceType: ApiTraceType = null,
+  toolType?: ToolStep["type"],
+): string {
   if (status === "running") return "text-[#c6e5ec] theme-dark:text-cyan-300"
+  if (status === "completed" && apiTraceType === "oa_api") {
+    return "text-sky-600/60 theme-dark:text-sky-400/70"
+  }
+  if (status === "completed" && apiTraceType === "knowledge_base_api") {
+    return "text-amber-700/60 theme-dark:text-amber-400/70"
+  }
+  if (status === "completed" && toolType === "command_execution") {
+    return "text-stone-400 theme-dark:text-zinc-500"
+  }
   if (status === "completed") return "text-[#00619a] theme-dark:text-sky-400"
   if (status === "failed") return "text-rose-700 theme-dark:text-rose-400"
   return "text-stone-400 theme-dark:text-zinc-500"
-}
-
-async function copyText(value: string): Promise<void> {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-
-  if (typeof document === "undefined") {
-    throw new Error("Clipboard is unavailable")
-  }
-
-  const textarea = document.createElement("textarea")
-  textarea.value = value
-  textarea.style.position = "fixed"
-  textarea.style.opacity = "0"
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand("copy")
-  textarea.remove()
-
-  if (!copied) {
-    throw new Error("Copy failed")
-  }
 }

@@ -20,7 +20,7 @@ test("validates the OA token against the authenticated current-user endpoint", a
       return Response.json({
         code: 200,
         success: true,
-        data: { email: "user@example.test" },
+        data: { user_id: 19, email: "user@example.test" },
       });
     },
   );
@@ -28,6 +28,7 @@ test("validates the OA token against the authenticated current-user endpoint", a
   assert.deepEqual(result, {
     status: "valid",
     principalId: createHash("sha256").update("user@example.test").digest("hex"),
+    oaUserId: "19",
   });
   assert.equal(requestUrl?.pathname, "/user/user");
   assert.equal(requestUrl?.searchParams.get("alias"), "production");

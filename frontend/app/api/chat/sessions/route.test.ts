@@ -163,6 +163,14 @@ test("PATCH persists the immutable creation time from generated session ids", as
           afterStepId: "tool-1",
         },
       ],
+      knowledgeSources: [
+        {
+          title: "生产部署手册",
+          description: "发布前请确认数据库迁移。",
+          originalContent: "发布前请确认数据库迁移、镜像版本和部署窗口。",
+          sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+        },
+      ],
       status: "completed",
     },
   ]

@@ -3,13 +3,68 @@ import test from "node:test"
 
 import {
   drainChatSseBuffer,
+  finalizeToolSteps,
   mergeMessageTraceDelta,
   mergeToolTimelineEvent,
+  normalizeKnowledgeSources,
+  requireCompletedChatRun,
   withTraceMessages,
   type ChatStreamEvent,
   type TraceMessage,
   type ToolStep,
 } from "./chat-stream"
+
+test("normalizes safe knowledge sources from a completed run", () => {
+  assert.deepEqual(
+    normalizeKnowledgeSources([
+      {
+        title: "生产部署手册",
+        description: "发布前请确认数据库迁移。",
+        originalContent: "较短原文。",
+        sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+      },
+      {
+        title: "生产部署手册",
+        description: "发布前请确认数据库迁移。",
+        originalContent: "发布前请确认数据库迁移、镜像版本和部署窗口。",
+        sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+      },
+      {
+        title: "危险链接",
+        description: "不应显示",
+        sourceUrl: "javascript:alert(1)",
+      },
+    ]),
+    [
+      {
+        title: "生产部署手册",
+        description: "发布前请确认数据库迁移。",
+        originalContent: "发布前请确认数据库迁移、镜像版本和部署窗口。",
+        sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+      },
+    ],
+  )
+})
+
+test("uses the displayed description as copy content for legacy knowledge sources", () => {
+  assert.deepEqual(
+    normalizeKnowledgeSources([
+      {
+        title: "旧版知识条目",
+        description: "旧会话保存的摘要。",
+        sourceUrl: "https://oa-kb.example.test/wiki/legacy-page",
+      },
+    ]),
+    [
+      {
+        title: "旧版知识条目",
+        description: "旧会话保存的摘要。",
+        originalContent: "旧会话保存的摘要。",
+        sourceUrl: "https://oa-kb.example.test/wiki/legacy-page",
+      },
+    ],
+  )
+})
 
 test("withTraceMessages retains collected trace messages when a turn finishes", () => {
   const traceMessages: TraceMessage[] = [
@@ -38,6 +93,28 @@ test("drainChatSseBuffer preserves partial events between chunks", () => {
   assert.equal(remainder, 'event: message.delta\ndata: {"type":"message.delta",')
 })
 
+test("requireCompletedChatRun rejects a stream that ended without run.completed", () => {
+  assert.throws(
+    () => requireCompletedChatRun(false),
+    /stream ended before.*run\.completed/i,
+  )
+  assert.doesNotThrow(() => requireCompletedChatRun(true))
+})
+
+test("finalizeToolSteps never promotes a tool without tool.completed to success", () => {
+  const runningStep: ToolStep = {
+    id: "oa-query",
+    type: "oa_api",
+    status: "running",
+    title: "OA API",
+    description: "Calling project query",
+  }
+
+  assert.equal(finalizeToolSteps([runningStep], "completed")[0]?.status, "failed")
+  assert.equal(finalizeToolSteps([runningStep], "failed")[0]?.status, "failed")
+  assert.equal(finalizeToolSteps([runningStep], "stopped")[0]?.status, "info")
+})
+
 test("mergeToolTimelineEvent keeps one tool row and accumulates streamed output", () => {
   let steps: ToolStep[] = []
 
@@ -51,7 +128,6 @@ test("mergeToolTimelineEvent keeps one tool row and accumulates streamed output"
   steps = mergeToolTimelineEvent(steps, {
     type: "tool.updated",
     itemId: "command-1",
-    toolType: "command_execution",
     status: "in_progress",
     outputDelta: "Compiling...\n",
   })
@@ -98,6 +174,39 @@ test("mergeToolTimelineEvent keeps structured MCP input and result", () => {
 
   assert.equal(steps[0]?.input, '{\n  "userId": 42\n}')
   assert.equal(steps[0]?.output, '{\n  "name": "Ada"\n}')
+})
+
+test("mergeToolTimelineEvent distinguishes OA and knowledge-base API calls", () => {
+  let oaSteps: ToolStep[] = []
+  oaSteps = mergeToolTimelineEvent(oaSteps, {
+    type: "tool.started",
+    itemId: "oa-api-1",
+    toolType: "command_execution",
+    name: "node scripts/callOaApi.mjs --operationId user_info_user_user_get --query '{}'",
+    status: "in_progress",
+  })
+  oaSteps = mergeToolTimelineEvent(oaSteps, {
+    type: "tool.updated",
+    itemId: "oa-api-1",
+    toolType: "command_execution",
+    status: "in_progress",
+    outputDelta: "Loading",
+  })
+
+  const knowledgeSteps = mergeToolTimelineEvent([], {
+    type: "tool.completed",
+    itemId: "knowledge-api-1",
+    toolType: "command_execution",
+    name: "node scripts/callKnowledgeBaseApi.mjs --operationId searchKnowledge --query '{}'",
+    status: "completed",
+  })
+
+  assert.equal(oaSteps[0]?.type, "oa_api")
+  assert.equal(oaSteps[0]?.title, "OA API")
+  assert.equal(oaSteps[0]?.description, "Calling user_info_user_user_get")
+  assert.equal(knowledgeSteps[0]?.type, "knowledge_base_api")
+  assert.equal(knowledgeSteps[0]?.title, "OA 知识库")
+  assert.equal(knowledgeSteps[0]?.description, "Calling searchKnowledge")
 })
 
 test("mergeMessageTraceDelta keeps separate agent messages and associates them with trace steps", () => {

@@ -1,3 +1,8 @@
+export {
+  normalizeKnowledgeSources,
+  type KnowledgeSource,
+} from "@/lib/knowledge-sources"
+
 export type ToolStepStatus = "running" | "completed" | "failed" | "info"
 
 export type ToolStep = {
@@ -9,6 +14,9 @@ export type ToolStep = {
   input?: string
   output?: string
 }
+
+const OA_API_TOOL_TYPE = "oa_api"
+const KNOWLEDGE_BASE_API_TOOL_TYPE = "knowledge_base_api"
 
 export type TraceMessage = {
   id: string
@@ -129,14 +137,34 @@ export function withTraceMessages<T extends object>(
   return traceMessages.length > 0 ? { ...message, traceMessages } : message
 }
 
+export function requireCompletedChatRun(completed: boolean): void {
+  if (!completed) {
+    throw new Error("Agent stream ended before run.completed.")
+  }
+}
+
+export function finalizeToolSteps(
+  steps: ToolStep[],
+  runStatus: "completed" | "failed" | "stopped",
+): ToolStep[] {
+  const incompleteStatus: ToolStepStatus = runStatus === "stopped" ? "info" : "failed"
+  return steps.map((step) =>
+    step.status === "running" ? { ...step, status: incompleteStatus } : step,
+  )
+}
+
 function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | null): ToolStep {
   const eventType = stringValue(event.type)
-  const toolType = stringValue(event.toolType) || previous?.type || (eventType === "progress" ? "progress" : "tool")
+  const previousRawToolType = previous?.type === OA_API_TOOL_TYPE || previous?.type === KNOWLEDGE_BASE_API_TOOL_TYPE
+    ? "command_execution"
+    : previous?.type
+  const rawToolType = stringValue(event.toolType) || previousRawToolType || (eventType === "progress" ? "progress" : "tool")
   const name = stringValue(event.name)
+  const toolType = resolveToolStepType(rawToolType, name, previous)
   const error = stringValue(event.error)
   const status = normalizeToolStatus(event.status, eventType, Boolean(error))
-  const input = resolveToolInput(toolType, event, name, previous)
-  const output = resolveToolOutput(toolType, event, error, previous)
+  const input = resolveToolInput(rawToolType, event, name, previous)
+  const output = resolveToolOutput(rawToolType, event, error, previous)
 
   return {
     id,
@@ -147,6 +175,19 @@ function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | 
     ...(input ? { input } : {}),
     ...(output ? { output } : {}),
   }
+}
+
+function resolveToolStepType(rawToolType: string, name: string | null, previous: ToolStep | null): string {
+  if (name?.includes("callKnowledgeBaseApi.mjs")) {
+    return KNOWLEDGE_BASE_API_TOOL_TYPE
+  }
+  if (name?.includes("callOaApi.mjs")) {
+    return OA_API_TOOL_TYPE
+  }
+  if (previous?.type === OA_API_TOOL_TYPE || previous?.type === KNOWLEDGE_BASE_API_TOOL_TYPE) {
+    return previous.type
+  }
+  return rawToolType
 }
 
 function normalizeToolStatus(rawStatus: unknown, eventType: string | null, hasError: boolean): ToolStepStatus {
@@ -180,8 +221,11 @@ function normalizeToolStatus(rawStatus: unknown, eventType: string | null, hasEr
 }
 
 function resolveToolTitle(toolType: string, name: string | null, previous: ToolStep | null): string {
-  if (name?.includes("callOaApi.mjs")) {
+  if (toolType === OA_API_TOOL_TYPE) {
     return "OA API"
+  }
+  if (toolType === KNOWLEDGE_BASE_API_TOOL_TYPE) {
+    return "OA 知识库"
   }
   if (toolType === "command_execution") {
     return "Command"
@@ -325,7 +369,7 @@ function readQuery(value: unknown): string | null {
 
 function describeToolName(name: string): string {
   const operationId = name.match(/--operationId\s+(['"]?)([^\s'"]+)\1/)?.[2]
-  if (name.includes("callOaApi.mjs") && operationId) {
+  if ((name.includes("callOaApi.mjs") || name.includes("callKnowledgeBaseApi.mjs")) && operationId) {
     return `Calling ${operationId}`
   }
   return compactText(name)

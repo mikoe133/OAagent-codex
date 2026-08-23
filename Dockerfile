@@ -37,6 +37,7 @@ COPY --from=agent-production-deps --chown=node:node /app/node_modules ./node_mod
 COPY --from=agent-build --chown=node:node /app/agent/dist ./agent/dist
 COPY --chown=node:node agent/package.json ./agent/package.json
 COPY --chown=node:node agent/openapi ./agent/openapi
+COPY --chown=node:node agent/knowledgebaseapi ./agent/knowledgebaseapi
 COPY --chown=node:node agent/prompts ./agent/prompts
 COPY --chown=node:node agent/scripts ./agent/scripts
 COPY --chown=node:node scripts/sql ./scripts/sql
