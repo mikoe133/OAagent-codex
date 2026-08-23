@@ -22,6 +22,8 @@ import {
   type ModelProviderId,
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
+import { callKnowledgeBaseApiTool } from "../infrastructure/knowledgebase/knowledgeBaseApiTool.js";
+import { recordKnowledgeBaseSourceResult } from "../infrastructure/knowledgebase/knowledgeBaseSources.js";
 import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
 import type { SessionStore } from "../infrastructure/persistence/sessionStore.js";
 import type { AutomationHttpApplication } from "../automation/http/automationHttpApplication.js";
@@ -135,6 +137,40 @@ async function routeRequest(
     return;
   }
 
+  if (
+    method === "POST" &&
+    url.pathname === "/__internal/call-knowledge-base-api"
+  ) {
+    if (!isLoopbackRequest(request)) {
+      writeJson(response, 403, { error: "forbidden" });
+      return;
+    }
+    if (request.headers.authorization !== `Bearer ${config.oaApiToolToken}`) {
+      writeJson(response, 401, { error: "unauthorized" });
+      return;
+    }
+    const body = await readJsonBody(request);
+    const sessionId = stringField(body, "sessionId");
+    if (!sessionId || !isValidSessionId(sessionId)) {
+      writeJson(response, 200, {
+        ok: false,
+        error: {
+          code: "invalid_session_id",
+          message: "知识库调用必须提供合法 sessionId。",
+        },
+      });
+      return;
+    }
+    const result = await callKnowledgeBaseApiTool(
+      config,
+      body,
+      sessionStore.getOaUserId(sessionId),
+    );
+    recordKnowledgeBaseSourceResult(sessionId, result);
+    writeJson(response, 200, result);
+    return;
+  }
+
   if (automationHttp && (await automationHttp.handle(request, response, url))) {
     return;
   }
@@ -185,6 +221,7 @@ async function routeRequest(
         sessionId,
         oaApiToken,
         tokenValidation.principalId,
+        tokenValidation.oaUserId,
       ))
     ) {
       writeJson(response, 403, { error: "forbidden" });
@@ -227,6 +264,7 @@ async function routeRequest(
         sessionId,
         oaApiToken,
         tokenValidation.principalId,
+        tokenValidation.oaUserId,
       ))
     ) {
       writeJson(response, 403, { error: "forbidden" });
@@ -249,6 +287,7 @@ async function routeRequest(
       provider: selection.provider,
       model: selection.model,
       oaApiToken,
+      oaUserId: tokenValidation.oaUserId,
     });
     writeJson(response, 200, result);
     return;
@@ -265,6 +304,7 @@ async function routeRequest(
         sessionId,
         oaApiToken,
         tokenValidation.principalId,
+        tokenValidation.oaUserId,
       ))
     ) {
       writeJson(response, 403, { error: "forbidden" });
@@ -287,6 +327,7 @@ async function routeRequest(
       provider: selection.provider,
       model: selection.model,
       oaApiToken,
+      oaUserId: tokenValidation.oaUserId,
     });
     return;
   }

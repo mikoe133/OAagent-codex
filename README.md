@@ -6,7 +6,7 @@
 - `frontend/`: Next.js 前端工作区,包含登录、会话列表、流式聊天 UI 和服务端 BFF。
 - 根目录: 只负责统一安装依赖、调度 workspace 脚本、保存共享文档和 `.env`。
 
-agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`)获取 OA 接口契约;远程请求失败、返回非 2xx 或内容不是合法 OpenAPI JSON 时,自动回退到 `agent/openapi/openapi.json`。选中的契约是回答 OA 后端接口问题的唯一事实来源,不引入额外 Skill、MCP、function tools 或多 agent 编排。详见 [docs/agent-demo-implementation-plan.md](docs/agent-demo-implementation-plan.md)。
+agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`)获取 OA 接口契约;远程请求失败、返回非 2xx 或内容不是合法 OpenAPI JSON 时,自动回退到 `agent/openapi/openapi.json`。公司制度、手册、规范、指南等文档内容问题则独立路由到 `agent/knowledgebaseapi/knowledgebaseapi.yaml`,不会与结构化 OA 接口混用。两类选中的契约是接口能力的唯一事实来源,不引入额外 Skill、MCP、function tools 或多 agent 编排。
 
 ## 运行
 
@@ -37,7 +37,7 @@ SSO code 默认在 Agent 进程内存中保存 60 秒并只能消费一次，单
 
 默认监听 `http://127.0.0.1:3000`,并把 `sessionId -> Codex threadId` 映射持久化到 `.context/agent-sessions.json`。完整接口说明见 [docs/server-api.md](docs/server-api.md)。
 
-后台服务不包含按关键词硬编码的 OA 直连分支。所有消息都会进入 Codex agent,由 agent 基于远程优先、本地兜底选中的 OpenAPI 契约分析接口能力;配置 `OA_API_BASE_URL` 后,agent 可通过受控 `callOaApi` 工具调用 OpenAPI 中声明的 OA 接口。Web 和 agent 使用同一枚用户 OA token,并分别通过 OA 的已登录用户接口验证。
+后台服务不包含业务直连分支。所有消息都会进入 Codex agent,由语义路由先区分结构化 OA 数据和知识库文档内容,再基于对应 OpenAPI 契约分析接口能力。配置 `OA_API_BASE_URL` 后可通过受控 `callOaApi` 工具调用 OA;配置 `OA_KNOWLEDGE_BASE_API_KEY` 后可通过受控知识库工具查询或按确认执行写操作。仅在调用知识库统一读写契约时,服务端组装 `Authorization: Bearer <OA_KNOWLEDGE_BASE_API_KEY>` 和当前已验证登录用户的 `X-OA-User-Id`,并为写请求生成 `Idempotency-Key`;Agent 不能填写或覆盖任何 Header。知识库写操作始终要求确认,且不会改走 OA。
 
 ```bash
 # 创建 session。不传 sessionId 时服务自动生成。

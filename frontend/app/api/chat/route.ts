@@ -30,6 +30,7 @@ type AgentStreamEvent = {
   text?: unknown
   result?: {
     finalResponse?: unknown
+    knowledgeSources?: unknown
   }
 }
 
@@ -183,6 +184,7 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
     async start(controller) {
       let buffer = ""
       let failed = false
+      let terminalRunEventReceived = false
 
       const enqueueEvent = (event: AgentStreamEvent) => {
         controller.enqueue(encoder.encode(formatSseEvent(event)))
@@ -196,6 +198,7 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
         }
 
         if (event.type === "run.completed") {
+          terminalRunEventReceived = true
           const finalResponse = event.result?.finalResponse
           if (typeof finalResponse === "string" && finalResponse && !emittedText) {
             emittedText = finalResponse
@@ -211,6 +214,7 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
 
         if (event.type === "run.failed") {
           failed = true
+          terminalRunEventReceived = true
           enqueueEvent(event)
           return
         }
@@ -237,6 +241,13 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
         if (failed) {
           controller.close()
           return
+        }
+
+        if (!terminalRunEventReceived) {
+          enqueueEvent({
+            type: "run.failed",
+            error: "Agent stream ended before a terminal run event.",
+          })
         }
 
         controller.close()

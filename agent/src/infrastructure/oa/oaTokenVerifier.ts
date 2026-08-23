@@ -6,7 +6,7 @@ export type OaTokenValidationConfig = {
 };
 
 export type OaTokenValidationResult =
-  | { status: "valid"; principalId: string }
+  | { status: "valid"; principalId: string; oaUserId: string | null }
   | { status: "invalid" }
   | { status: "unavailable" };
 
@@ -14,6 +14,8 @@ type OaUserEnvelope = {
   code?: unknown;
   success?: unknown;
   data?: {
+    user_id?: unknown;
+    id?: unknown;
     email?: unknown;
   } | null;
 };
@@ -72,7 +74,20 @@ export async function validateOaToken(
   return {
     status: "valid",
     principalId: createHash("sha256").update(email).digest("hex"),
+    oaUserId: stableOaUserId(payload.data?.user_id ?? payload.data?.id),
   };
+}
+
+function stableOaUserId(value: unknown): string | null {
+  const normalized =
+    typeof value === "number" && Number.isSafeInteger(value)
+      ? String(value)
+      : typeof value === "string"
+        ? value.trim()
+        : "";
+  return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,119}$/.test(normalized)
+    ? normalized
+    : null;
 }
 
 function buildOaSessionHeaders(token: string): Headers {

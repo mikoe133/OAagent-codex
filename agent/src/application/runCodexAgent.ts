@@ -1,7 +1,10 @@
 import type { ThreadItem } from "@openai/codex-sdk";
 import path from "node:path";
 import type { AppConfig } from "../config/config.js";
-import type { OpenApiOperationIndexEntry } from "../infrastructure/oa/openApiIndex.js";
+import type {
+  OpenApiCatalog,
+  OpenApiOperationIndexEntry,
+} from "../infrastructure/oa/openApiIndex.js";
 import {
   createCodexClient,
   startOrResumeThread,
@@ -24,7 +27,10 @@ export type AgentRunResult = {
 export type AgentRuntimeContext = {
   sessionId?: string | null;
   hasSessionOaApiToken?: boolean;
+  hasSessionOaUserId?: boolean;
   openApiCandidates?: OpenApiOperationIndexEntry[];
+  selectedApiCatalogs?: OpenApiCatalog[];
+  knowledgeBaseWriteContractAvailable?: boolean;
   oaQueryPolicy?: OaQueryPolicy;
 };
 
@@ -60,62 +66,130 @@ export function buildRuntimeContext(
   runtime: AgentRuntimeContext = {},
 ): string {
   const hasAnyOaApiToken = Boolean(runtime.hasSessionOaApiToken);
+  const hasOaUserId = Boolean(runtime.hasSessionOaUserId);
   const openapiPath = displayOpenApiPath(config);
+  const selectedCatalogs = resolveSelectedCatalogs(runtime);
+  const usesOa = selectedCatalogs.includes("oa");
+  const usesKnowledgeBase = selectedCatalogs.some((catalog) =>
+    catalog.startsWith("knowledge_base_"),
+  );
+  const knowledgeBaseContractPath = displayConfiguredPath(
+    config,
+    config.knowledgeBaseOpenapiPath ??
+      path.join(config.projectRoot, "knowledgebaseapi", "knowledgebaseapi.yaml"),
+  );
   const candidateContext = formatOpenApiCandidates(runtime.openApiCandidates ?? []);
-  const oaApiBudgetContext = formatOaQueryPolicy(runtime.oaQueryPolicy);
+  const oaApiBudgetContext = usesOa
+    ? formatOaQueryPolicy(runtime.oaQueryPolicy)
+    : null;
   const commandSessionArg = runtime.sessionId
     ? ` --sessionId ${runtime.sessionId}`
     : "";
+  const oaGuidance = usesOa
+    ? [
+        "- OA 工具对大响应采用渐进式读取:首次结果若 data.mode=inspect,其中 structure 只用于识别相关 JSON 路径和字段,样例值不能代表完整数组内容。",
+        "- inspect 里暴露的 fields/itemFields 只是检索提示;遇到分组或嵌套数组时,优先把 responsePath 指到具体子数组,且 responsePath 支持中文等非 ASCII 字段名。",
+        "- 收到 responseId 后不要重复调用原 OA operation;使用同一 responseId 和 responsePath 执行 find、filter、count、group_count 或 read。本地分析扫描已缓存的完整响应,不产生新的 OA 请求。",
+        "- 人员身份可能落在 full_name、username、wx_name、qq_name、email、alias 或 name。用 find 的 $or 条件一次检索,不要先读全量列表再肉眼扫描;find 返回的 matchedBy 用于说明实际命中字段。",
+        "- 任一身份字段精确命中都是有效身份命中,即使 full_name 与用户输入不同也不得表述为未查到;应说明输入命中了哪个别名、用户名或联系方式字段。",
+        "- 身份命中且结果已包含当前问题所需信息时,立即结束工具调用并回答;仅当用户明确要求的技能、项目、周报等信息尚未返回时,才继续调用对应业务接口。",
+        "- 工具检索必须保持问题域相关:身份查询不得扩展到薪资、权限、聊天、文件、问答等无关域;只有用户明确询问这些信息时才进入对应接口。",
+        "- 存在性查询优先用 find,统计用 count/group_count,只有用户确实需要查看明细时才用 read 分块读取;不得仅根据 structure.sample 判断目标不存在。",
+        "- 按项目名称查询项目状态、进展或更新时,优先使用扁平分页的 projects_list_projects_list_by_project_get 定位 project_name 和项目 ID;只有按人员查询参与项目时才使用 projects_list_projects_list_by_person_get。",
+        "- 项目列表进入 inspect 模式后,必须使用 responseId 在 $.data.items 上按 project_name 执行 find;名称可能存在空格或大小写差异时使用 contains operator,不得停在 inspect 或仅回复后续计划。",
+        "- 只有 coverage=complete 时,全量 find 未命中或全量统计才可作为完整结论。coverage=partial 或 unknown 且未命中时不得断言不存在、不得把当前数量当作总数;应继续处理分页或明确说明完整性限制。",
+        "- 已确认的批量写操作按记录独立处理;单条失败时记录结果并继续处理其余记录,只有认证、权限、确认或共享前置条件失败才停止整批。",
+        "- 项目 ID 缺失时先通过只读项目列表和详情重新发现并处理分页;历史或归档状态不是项目不可更新的证据,无法唯一匹配时只跳过该条。",
+        "- 维护项目 GitHub 地址时先映射项目名称和 ID,再使用请求 schema 声明 github_urls 的项目更新接口;不得误用 Commit 摘要接口,写入后应回查并汇总每条结果。",
+        config.oaApiBaseUrl && hasAnyOaApiToken
+          ? [
+              "- 受控 OA API 调用工具: 可用",
+              "- OA 登录态: 已从当前请求 header 绑定到 session;不要读取、输出或转述该 token",
+              `- 接口中的 alias 是 OA 数据源别名,不是姓名或业务筛选条件;受控工具会自动固定为 ${config.oaAuthAlias},调用时不要传 alias`,
+              "- 需要真实调用 OA 后端时,先从候选接口索引选择 operationId,必要时按上述规则读取一次精确 schema,再运行:",
+              `  node scripts/callOaApi.mjs${commandSessionArg} --operationId <operationId> --query '<JSON对象>'`,
+              "- 有 path parameters 时加 --pathParams '<JSON对象>';有 request body 时加 --body '<JSON值>'",
+              `- 渐进式查找示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action find --responsePath '$.data' --conditions '{"full_name":"目标姓名"}' --fields '["id","full_name"]'`,
+              `- 项目名称查找示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action find --responsePath '$.data.items' --conditions '{"project_name":{"operator":"contains","value":"目标项目名"}}' --fields '["id","project_name","status","updated_at","describe"]'`,
+              `- 多字段查找示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action find --responsePath '$.data' --conditions '{"$or":[{"full_name":"目标"},{"username":"目标"},{"wx_name":"目标"},{"qq_name":"目标"},{"email":"目标"},{"alias":"目标"}]}' --fields '["id","full_name","username","wx_name","qq_name","email","alias"]'`,
+              `- 分组统计示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action group_count --responsePath '$.data' --groupBy department`,
+              `- 分块读取示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action read --responsePath '$.data' --offset 0 --limit 20`,
+              "- 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认",
+              "- 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作必须先取得用户确认,再加 --confirmed true",
+              `- 处理 OA 查询时不要修改工作区文件;只允许按上述规则受限检索或精确读取 ${openapiPath} 并运行 scripts/callOaApi.mjs`,
+              "- 不要读取或输出 CALL_OA_API_URL、CALL_OA_API_TOKEN、请求 token 或 Authorization header",
+            ].join("\n")
+          : "- 受控 OA API 调用工具: 不可用;只能基于 OA 候选接口索引和 OA OpenAPI 做接口分析,不能声称已执行真实 OA 请求",
+      ].join("\n")
+    : null;
+  const knowledgeBaseToolAvailable = Boolean(
+    config.knowledgeBaseApiBaseUrl &&
+      config.knowledgeBaseApiToken &&
+      runtime.sessionId &&
+      hasOaUserId,
+  );
+  const knowledgeBaseGuidance = usesKnowledgeBase
+    ? [
+        "- 资料、制度、手册、规范、指南、流程说明等内容问题直接使用知识库接口，不要改走结构化 OA 接口。",
+        `- 知识库读写接口文档: ${knowledgeBaseContractPath}`,
+        "- 上述统一 OpenAPI 是知识库接口能力的唯一事实来源;不要读取其他知识库开发接入说明文档。",
+        knowledgeBaseToolAvailable
+          ? [
+              "- 受控知识库 API 调用工具: 可用",
+              "- Authorization Bearer 鉴权和 X-OA-User-Id 由服务端根据环境变量与当前已验证登录 session 自动注入;不要自行传入、猜测或覆盖",
+              "- 写请求的 Idempotency-Key 由服务端自动生成;不要自行传入、猜测或覆盖",
+              "- 从当前 knowledge_base_read 或 knowledge_base_write 候选选择 operationId,然后运行:",
+              `  node scripts/callKnowledgeBaseApi.mjs${commandSessionArg} --operationId <operationId> --query '<JSON对象>'`,
+              "- 多个知识库子问题必须分别提取核心业务实体并分别搜索;每个 q 只表达一个主题,不要把发票、宽带等无关实体合并查询。",
+              "- 知识库搜索 q 应保留用户原话中区分主题所需的完整核心短语,不要追加“配置”“信息”“资料”“内容”等通用扩展词;例如“发票抬头”保留为“发票 抬头”,“宽带配置”清洗为“宽带”。",
+              "- 服务端按语义长度动态补查:一个核心词只查一次,两个核心词查完整短语和主实体,三个及以上核心词再增加一个去掉末尾限定词的短语,总上限 3 次;结果相关时立即停止,不要重复发送、无限重试或自行发明同义词。",
+              "- 读取详情时使用 --pathParams '<JSON对象>';知识库搜索、浏览和读取不需要用户确认",
+              "- 任何知识库写操作都必须先取得用户确认,再加 --confirmed true;不得改用 OA 接口",
+              "- 不要读取或输出 CALL_KNOWLEDGE_BASE_API_URL、CALL_KNOWLEDGE_BASE_API_TOKEN、OA_KNOWLEDGE_BASE_API_KEY、Authorization、Idempotency-Key 或 X-OA-User-Id header",
+            ].join("\n")
+          : "- 受控知识库 API 调用工具: 不可用;只能基于知识库接口文档分析,不能声称已查询真实知识库",
+      ].join("\n")
+    : null;
 
   return [
     `- 模型 provider: ${config.modelProvider}`,
     `- 模型: ${config.model}`,
     runtime.sessionId ? `- 当前 sessionId: ${runtime.sessionId}` : null,
-    `- 完整接口文档: ${openapiPath}`,
+    `- 当前路由接口域: ${selectedCatalogs.join(", ")}`,
+    usesOa ? `- OA 完整接口文档: ${openapiPath}` : null,
     candidateContext,
     oaApiBudgetContext,
-    "- 必须优先从候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,允许在候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
+    "- 必须优先从当前路由接口域的候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,只允许在同一接口域候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
     `- 候选索引包含主要请求字段和响应字段。候选信息不足,或受限检索发现候选外 operation 时,才读取完整 schema,并精确限定到该 operation;具体读取次数服从本 turn 的动态查询模式。不得因候选接口未命中就直接断言接口不存在。`,
-    "- OA 工具对大响应采用渐进式读取:首次结果若 data.mode=inspect,其中 structure 只用于识别相关 JSON 路径和字段,样例值不能代表完整数组内容。",
-    "- inspect 里暴露的 fields/itemFields 只是检索提示;遇到分组或嵌套数组时,优先把 responsePath 指到具体子数组,且 responsePath 支持中文等非 ASCII 字段名。",
-    "- 收到 responseId 后不要重复调用原 OA operation;使用同一 responseId 和 responsePath 执行 find、filter、count、group_count 或 read。本地分析扫描已缓存的完整响应,不产生新的 OA 请求。",
-    "- 人员身份可能落在 full_name、username、wx_name、qq_name、email、alias 或 name。用 find 的 $or 条件一次检索,不要先读全量列表再肉眼扫描;find 返回的 matchedBy 用于说明实际命中字段。",
-    "- 任一身份字段精确命中都是有效身份命中,即使 full_name 与用户输入不同也不得表述为未查到;应说明输入命中了哪个别名、用户名或联系方式字段。",
-    "- 身份命中且结果已包含当前问题所需信息时,立即结束工具调用并回答;仅当用户明确要求的技能、项目、周报等信息尚未返回时,才继续调用对应业务接口。",
-    "- 工具检索必须保持问题域相关:身份查询不得扩展到薪资、权限、聊天、文件、问答等无关域;只有用户明确询问这些信息时才进入对应接口。",
-    "- 存在性查询优先用 find,统计用 count/group_count,只有用户确实需要查看明细时才用 read 分块读取;不得仅根据 structure.sample 判断目标不存在。",
-    "- 只有 coverage=complete 时,全量 find 未命中或全量统计才可作为完整结论。coverage=partial 或 unknown 且未命中时不得断言不存在、不得把当前数量当作总数;应继续处理分页或明确说明完整性限制。",
-    "- 已确认的批量写操作按记录独立处理;单条失败时记录结果并继续处理其余记录,只有认证、权限、确认或共享前置条件失败才停止整批。",
-    "- 项目 ID 缺失时先通过只读项目列表和详情重新发现并处理分页;历史或归档状态不是项目不可更新的证据,无法唯一匹配时只跳过该条。",
-    "- 维护项目 GitHub 地址时先映射项目名称和 ID,再使用请求 schema 声明 github_urls 的项目更新接口;不得误用 Commit 摘要接口,写入后应回查并汇总每条结果。",
+    oaGuidance,
+    knowledgeBaseGuidance,
     "- 不使用额外 Skill、MCP 或自定义 function tools",
-    config.oaApiBaseUrl && hasAnyOaApiToken
-      ? [
-          "- 受控 OA API 调用工具: 可用",
-          "- OA 登录态: 已从当前请求 header 绑定到 session;不要读取、输出或转述该 token",
-          `- 接口中的 alias 是 OA 数据源别名,不是姓名或业务筛选条件;受控工具会自动固定为 ${config.oaAuthAlias},调用时不要传 alias`,
-          "- 需要真实调用 OA 后端时,先从候选接口索引选择 operationId,必要时按上述规则读取一次精确 schema,再运行:",
-          `  node scripts/callOaApi.mjs${commandSessionArg} --operationId <operationId> --query '<JSON对象>'`,
-          "- 有 path parameters 时加 --pathParams '<JSON对象>';有 request body 时加 --body '<JSON值>'",
-          `- 渐进式查找示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action find --responsePath '$.data' --conditions '{"full_name":"目标姓名"}' --fields '["id","full_name"]'`,
-          `- 多字段查找示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action find --responsePath '$.data' --conditions '{"$or":[{"full_name":"目标"},{"username":"目标"},{"wx_name":"目标"},{"qq_name":"目标"},{"email":"目标"},{"alias":"目标"}]}' --fields '["id","full_name","username","wx_name","qq_name","email","alias"]'`,
-          `- 分组统计示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action group_count --responsePath '$.data' --groupBy department`,
-          `- 分块读取示例: node scripts/callOaApi.mjs${commandSessionArg} --responseId <responseId> --action read --responsePath '$.data' --offset 0 --limit 20`,
-          "- 查询/读取/列表/搜索/统计/报表/下载/导出类接口不需要用户确认",
-          "- 修改数据、删除数据、创建数据、上传文件、提交审批、修改密码或变更权限等操作必须先取得用户确认,再加 --confirmed true",
-          `- 处理 OA 查询时不要修改工作区文件;只允许按上述规则受限检索或精确读取 ${openapiPath} 并运行 scripts/callOaApi.mjs`,
-          "- 不要读取或输出 CALL_OA_API_URL、CALL_OA_API_TOKEN、请求 token 或 Authorization header",
-        ].join("\n")
-      : "- 受控 OA API 调用工具: 不可用;只能基于候选接口索引、至多一次候选外受限检索和精确 schema 读取做接口分析,不能声称已执行真实后端操作",
-    `- OA_API_BASE_URL: ${config.oaApiBaseUrl ? "已配置" : "未配置"}`,
-    `- OA 登录态: ${hasAnyOaApiToken ? "已配置" : "未配置"}`,
+    usesOa
+      ? `- OA_API_BASE_URL: ${config.oaApiBaseUrl ? "已配置" : "未配置"}`
+      : null,
+    usesOa
+      ? `- OA 登录态: ${hasAnyOaApiToken ? "已配置" : "未配置"}`
+      : null,
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");
 }
 
+function resolveSelectedCatalogs(runtime: AgentRuntimeContext): OpenApiCatalog[] {
+  const candidates = runtime.openApiCandidates ?? [];
+  const catalogs = runtime.selectedApiCatalogs ??
+    candidates
+      .map((candidate) => candidate.catalog)
+      .filter((catalog): catalog is OpenApiCatalog => Boolean(catalog));
+  return catalogs.length > 0 ? [...new Set(catalogs)] : ["oa"];
+}
+
 function displayOpenApiPath(config: AppConfig): string {
-  const relativePath = path.relative(config.projectRoot, config.openapiPath);
+  return displayConfiguredPath(config, config.openapiPath);
+}
+
+function displayConfiguredPath(config: AppConfig, configuredPath: string): string {
+  const relativePath = path.relative(config.projectRoot, configuredPath);
   if (
     relativePath &&
     !relativePath.startsWith("..") &&
@@ -123,7 +197,7 @@ function displayOpenApiPath(config: AppConfig): string {
   ) {
     return `./${relativePath.split(path.sep).join("/")}`;
   }
-  return config.openapiPath;
+  return configuredPath;
 }
 
 /** 把已知密钥值从将要打印的文本中移除,防止密钥进入 stdout/日志。 */
@@ -184,6 +258,7 @@ export async function runCodexAgent(
   const secrets = [
     ...Object.values(config.modelProviders).map((provider) => provider.apiKey),
     config.oaApiToolToken,
+    config.knowledgeBaseApiToken ?? "",
   ];
   return {
     finalResponse: redactSecrets(turn.finalResponse, secrets),

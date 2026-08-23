@@ -16,6 +16,8 @@ const DEFAULT_NEXTTOKEN_BASE_URL = "https://next-token.cc/v1";
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_MODEL_PROVIDER: ModelProviderId = "nexttoken";
 const DEFAULT_OPENAPI_URL = "https://api-oa.rwkvos.com/openapi_json";
+const DEFAULT_KNOWLEDGE_BASE_API_BASE_URL =
+  "https://oa-kb.rwkvos.com/api/agent/v1";
 
 export type AppConfig = {
   /** 后端包根目录(openapi/、prompts/ 所在目录)。 */
@@ -50,6 +52,12 @@ export type AppConfig = {
   oaUserTokenPrefix: string;
   /** Codex 子进程调用服务端受控 OA API 工具的短期 token。 */
   oaApiToolToken: string;
+  /** 知识库 Agent API 地址。 */
+  knowledgeBaseApiBaseUrl: string;
+  /** 仅由服务端组装为知识库 Authorization Bearer header 的固定 Token。 */
+  knowledgeBaseApiToken: string | null;
+  /** 提供给 agent 的知识库统一读写 OpenAPI 文档。 */
+  knowledgeBaseOpenapiPath: string;
   /** OA 后端调用自动化模型目录与校验接口的专用 token。 */
   automationApiToken: string | null;
   /** Node 自动任务存储、认证与 maintenance 配置。 */
@@ -97,6 +105,14 @@ export function loadConfig(): AppConfig {
     throw new Error(
       `缺少本地兜底接口文档:${openapiPath} 不存在。远程 OpenAPI 不可用时必须使用该文件。`,
     );
+  }
+  const knowledgeBaseOpenapiPath = path.join(
+    projectRoot,
+    "knowledgebaseapi",
+    "knowledgebaseapi.yaml",
+  );
+  if (!existsSync(knowledgeBaseOpenapiPath)) {
+    throw new Error(`缺少知识库接口文档:${knowledgeBaseOpenapiPath} 不存在。`);
   }
 
   const modelProviders: Record<ModelProviderId, ModelProviderConfig> = {
@@ -174,6 +190,14 @@ export function loadConfig(): AppConfig {
     oaUserTokenPrefix,
     oaApiToolToken:
       process.env.AGENT_OA_TOOL_TOKEN?.trim() || randomBytes(32).toString("hex"),
+    knowledgeBaseApiBaseUrl: normalizeHttpServiceBaseUrl(
+      process.env.OA_KNOWLEDGE_API_BASE_URL?.trim() ||
+        DEFAULT_KNOWLEDGE_BASE_API_BASE_URL,
+      "OA_KNOWLEDGE_API_BASE_URL",
+    ),
+    knowledgeBaseApiToken:
+      process.env.OA_KNOWLEDGE_BASE_API_KEY?.trim() || null,
+    knowledgeBaseOpenapiPath,
     automationApiToken: process.env.OA_AGENT_AUTOMATION_TOKEN?.trim() || null,
     automation: parseAutomationConfig(process.env),
     serverPort,
@@ -225,6 +249,20 @@ export function normalizeModelBaseUrl(value: string, variableName = "MODEL_API_B
     throw new Error(`${variableName} 必须是 HTTP(S) 地址,当前值:${value}。`);
   }
   return /\/v1$/i.test(normalized) ? normalized : `${normalized}/v1`;
+}
+
+function normalizeHttpServiceBaseUrl(value: string, variableName: string): string {
+  const normalized = value.replace(/\/+$/, "");
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new Error(`${variableName} 必须是 HTTP(S) 地址,当前值:${value}。`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${variableName} 必须是 HTTP(S) 地址,当前值:${value}。`);
+  }
+  return normalized;
 }
 
 function requireModelApiKey(name: "NEXTTOKEN_API_KEY" | "OPENROUTER_API_KEY"): string {

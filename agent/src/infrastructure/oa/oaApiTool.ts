@@ -1,4 +1,5 @@
 import type { AppConfig } from "../../config/config.js";
+import { normalizeJsonLineSeparators } from "../codex/jsonLineSafety.js";
 import { resolveOpenApiContract } from "./openApiContract.js";
 import {
   cacheOaApiResult,
@@ -829,11 +830,12 @@ function limitToolOutput(value: unknown, depth = 0): {
   }
 
   if (typeof value === "string") {
-    if (value.length <= MAX_TOOL_STRING_LENGTH) {
-      return { value, truncated: false };
+    const normalized = normalizeJsonLineSeparators(value);
+    if (normalized.length <= MAX_TOOL_STRING_LENGTH) {
+      return { value: normalized, truncated: false };
     }
     return {
-      value: `${value.slice(0, MAX_TOOL_STRING_LENGTH)}... [TRUNCATED ${value.length - MAX_TOOL_STRING_LENGTH} chars]`,
+      value: `${normalized.slice(0, MAX_TOOL_STRING_LENGTH)}... [TRUNCATED ${normalized.length - MAX_TOOL_STRING_LENGTH} chars]`,
       truncated: true,
     };
   }

@@ -4,10 +4,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import type { AgentService } from "../src/application/agentService.js";
 import { createAgentHttpServer } from "../src/api/httpServer.js";
 import type { AppConfig } from "../src/config/config.js";
+import {
+  beginKnowledgeBaseSourceTurn,
+  finishKnowledgeBaseSourceTurn,
+} from "../src/infrastructure/knowledgebase/knowledgeBaseSources.js";
 import { SessionStore } from "../src/infrastructure/persistence/sessionStore.js";
 
 test("protects public agent routes with a validated OA token", async () => {
@@ -180,6 +185,171 @@ test("protects the OA automation model catalog with a dedicated token", async ()
     );
     assert.equal(wrongContentType.status, 415);
   } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("uses the validated page login userid for knowledge-base headers", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-kb-user-"));
+  const originalFetch = globalThis.fetch;
+  const projectRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+  );
+  const config = {
+    projectRoot,
+    oaApiBaseUrl: "https://oa.example.test",
+    oaAuthAlias: "default",
+    oaUserTokenHeader: "Authorization",
+    oaUserTokenPrefix: "Bearer",
+    oaApiToolToken: "internal-tool-token",
+    knowledgeBaseApiBaseUrl: "https://oa-kb.example.test/api/agent/v1",
+    knowledgeBaseApiToken: "knowledge-service-token",
+    knowledgeBaseOpenapiPath: path.join(
+      projectRoot,
+      "knowledgebaseapi",
+      "knowledgebaseapi.yaml",
+    ),
+  } as AppConfig;
+  const sessionStore = new SessionStore(path.join(directory, "sessions.json"));
+  const server = createAgentHttpServer(config, {} as AgentService, sessionStore);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  let knowledgeRequestHeaders: Headers | null = null;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.origin === "https://oa.example.test") {
+      return Response.json({
+        code: 200,
+        success: true,
+        data: { id: 73, email: "current-user@example.test" },
+      });
+    }
+    knowledgeRequestHeaders = new Headers(init?.headers);
+    return Response.json({ data: [], nextCursor: null, requestId: "request-1" });
+  };
+
+  try {
+    const created = await requestAutomationJson(
+      address.port,
+      "POST",
+      "/v1/sessions",
+      "page-login-token",
+      { sessionId: "current-page-session" },
+    );
+    assert.equal(created.status, 201);
+
+    const response = await requestAutomationJson(
+      address.port,
+      "POST",
+      "/__internal/call-knowledge-base-api",
+      "internal-tool-token",
+      {
+        sessionId: "current-page-session",
+        operationId: "searchKnowledgeBase",
+        query: { q: "部署" },
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      knowledgeRequestHeaders?.get("authorization"),
+      "Bearer knowledge-service-token",
+    );
+    assert.equal(knowledgeRequestHeaders?.get("x-oa-user-id"), "73");
+    assert.equal(knowledgeRequestHeaders?.get("agent_api_token"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("registers controlled knowledge API sources for the active session turn", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-kb-source-"));
+  const originalFetch = globalThis.fetch;
+  const projectRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+  );
+  const config = {
+    projectRoot,
+    oaApiToolToken: "internal-tool-token",
+    knowledgeBaseApiBaseUrl: "https://oa-kb.example.test/api/agent/v1",
+    knowledgeBaseApiToken: "knowledge-service-token",
+    knowledgeBaseOpenapiPath: path.join(
+      projectRoot,
+      "knowledgebaseapi",
+      "knowledgebaseapi.yaml",
+    ),
+  } as AppConfig;
+  const sessionStore = new SessionStore(path.join(directory, "sessions.json"));
+  await sessionStore.bindOaToken(
+    "kb-source-session",
+    "oa-session-token",
+    undefined,
+    "19",
+  );
+  const server = createAgentHttpServer(config, {} as AgentService, sessionStore);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  beginKnowledgeBaseSourceTurn("kb-source-session");
+  let knowledgeRequestHeaders: Headers | null = null;
+  globalThis.fetch = async (_input, init) => {
+    knowledgeRequestHeaders = new Headers(init?.headers);
+    return Response.json({
+      data: [
+        {
+          title: "生产部署手册",
+          excerpt: "发布前请确认数据库迁移。",
+          sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+        },
+      ],
+      nextCursor: null,
+      requestId: "request-1",
+    });
+  };
+
+  try {
+    const response = await requestAutomationJson(
+      address.port,
+      "POST",
+      "/__internal/call-knowledge-base-api",
+      "internal-tool-token",
+      {
+        sessionId: "kb-source-session",
+        operationId: "searchKnowledgeBase",
+        query: { q: "部署" },
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      knowledgeRequestHeaders?.get("authorization"),
+      "Bearer knowledge-service-token",
+    );
+    assert.equal(knowledgeRequestHeaders?.get("x-oa-user-id"), "19");
+    assert.equal(knowledgeRequestHeaders?.get("agent_api_token"), null);
+    assert.deepEqual(finishKnowledgeBaseSourceTurn("kb-source-session"), [
+      {
+        title: "生产部署手册",
+        description: "发布前请确认数据库迁移。",
+        originalContent: "发布前请确认数据库迁移。",
+        sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+      },
+    ]);
+  } finally {
+    finishKnowledgeBaseSourceTurn("kb-source-session");
+    globalThis.fetch = originalFetch;
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );

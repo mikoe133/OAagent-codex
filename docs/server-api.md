@@ -26,6 +26,8 @@
 | `CODEX_SANDBOX_MODE` | 自动 | Codex 命令沙箱。未配置时,无 OA 工具使用 `read-only`,启用 OA 工具使用 `workspace-write`;`danger-full-access` 仅用于已有独立外部沙箱的进程 |
 | `OA_OPENAPI_URL` | `https://api-oa.rwkvos.com/openapi_json` | 优先读取的 OA OpenAPI 地址。请求失败、非 2xx 或内容非法时回退本地契约 |
 | `OA_API_BASE_URL` | 空 | OA 后端地址。HTTP 服务用它验证用户 OA token,受控工具也通过该地址调用 OA |
+| `OA_KNOWLEDGE_API_BASE_URL` | `https://oa-kb.rwkvos.com/api/agent/v1` | 知识库 Agent API 地址 |
+| `OA_KNOWLEDGE_BASE_API_KEY` | 空 | 仅用于服务端组装知识库 `Authorization: Bearer` header 的固定 Token；只保存在 agent 服务端 |
 | `OA_AUTH_ALIAS` | `default` | OA 登录和 token 验证使用的数据源 alias |
 | `OA_API_TOKEN_HEADER` | `Cookie` | 受控 OA 工具调用时的 token header 名称 |
 | `OA_API_TOKEN_PREFIX` | `sessionid=` | 受控 OA 工具调用时的 token header 值前缀。设为空时直接发送 token |
@@ -35,6 +37,8 @@
 | `HOST` | `127.0.0.1` | 服务监听地址 |
 | `PORT` | `3000` | 服务监听端口 |
 | `AGENT_SESSION_STORE` | `.context/agent-sessions.json` | `sessionId -> Codex threadId` 和摘要的持久化文件 |
+
+知识库统一读写 OpenAPI 是 Agent 的唯一知识库接口事实来源。依据该契约发起上游请求时,服务端固定把 `OA_KNOWLEDGE_BASE_API_KEY` 组装为 `Authorization: Bearer <token>`,把当前页面登录账户经 OA 校验后的 userid 组装为 `X-OA-User-Id`,并为写请求生成 `Idempotency-Key`;Agent 参数不能填写或覆盖任何 Header。开发接入说明 `agent/knowledgebaseapi/AGENT_API.md` 不进入 Agent 运行时上下文。浏览器到 Agent、Codex 到内部工具以及普通 OA API 的现有鉴权方式均不受影响。
 
 ## 鉴权
 
@@ -138,6 +142,13 @@ Cookie: foo=1; sessionid=<OA_USER_TOKEN>; bar=2
   "executedCommands": [
     "python3 ..."
   ],
+  "knowledgeSources": [
+    {
+      "title": "生产部署手册",
+      "description": "发布前请确认数据库迁移、镜像版本和部署窗口。",
+      "sourceUrl": "https://oa-kb.rwkvos.com/wiki/PAGE_ID"
+    }
+  ],
   "summary": "用户: ...\n助手: ..."
 }
 ```
@@ -152,6 +163,7 @@ Cookie: foo=1; sessionid=<OA_USER_TOKEN>; bar=2
 | `model` | `string` | 本轮实际使用的模型 ID |
 | `finalResponse` | `string` | agent 的最终中文回答。已对已知密钥做脱敏 |
 | `executedCommands` | `string[]` | agent 运行过程中执行过的命令记录。已对已知密钥做脱敏 |
+| `knowledgeSources` | `{title,description,sourceUrl}[]` | 本轮知识库调用返回的去重来源。正文优先作为截断后的 `description`;没有正文时使用搜索摘要 |
 | `summary` | `string` | 写回 session 的紧凑摘要,用于后续续聊 |
 
 ### AgentStreamEvent
@@ -185,7 +197,7 @@ data: <JSON>
 
 - `message.delta`、`tool.*` 和 `progress` 已对已知密钥值做脱敏。
 - `message.delta.text` 是累积文本,前端渲染打字机效果时通常只追加 `delta`。
-- `run.completed.result` 是最终权威结果,建议用它落库或更新会话摘要。
+- `run.completed.result` 是最终权威结果,建议用它落库或更新会话摘要。知识库引用应从其中的 `knowledgeSources` 渲染,不要从最终 Markdown 反向解析。
 - 客户端主动断开连接时,服务端会取消本轮流式请求;此时不保证还能收到 `run.failed`。
 
 ### OaApiToolResult

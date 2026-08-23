@@ -32,8 +32,11 @@ function buildChildEnv(
   env[providerConfig.envKey] = providerConfig.apiKey;
   env.CALL_OA_API_URL = `http://127.0.0.1:${config.serverPort}/__internal/call-oa-api`;
   env.CALL_OA_API_TOKEN = config.oaApiToolToken;
+  env.CALL_KNOWLEDGE_BASE_API_URL = `http://127.0.0.1:${config.serverPort}/__internal/call-knowledge-base-api`;
+  env.CALL_KNOWLEDGE_BASE_API_TOKEN = config.oaApiToolToken;
   if (toolSessionId) {
     env.CALL_OA_API_SESSION_ID = toolSessionId;
+    env.CALL_KNOWLEDGE_BASE_API_SESSION_ID = toolSessionId;
   }
   return env;
 }
@@ -78,8 +81,13 @@ export function createThreadOptions(
   modelReasoningEffort: ModelReasoningEffort = "medium",
 ): ThreadOptions {
   const oaToolEnabled = Boolean(config.oaApiBaseUrl);
+  const knowledgeBaseToolEnabled = Boolean(
+    config.knowledgeBaseApiBaseUrl && config.knowledgeBaseApiToken,
+  );
+  const controlledApiToolEnabled = oaToolEnabled || knowledgeBaseToolEnabled;
   const sandboxMode =
-    config.codexSandboxMode ?? (oaToolEnabled ? "workspace-write" : "read-only");
+    config.codexSandboxMode ??
+    (controlledApiToolEnabled ? "workspace-write" : "read-only");
   return {
     model,
     modelReasoningEffort: normalizeModelReasoningEffort(
@@ -90,7 +98,7 @@ export function createThreadOptions(
     workingDirectory: config.projectRoot,
     skipGitRepoCheck: true,
     networkAccessEnabled:
-      sandboxMode === "workspace-write" ? oaToolEnabled : undefined,
+      sandboxMode === "workspace-write" ? controlledApiToolEnabled : undefined,
     webSearchMode: "disabled",
   };
 }

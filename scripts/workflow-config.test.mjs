@@ -45,6 +45,8 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.equal(workflow.match(/PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \|\| '1' \}\}/g)?.length, 2)
   assert.equal(workflow.match(/AGENT_BIND_ADDRESS: \$\{\{ vars\.AGENT_BIND_ADDRESS \|\| '127\.0\.0\.1' \}\}/g)?.length, 2)
   assert.match(workflow, /OA_DOCKER_API_BASE_URL: \$\{\{ vars\.OA_DOCKER_API_BASE_URL \}\}/)
+  assert.equal(workflow.match(/OA_KNOWLEDGE_BASE_API_KEY: \$\{\{ secrets\.OA_KNOWLEDGE_BASE_API_KEY \}\}/g)?.length, 2)
+  assert.equal(workflow.match(/OA_KNOWLEDGE_API_BASE_URL: \$\{\{ vars\.OA_KNOWLEDGE_API_BASE_URL \|\| 'https:\/\/oa-kb\.rwkvos\.com\/api\/agent\/v1' \}\}/g)?.length, 2)
   assert.equal(workflow.match(/AUTOMATION_API_BASE_URL: \$\{\{ vars\.AUTOMATION_API_BASE_URL \}\}/g)?.length, 2)
   assert.equal(workflow.match(/PROJECT_SYNC_API_BASE_URL: \$\{\{ vars\.PROJECT_SYNC_API_BASE_URL \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_SSO_SHARED_SECRET: \$\{\{ secrets\.OA_AGENT_SSO_SHARED_SECRET \}\}/g)?.length, 2)
@@ -52,7 +54,7 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.equal(workflow.match(/DATABASE_URL: \$\{\{ secrets\.DATABASE_URL \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_SESSION_SECRET: \$\{\{ secrets\.OA_SESSION_SECRET \}\}/g)?.length, 2)
   assert.equal(workflow.match(/OA_AGENT_SSO_TTL_SECONDS: \$\{\{ vars\.OA_AGENT_SSO_TTL_SECONDS \}\}/g)?.length, 2)
-  assert.equal(workflow.match(/OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN DATABASE_URL OA_SESSION_SECRET OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN; do/g)?.length, 2)
+  assert.equal(workflow.match(/OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN DATABASE_URL OA_SESSION_SECRET OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN; do/g)?.length, 2)
   assert.match(workflow, /bash scripts\/render-runtime-env\.sh/)
   assert.match(workflow, /push: \$\{\{ github\.event_name != 'pull_request' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/test'\) \}\}/)
   assert.match(workflow, /uses: actions\/upload-artifact@v4/)
@@ -61,6 +63,35 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.equal(workflow.match(/SKIP_IMAGE_PULL=1 bash -s/g)?.length, 2)
   assert.doesNotMatch(workflow, /GHCR_PULL_TOKEN/)
   assert.doesNotMatch(workflow, /docker login ghcr\.io/)
+})
+
+test("documents the shared knowledge-base key as one Repository Secret", async () => {
+  const cicd = await readFile(path.join(repoRoot, "docs/cicd.md"), "utf8")
+  const deployment = await readFile(
+    path.join(repoRoot, "docs/dual-environment-deployment.md"),
+    "utf8",
+  )
+  const cicdRepositorySecrets = cicd.slice(
+    cicd.indexOf("Repository Secrets:"),
+    cicd.indexOf("Repository Variables:"),
+  )
+  const cicdEnvironmentVariables = cicd.slice(
+    cicd.indexOf("Environment Variables:"),
+    cicd.indexOf("## 固定环境参数"),
+  )
+  const deploymentRepositorySecrets = deployment.slice(
+    deployment.indexOf("添加以下 Repository Secret:"),
+    deployment.indexOf("不需要配置:"),
+  )
+  const deploymentEnvironmentVariables = deployment.slice(
+    deployment.indexOf("分别添加 Environment Variable:"),
+    deployment.indexOf("再分别为两个 Environment 添加以下 Secret："),
+  )
+
+  assert.match(cicdRepositorySecrets, /`OA_KNOWLEDGE_BASE_API_KEY`/)
+  assert.doesNotMatch(cicdEnvironmentVariables, /`OA_KNOWLEDGE_BASE_API_KEY`/)
+  assert.match(deploymentRepositorySecrets, /`OA_KNOWLEDGE_BASE_API_KEY`/)
+  assert.doesNotMatch(deploymentEnvironmentVariables, /`OA_KNOWLEDGE_BASE_API_KEY`/)
 })
 
 test("runs the Node automation contract against a real MySQL 8 service", async () => {
@@ -82,7 +113,7 @@ test("passes automation maintenance controls into both deployment environments",
   for (const [name, fallback] of [
     ["OA_SESSION_VERIFY_MAX_AGE", "0"],
     ["AUTOMATION_MIGRATE_ON_START", "true"],
-    ["AUTOMATION_MAINTENANCE_ENABLED", "false"],
+    ["AUTOMATION_MAINTENANCE_ENABLED", "true"],
     ["AUTOMATION_MAINTENANCE_INTERVAL_SECONDS", "30"],
     ["AUTOMATION_MODEL_CATALOG_TTL_SECONDS", "300"],
     ["AUTOMATION_MODEL_CATALOG_STALE_SECONDS", "86400"],
@@ -102,6 +133,10 @@ test("allows the server env to isolate Compose projects", async () => {
   const compose = await readFile(path.join(repoRoot, "compose.yml"), "utf8")
   assert.match(compose, /^name: \$\{COMPOSE_PROJECT_NAME:-oa-agent\}$/m)
   assert.match(compose, /\$\{AGENT_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{AGENT_PORT:-3001\}:3000/)
+  assert.match(
+    compose,
+    /^      AUTOMATION_MAINTENANCE_ENABLED: \$\{AUTOMATION_MAINTENANCE_ENABLED:-true\}$/m,
+  )
 })
 
 test("injects SSO configuration into the web container at runtime", async () => {

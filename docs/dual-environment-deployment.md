@@ -86,7 +86,10 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 | `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan` 完整输出 | 第 2 步生成并核对 |
 | `NEXTTOKEN_API_KEY` | Nexttoken Key | Nexttoken 控制台创建 |
 | `OPENROUTER_API_KEY` | OpenRouter Key | OpenRouter 控制台创建 |
+| `OA_KNOWLEDGE_BASE_API_KEY` | 测试和生产共用的知识库固定 Token | 知识库服务提供方；只配置一次 |
 | `PROJECT_PROGRESS_GITHUB_TOKEN` | GitHub fine-grained PAT | AI GitHub 账号创建，只授予 Metadata/Contents Read |
+
+这是 Repository Secret：两个部署 Job 都通过 `${{ secrets.OA_KNOWLEDGE_BASE_API_KEY }}` 读取它。不要在 `test` 和 `production` Environment 中重复创建同名 Secret，也不要把它配置成 Variable。
 
 不需要配置:
 
@@ -133,6 +136,7 @@ GitHub 仓库 -> Settings -> Environments
 | --- | --- | --- |
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
+| `test` / `production` | `OA_KNOWLEDGE_API_BASE_URL` | 知识库 Agent API 地址；未填时使用默认生产地址 |
 | `test` / `production` | `AUTOMATION_API_BASE_URL` | 无需配置；Compose 固定使用 `http://agent:3000` |
 | `test` / `production` | `PROJECT_SYNC_API_BASE_URL` | 原 OA 项目同步服务地址；未填时继承 `OA_DOCKER_API_BASE_URL` |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),例如 `300` |
@@ -143,7 +147,7 @@ GitHub 仓库 -> Settings -> Environments
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_PREFIX` | 通常为 `Bearer`；session 测试可填 `sessionid=` |
 | `test` / `production` | `PROJECT_PROGRESS_HEARTBEAT_SECONDS` | 填 `10`，使取消请求及时传给 Worker |
 | `test` / `production` | `AUTOMATION_MIGRATE_ON_START` | 首次部署保持 `true` |
-| `test` / `production` | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `false`；切流确认后显式改为 `true` 并重新部署 |
+| `test` / `production` | `AUTOMATION_MAINTENANCE_ENABLED` | 可选；默认 `true`，仅在需要暂停自动调度时显式设为 `false` |
 
 再分别为两个 Environment 添加以下 Secret：
 

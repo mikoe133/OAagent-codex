@@ -21,7 +21,7 @@ function reject_multiline() {
 
 readonly output_path="${1:?usage: render-runtime-env.sh OUTPUT_PATH}"
 
-for name in COMPOSE_PROJECT_NAME NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN DATABASE_URL OA_SESSION_SECRET AGENT_PORT WEB_PORT; do
+for name in COMPOSE_PROJECT_NAME NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN DATABASE_URL OA_SESSION_SECRET AGENT_PORT WEB_PORT; do
   require_value "$name"
 done
 
@@ -32,6 +32,7 @@ readonly nexttoken_api_base_url="${NEXTTOKEN_API_BASE_URL:-https://next-token.cc
 readonly openrouter_api_base_url="${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}"
 readonly automation_api_base_url="${AUTOMATION_API_BASE_URL:-$OA_DOCKER_API_BASE_URL}"
 readonly project_sync_api_base_url="${PROJECT_SYNC_API_BASE_URL:-$OA_DOCKER_API_BASE_URL}"
+readonly oa_knowledge_api_base_url="${OA_KNOWLEDGE_API_BASE_URL:-https://oa-kb.rwkvos.com/api/agent/v1}"
 readonly oa_project_sync_token_header="${OA_PROJECT_SYNC_TOKEN_HEADER:-Authorization}"
 readonly oa_project_sync_token_prefix="${OA_PROJECT_SYNC_TOKEN_PREFIX:-Bearer}"
 readonly project_progress_worker_instance="${PROJECT_PROGRESS_WORKER_INSTANCE:-oaagent-${COMPOSE_PROJECT_NAME}}"
@@ -51,7 +52,7 @@ readonly project_progress_agent_max_total_patch_chars="${PROJECT_PROGRESS_AGENT_
 readonly automation_expected_database_name="${AUTOMATION_EXPECTED_DATABASE_NAME:-}"
 readonly oa_session_verify_max_age="${OA_SESSION_VERIFY_MAX_AGE:-0}"
 readonly automation_migrate_on_start="${AUTOMATION_MIGRATE_ON_START:-true}"
-readonly automation_maintenance_enabled="${AUTOMATION_MAINTENANCE_ENABLED:-false}"
+readonly automation_maintenance_enabled="${AUTOMATION_MAINTENANCE_ENABLED:-true}"
 readonly automation_maintenance_interval_seconds="${AUTOMATION_MAINTENANCE_INTERVAL_SECONDS:-30}"
 readonly automation_model_catalog_ttl_seconds="${AUTOMATION_MODEL_CATALOG_TTL_SECONDS:-300}"
 readonly automation_model_catalog_stale_seconds="${AUTOMATION_MODEL_CATALOG_STALE_SECONDS:-86400}"
@@ -64,6 +65,8 @@ for name in \
   NEXTTOKEN_API_KEY \
   OPENROUTER_API_KEY \
   OA_DOCKER_API_BASE_URL \
+  OA_KNOWLEDGE_API_BASE_URL \
+  OA_KNOWLEDGE_BASE_API_KEY \
   AUTOMATION_API_BASE_URL \
   PROJECT_SYNC_API_BASE_URL \
   OA_AUTH_ALIAS \
@@ -113,6 +116,8 @@ done
   || fail "COMPOSE_PROJECT_NAME contains unsupported characters"
 [[ "$OA_DOCKER_API_BASE_URL" =~ ^https?://[^[:space:]]+$ ]] \
   || fail "OA_DOCKER_API_BASE_URL must be an HTTP(S) URL"
+[[ "$oa_knowledge_api_base_url" =~ ^https?://[^[:space:]]+$ ]] \
+  || fail "OA_KNOWLEDGE_API_BASE_URL must be an HTTP(S) URL"
 [[ "$DATABASE_URL" =~ ^mysql://[^[:space:]]+/[^[:space:]/]+$ ]] \
   || fail "DATABASE_URL must be a mysql:// URL with a database name"
 if [[ -n "$automation_expected_database_name" ]]; then
@@ -247,6 +252,8 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'CODEX_MODEL_PROVIDER=nexttoken\n'
   printf 'CODEX_MODEL=gpt-5.6-terra\n'
   printf 'OA_DOCKER_API_BASE_URL=%s\n' "$OA_DOCKER_API_BASE_URL"
+  printf 'OA_KNOWLEDGE_API_BASE_URL=%s\n' "$oa_knowledge_api_base_url"
+  printf 'OA_KNOWLEDGE_BASE_API_KEY=%s\n' "$OA_KNOWLEDGE_BASE_API_KEY"
   printf 'AUTOMATION_API_BASE_URL=%s\n' "$automation_api_base_url"
   printf 'PROJECT_SYNC_API_BASE_URL=%s\n' "$project_sync_api_base_url"
   printf 'OA_API_TOKEN_HEADER=Cookie\n'

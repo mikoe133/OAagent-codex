@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { stringifyJsonLineSafe } from "./jsonLineSafe.mjs";
+
 const args = parseArgs(process.argv.slice(2));
 const url = process.env.CALL_OA_API_URL;
 const token = process.env.CALL_OA_API_TOKEN;
@@ -48,7 +50,7 @@ try {
   data = text;
 }
 
-console.log(JSON.stringify(data, null, 2));
+console.log(stringifyJsonLineSafe(data, 2));
 
 function parseArgs(values) {
   const result = {};

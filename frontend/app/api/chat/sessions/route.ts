@@ -3,6 +3,10 @@ import { resolve } from "node:path"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
 import { normalizeResponseDuration } from "@/lib/response-duration"
+import {
+  normalizeKnowledgeSources,
+  type KnowledgeSource,
+} from "@/lib/knowledge-sources"
 
 const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
 const COPILOT_RECORD_SCHEMA = "oa-agent-chat/v1"
@@ -56,6 +60,7 @@ type NormalizedMessage = {
   imageData?: string
   toolSteps?: NormalizedToolStep[]
   traceMessages?: NormalizedTraceMessage[]
+  knowledgeSources?: KnowledgeSource[]
   status?: "streaming" | "completed" | "stopped" | "failed"
   error?: string
   feedback?: "like" | "dislike"
@@ -781,6 +786,7 @@ function normalizeMessage(value: unknown): NormalizedMessage | null {
   const content = stringField(item, "content") || ""
   const toolSteps = normalizeToolSteps(item.toolSteps)
   const traceMessages = normalizeTraceMessages(item.traceMessages)
+  const knowledgeSources = normalizeKnowledgeSources(item.knowledgeSources)
   if (!role || (!content && toolSteps.length === 0)) {
     return null
   }
@@ -801,6 +807,7 @@ function normalizeMessage(value: unknown): NormalizedMessage | null {
     ...(imageData ? { imageData } : {}),
     ...(toolSteps.length > 0 ? { toolSteps } : {}),
     ...(traceMessages.length > 0 ? { traceMessages } : {}),
+    ...(knowledgeSources.length > 0 ? { knowledgeSources } : {}),
     ...(status ? { status } : {}),
     ...(messageError ? { error: messageError } : {}),
     ...(feedback ? { feedback } : {}),

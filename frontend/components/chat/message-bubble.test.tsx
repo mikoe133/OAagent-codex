@@ -186,6 +186,59 @@ test("completed assistant replies expose copy and feedback actions", () => {
   assert.doesNotMatch(html, /data-slot="streaming-message-trace"/)
 })
 
+test("completed knowledge answers end with clickable source references", () => {
+  const message = {
+    id: "assistant-with-knowledge-sources",
+    role: "assistant",
+    content: "部署前需要完成数据库迁移检查。",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    status: "completed",
+    knowledgeSources: [
+      {
+        title: "生产部署手册",
+        description: "发布前请确认数据库迁移、镜像版本和部署窗口。",
+        originalContent: "发布前请确认数据库迁移、镜像版本和部署窗口的完整要求。",
+        sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+      },
+    ],
+  } as Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.match(html, /data-slot="knowledge-source-showcase"/)
+  assert.match(html, />知识库引用</)
+  assert.match(html, />生产部署手册</)
+  assert.match(html, /发布前请确认数据库迁移、镜像版本和部署窗口。/)
+  assert.match(html, /href="https:\/\/oa-kb\.example\.test\/wiki\/page-1"/)
+  assert.match(html, /target="_blank"/)
+  assert.match(html, /rel="noopener noreferrer"/)
+  assert.match(html, /aria-label="复制引用原文：生产部署手册"/)
+  assert.match(
+    html,
+    /data-slot="knowledge-source-copy"[^>]*pointer-events-none[^>]*opacity-0[^>]*group-hover\/source:pointer-events-auto[^>]*group-hover\/source:opacity-100/,
+  )
+  assert.doesNotMatch(html, />知识库</)
+  assert.doesNotMatch(html, /OA Knowledge/)
+  assert.doesNotMatch(html, /bg-gradient-to-r/)
+  assert.doesNotMatch(html, /data-slot="knowledge-source-preview"/)
+  assert.doesNotMatch(html, /data-slot="knowledge-source-showcase"[^>]*max-w-2xl/)
+  assert.match(html, /w-2\/3 truncate/)
+})
+
+test("ordinary assistant answers do not render a source section", () => {
+  const message = {
+    id: "assistant-without-knowledge-sources",
+    role: "assistant",
+    content: "这是普通 OA 查询结果。",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    status: "completed",
+  } satisfies Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+
+  assert.doesNotMatch(html, /data-slot="knowledge-source-showcase"/)
+})
+
 test("streaming assistant replies announce live output without feedback controls", () => {
   const message = {
     id: "assistant-2",
@@ -285,8 +338,8 @@ test("streaming agent messages render as separate subdued trace steps in event o
   assert.match(html, /data-slot="trace-summary-orb"/)
   assert.doesNotMatch(messageIcon, /\bborder(?:-|\b)/)
   assert.doesNotMatch(html, /data-slot="trace-tool-icon"[^>]*\bborder(?:-|\b)/)
-  assert.match(html, /data-slot="trace-tool-status"[^>]*text-\[#00619a\]/)
-  assert.match(html, /lucide-circle-check[^>]*text-\[#00BFFF\]/)
+  assert.match(html, /data-slot="trace-tool-status"[^>]*text-stone-400/)
+  assert.match(html, /lucide-square-terminal[^>]*text-stone-700/)
 })
 
 test("completed assistant replies keep a trace entry when no tool was called", () => {
@@ -322,10 +375,10 @@ test("running trace nodes use the mint icon color", () => {
     toolSteps: [
       {
         id: "tool-running",
-        type: "command_execution",
+        type: "web_search",
         status: "running",
-        title: "Command",
-        description: "Running command",
+        title: "Web Search",
+        description: "Searching",
       },
     ],
   } satisfies Message
@@ -335,6 +388,89 @@ test("running trace nodes use the mint icon color", () => {
   )
 
   assert.match(html, /lucide-loader-circle[^>]*text-\[#b4fbde\]/)
+})
+
+test("Command traces use a dark square terminal icon with softer gray title and completion text", () => {
+  const message = {
+    id: "assistant-command-trace",
+    role: "assistant",
+    content: "执行完成。",
+    createdAt: new Date("2026-07-10T10:02:00.000Z"),
+    status: "streaming",
+    toolSteps: [
+      {
+        id: "command",
+        type: "command_execution",
+        status: "completed",
+        title: "Command",
+        description: "npm run build",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(
+    <MessageBubble message={message} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
+
+  assert.match(html, /data-trace-tool-type="command_execution"/)
+  assert.match(html, /lucide-square-terminal[^>]*text-stone-700/)
+  assert.match(html, /text-stone-500[^>]*>Command<\/span>/)
+  assert.match(html, /data-slot="trace-tool-status"[^>]*text-stone-400[^>]*>Complete<\/span>/)
+})
+
+test("OA and knowledge-base traces use matching semantic icon, title, and completion colors", () => {
+  const oaMessage = {
+    id: "assistant-oa-api-trace",
+    role: "assistant",
+    content: "查询完成。",
+    createdAt: new Date("2026-07-10T10:02:00.000Z"),
+    status: "streaming",
+    toolSteps: [
+      {
+        id: "oa-api",
+        type: "oa_api",
+        status: "completed",
+        title: "OA API",
+        description: "Calling user_info_user_user_get",
+      },
+    ],
+  } satisfies Message
+  const knowledgeBaseMessage = {
+    id: "assistant-knowledge-base-trace",
+    role: "assistant",
+    content: "查询完成。",
+    createdAt: new Date("2026-07-10T10:02:00.000Z"),
+    status: "streaming",
+    toolSteps: [
+      {
+        id: "knowledge-base-api",
+        type: "knowledge_base_api",
+        status: "completed",
+        title: "OA 知识库",
+        description: "Calling searchKnowledge",
+        input: "node scripts/callKnowledgeBaseApi.mjs --operationId searchKnowledge --query '{}'",
+      },
+    ],
+  } satisfies Message
+
+  const oaHtml = renderToStaticMarkup(
+    <MessageBubble message={oaMessage} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
+  const knowledgeBaseHtml = renderToStaticMarkup(
+    <MessageBubble message={knowledgeBaseMessage} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
+
+  assert.match(oaHtml, /data-trace-tool-type="oa_api"[^>]*bg-sky-50/)
+  assert.match(oaHtml, /lucide-user-round-search[^>]*text-sky-600/)
+  assert.match(oaHtml, /text-sky-600\/75[^>]*>OA API<\/span>/)
+  assert.match(oaHtml, /data-slot="trace-tool-status"[^>]*text-sky-600\/60[^>]*>Complete<\/span>/)
+  assert.match(knowledgeBaseHtml, /data-trace-tool-type="knowledge_base_api"[^>]*bg-amber-50/)
+  assert.match(knowledgeBaseHtml, /lucide-library[^>]*text-amber-700/)
+  assert.match(knowledgeBaseHtml, /text-amber-700\/75[^>]*>OA 知识库<\/span>/)
+  assert.match(
+    knowledgeBaseHtml,
+    /data-slot="trace-tool-status"[^>]*text-amber-700\/60[^>]*>Complete<\/span>/,
+  )
 })
 
 test("completed assistant traces show a completed status", () => {
