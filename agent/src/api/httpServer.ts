@@ -23,6 +23,7 @@ import {
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { callKnowledgeBaseApiTool } from "../infrastructure/knowledgebase/knowledgeBaseApiTool.js";
+import { recordKnowledgeBaseSourceResult } from "../infrastructure/knowledgebase/knowledgeBaseSources.js";
 import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
 import type { SessionStore } from "../infrastructure/persistence/sessionStore.js";
 import type { AutomationHttpApplication } from "../automation/http/automationHttpApplication.js";
@@ -160,15 +161,13 @@ async function routeRequest(
       });
       return;
     }
-    writeJson(
-      response,
-      200,
-      await callKnowledgeBaseApiTool(
-        config,
-        body,
-        sessionStore.getOaUserId(sessionId),
-      ),
+    const result = await callKnowledgeBaseApiTool(
+      config,
+      body,
+      sessionStore.getOaUserId(sessionId),
     );
+    recordKnowledgeBaseSourceResult(sessionId, result);
+    writeJson(response, 200, result);
     return;
   }
 

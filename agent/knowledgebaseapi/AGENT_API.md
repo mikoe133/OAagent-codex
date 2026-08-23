@@ -1,8 +1,8 @@
 # 元始知识库 Agent API 接入文档（v1）
 
-本文档面向需要从 OA Agent、后端服务或自动化任务中读取元始知识库的调用方。
+本文档面向需要从 OA Agent、后端服务或自动化任务中读取、组织和安全编辑元始知识库的调用方。
 
-> 当前版本仅提供只读能力：搜索、浏览目录、读取页面。接口使用固定服务 Token 认证调用方，并按每次请求携带的 OA user id 执行知识库现有权限；用户无需亲自登录过知识库，但必须存在于知识库同步的 OA 活跃用户目录中。
+> 当前版本提供搜索、目录浏览、页面读取、目录与元数据编辑、附件上传，以及必须经过草稿预览的 TipTap 正文写入。接口使用固定服务 Token 认证调用方，并按每次请求携带的 OA user id 执行知识库现有权限；用户无需亲自登录过知识库，但必须存在于知识库同步的 OA 活跃用户目录中。
 >
 > **上线状态：待生产部署。** 当前生产地址尚未开放这些路由，请等待接口提供方确认上线后再开始联调。上线后，无 Token 请求应返回 JSON 格式的 `401 missing_token`；如果仍返回 HTML `404`，表示路由尚未部署。
 
@@ -16,6 +16,8 @@
 | 调用方鉴权 | 固定 Agent API Bearer Token |
 | 权限用户 | 每次请求的 `X-OA-User-Id` |
 | OpenAPI 3.1 | [`AGENT_API_OPENAPI.yaml`](./AGENT_API_OPENAPI.yaml) |
+| API Changelog | [`AGENT_API_CHANGELOG.md`](./AGENT_API_CHANGELOG.md) |
+| 第三方接入指南 | [`AGENT_API_MCP_GUIDE.md`](./AGENT_API_MCP_GUIDE.md) |
 
 所有响应均包含 `X-Request-Id` 响应头和同值的 `requestId` JSON 字段。排障时请提供该值。
 
@@ -111,6 +113,7 @@ X-OA-User-Id: <当前终端用户的稳定 OA ID>
 | `X-OA-Agent-Id` | 否 | Agent 或调用方标识，仅用于审计，最长 120 个字符 |
 | `X-OA-Run-Id` | 否 | 单次任务、对话或执行标识，仅用于审计，最长 160 个字符 |
 | `X-Request-Id` | 否 | 调用方链路 ID；仅接受 1–64 位字母、数字、`.`、`_`、`:`、`-`，不符合格式时服务端会生成新值 |
+| `Idempotency-Key` | 写接口必填 | 1–128 位可见 ASCII 字符；同一写请求重试时必须复用，服务端保留结果 24 小时 |
 
 `X-OA-Agent-Id` 和 `X-OA-Run-Id` 不参与用户识别或权限判断。
 
@@ -155,7 +158,8 @@ X-OA-User-Id: <当前终端用户的稳定 OA ID>
 
 `/search`、`/pages` 和 `/pages/{id}/children` 使用游标分页：
 
-- `limit` 默认为 `20`，范围为 `1`–`50`。
+- `/search`、`/pages` 以及非递归的 `/pages/{id}/children`：`limit` 默认为 `20`，范围为 `1`–`50`。
+- 递归的 `/pages/{id}/children`：`limit` 默认为 `200`，范围为 `1`–`500`。
 - 首次请求不传 `cursor`。
 - `nextCursor` 不为 `null` 时，将它原样放入下一次请求的 `cursor`。
 - `nextCursor` 为 `null` 表示没有下一页。
@@ -168,7 +172,7 @@ GET /api/agent/v1/search?q=部署&limit=20&cursor=djE6MjA
 
 ### 4.4 限流
 
-默认按用户限制为每分钟 `120` 次，实际值以响应头为准：
+只读请求默认按用户每分钟 `120` 次，JSON 写入默认 `30` 次，上传默认 `10` 次；实际值以响应头为准：
 
 | 响应头 | 说明 |
 | --- | --- |
@@ -186,7 +190,19 @@ GET /api/agent/v1/search?q=部署&limit=20&cursor=djE6MjA
 | `GET` | `/search` | 搜索当前用户可见的页面和目录 |
 | `GET` | `/pages` | 浏览公共或私人空间根节点，也可浏览指定目录 |
 | `GET` | `/pages/{id}` | 读取单个页面或目录的内容与元数据 |
-| `GET` | `/pages/{id}/children` | 浏览指定目录的直接子节点 |
+| `GET` | `/pages/{id}/children` | 浏览指定目录的直接子节点或批量列出子孙节点 |
+| `GET` | `/capabilities` | 查询写开关、限制和 TipTap schema |
+| `GET` | `/system-images` | 浏览允许作为封面的系统图库 |
+| `POST` | `/pages` | 创建空页面或目录 |
+| `PATCH` | `/pages/{id}` | 修改 title、emoji、封面或目录外观 |
+| `PATCH` | `/pages/{id}/location` | 移动或重新排序页面/目录 |
+| `POST` | `/pages/{id}/attachments` | 上传页面图片或普通附件 |
+| `POST` | `/pages/{id}/content-drafts` | 创建 TipTap 正文草稿和预览链接 |
+| `GET/PUT/DELETE` | `/content-drafts/{draftId}` | 读取、替换或废弃正文草稿 |
+| `POST` | `/content-drafts/{draftId}/apply` | 用户确认后提交正文草稿 |
+| `GET` | `/pages/{id}/revisions` | 列出正文历史版本 |
+| `GET` | `/pages/{id}/revisions/{revision}` | 读取指定历史 TipTap 内容 |
+| `GET` | `/pages/{id}/backlinks` | 查询反向引用 |
 
 ## 6. 搜索知识库
 
@@ -327,7 +343,7 @@ GET /pages/{id}
 
 资源不存在或当前用户无权访问时均返回 `404 not_found`，调用方不能据此判断资源是否真实存在。
 
-## 9. 浏览目录子节点
+## 9. 浏览目录子节点或子孙节点
 
 ~~~http
 GET /pages/{id}/children
@@ -336,10 +352,13 @@ GET /pages/{id}/children
 | 参数 | 位置 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- | --- |
 | `id` | path | string | 是 | — | 父目录 ID |
-| `limit` | query | integer | 否 | `20` | 每页数量，范围 `1`–`50` |
+| `recursive` | query | boolean | 否 | `false` | 为 `true` 时批量返回子孙节点；为 `false` 时保持直接子节点行为 |
+| `maxDepth` | query | integer | 否 | `20` | 递归的最大相对深度，范围 `1`–`20`；直接子节点深度为 `1` |
+| `kind` | query | `page` \| `folder` | 否 | — | 只返回指定节点类型；筛选页面时仍会穿过目录继续遍历 |
+| `limit` | query | integer | 否 | `20` / `200` | 非递归范围 `1`–`50`；递归范围 `1`–`500` |
 | `cursor` | query | string | 否 | — | 上一页返回的 `nextCursor` |
 
-响应结构与 `GET /pages` 相同。父节点不存在、不可见或不是目录时返回 `404 not_found`。
+返回节点按目录树的前序顺序排列，每个节点增加 `depth` 字段。响应还包含 `truncated`；其为 `true` 时表示本页因数量上限截断，应使用非空的 `nextCursor` 继续读取。权限过滤在遍历之前执行，因此接口不会越过当前用户不可见的目录。父节点不存在、不可见或不是目录时返回 `404 not_found`。
 
 ~~~bash
 curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?limit=20" \
@@ -348,7 +367,124 @@ curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?limit=20" \
   --header "X-OA-User-Id: 19"
 ~~~
 
-## 10. 字段说明
+一次批量获取最多 5 层内的所有页面：
+
+~~~bash
+curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?recursive=true&maxDepth=5&kind=page&limit=500" \
+  --header "Accept: application/json" \
+  --header "Authorization: Bearer <AGENT_API_TOKEN>" \
+  --header "X-OA-User-Id: 19"
+~~~
+
+~~~json
+{
+  "data": [
+    {
+      "id": "01JKBEXAMPLEPAGE00000000001",
+      "title": "生产部署手册",
+      "parentId": "01JKBEXAMPLEFOLDER000000001",
+      "kind": "page",
+      "depth": 2,
+      "space": "public",
+      "permission": "viewer",
+      "revision": 12,
+      "updatedAt": "2026-08-20T03:12:45.000Z",
+      "updatedBy": "林锦豪",
+      "updatedByOaUserId": "19",
+      "sourceUrl": "https://oa-kb.rwkvos.com/wiki/01JKBEXAMPLEPAGE00000000001"
+    }
+  ],
+  "nextCursor": null,
+  "truncated": false,
+  "requestId": "2734bd33-3807-4c7c-9cc7-803b3034d060"
+}
+~~~
+
+## 10. 写入、附件与正文草稿
+
+### 10.1 写入总则
+
+- 生产环境只有 `KB_AGENT_WRITE_API_ENABLED=true` 时开放写接口；关闭时返回 `503 agent_write_api_disabled`，只读接口不受影响。
+- 所有写请求必须携带 `Idempotency-Key`。相同 key 和相同请求会重放原结果；相同 key 对应不同请求返回 `409 idempotency_conflict`。
+- 新页面只能创建为空页面。正文通过草稿写入；title、emoji 和封面既可以直接 PATCH，也可以随正文草稿一起预览和确认。
+- 目录创建/改名/移动及单独的页面元数据 PATCH 直接生效；正文禁止通过页面 PATCH 直接覆盖。
+
+### 10.2 创建页面或目录
+
+~~~http
+POST /pages
+Idempotency-Key: create-page-run-123
+Content-Type: application/json
+~~~
+
+~~~json
+{
+  "kind": "page",
+  "space": "public",
+  "parentId": "FOLDER_ID",
+  "title": "Agent API 使用手册",
+  "icon": "🤖",
+  "coverImage": {
+    "source": "system",
+    "url": "/system-images/space/nasa-Q1p7bh3SHj8-unsplash.jpg"
+  },
+  "coverPositionY": 50
+}
+~~~
+
+目录使用 `kind=folder`，不接受页面 emoji、封面或正文。创建子节点需要父目录 `editor`；移动源节点需要 `manager`，目标目录需要 `editor`。
+
+### 10.3 页面元数据和位置
+
+`PATCH /pages/{id}` 支持页面的 `title`、`icon`、`coverImage`、`coverPositionY`。`coverImage` 可为 `null`、系统图片 `{source:"system",url}`，或当前页面图片附件 `{source:"attachment",attachmentId}`。外部 URL 不受支持。
+
+`PATCH /pages/{id}/location` 请求为 `{ "parentId": "FOLDER_ID", "index": 0 }`。`parentId=null` 表示移至空间根节点；服务端拒绝跨空间、跨私人所有者和将目录移动到自身后代。
+
+### 10.4 上传附件
+
+向 `POST /pages/{id}/attachments` 发送 multipart 表单：`file` 为文件，`kind` 为 `image` 或 `file`。图片支持 JPG、PNG、GIF、WebP 且不超过 10 MB；普通文件不超过 50 MB。响应同时返回附件 URL 和可直接放入正文的标准 TipTap 节点。
+
+### 10.5 TipTap 草稿与预览
+
+先调用 `GET /capabilities` 获取 `contentSchemaVersion`、节点、marks、自定义节点示例、正文大小限制和 `draftPageMetadata`。首版 schema 为 `1`，正文根节点必须为 `doc`；未知节点、未知属性、临时上传节点、外链资源、跨页面附件和不可见页面提及会被拒绝。
+
+`/capabilities` 的正式字段名为 `nodes`、`marks`、`maxBytes`；`draftPageMetadata` 是包含 `fields` 和 `appliedAtomically` 的对象；`nodes`/`marks` 的元素为纯字符串。响应 `data` 是面向演进的能力发现对象，后端会持续新增字段，调用方必须忽略未知字段，不得使用拒绝额外字段的严格反序列化。完整 200 响应 schema 与 example 见 [`AGENT_API_OPENAPI.yaml`](./AGENT_API_OPENAPI.yaml) 的 `CapabilitiesResponse`，官方脱敏 fixture 见 [`fixtures/agent-api/capabilities.success.json`](./fixtures/agent-api/capabilities.success.json)。
+
+~~~http
+POST /pages/PAGE_ID/content-drafts
+Idempotency-Key: draft-run-123
+Content-Type: application/json
+
+{
+  "baseRevision": 12,
+  "contentSchemaVersion": 1,
+  "content": {
+    "type": "doc",
+    "content": [
+      { "type": "paragraph", "content": [{ "type": "text", "text": "待确认正文" }] }
+    ]
+  },
+  "metadata": {
+    "title": "Agent API 使用手册",
+    "icon": "🤖",
+    "coverImage": {
+      "source": "system",
+      "url": "/system-images/space/nasa-Q1p7bh3SHj8-unsplash.jpg"
+    },
+    "coverPositionY": 50
+  }
+}
+~~~
+
+`metadata` 可选，支持 `title`、`icon`、`coverImage` 和 `coverPositionY`，校验规则与页面 PATCH 相同；提供后不会立刻修改正式页面。也可用 `sourceRevision` 代替 `content`，把历史版本生成成待确认草稿。成功响应中的 `previewUrl` 有效 24 小时；链接必须由草稿对应的 OA 用户登录知识库后访问。“草稿正文”会显示待确认正文和元数据，“当前正文”显示正式页面当前状态。
+
+用户在 Agent 对话中确认后，Agent 使用新的 `Idempotency-Key` 调用 `POST /content-drafts/{draftId}/apply`。服务端先刷新实时 Yjs 状态，再检查 `baseRevision` 和元数据基准。成功时正文、正式修订以及草稿中的 title、emoji、封面会原子写入。页面正文期间被其他人修改时返回 `409 revision_conflict`；草稿涉及的元数据被修改时返回 `409 metadata_conflict`。草稿会变为 `stale`，必须重新读取页面并创建新草稿；不支持强制覆盖。
+
+### 10.6 历史与反向引用
+
+`GET /pages/{id}/revisions` 返回历史摘要，`GET /pages/{id}/revisions/{revision}` 返回 TipTap JSON 和 `contentSchemaVersion`。`GET /pages/{id}/backlinks` 只返回当前 OA 用户可见的引用页面。
+
+## 11. 字段说明
 
 ### PageSummary
 
@@ -366,6 +502,14 @@ curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?limit=20" \
 | `updatedByOaUserId` | string \| null | 最后更新者的稳定 OA user id；系统更新或历史姓名无法唯一匹配时为 `null` |
 | `sourceUrl` | string | 可在浏览器中打开的知识库页面地址 |
 
+### DirectoryPageSummary 附加字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `depth` | integer | 相对于请求目录的深度；直接子节点为 `1` |
+
+目录响应还包含 `truncated` 布尔值，用于明确表示当前响应是否因分页上限截断。
+
 ### SearchResult 附加字段
 
 | 字段 | 类型 | 说明 |
@@ -376,7 +520,7 @@ curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?limit=20" \
 | `titleMatch` | MatchRange \| null | 标题命中范围 `[start, end)` |
 | `excerptMatch` | MatchRange \| null | 摘要命中范围 `[start, end)` |
 
-## 11. 错误码与重试
+## 12. 错误码与重试
 
 | HTTP | `error.code` | 含义 | 调用方建议 |
 | --- | --- | --- | --- |
@@ -385,6 +529,7 @@ curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?limit=20" \
 | `400` | `invalid_oa_user_id` | `X-OA-User-Id` 格式不合法 | 修正 OA user id，不要原样重试 |
 | `400` | `invalid_query` | 搜索词超过 100 个字符 | 缩短搜索词 |
 | `400` | `invalid_pagination` | `limit` 或 `cursor` 不合法 | 重新使用服务端返回的游标 |
+| `400` | `invalid_directory_query` | `recursive`、`maxDepth` 或 `kind` 不合法 | 修正目录遍历参数，不要原样重试 |
 | `400` | `invalid_space` | `space` 不合法 | 使用 `public` 或 `private` |
 | `400` | `invalid_format` | `format` 不受支持 | 使用支持的三种格式之一 |
 | `401` | `missing_token` | 缺少 Bearer Token | 补充固定 Agent API Token |
@@ -394,10 +539,17 @@ curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?limit=20" \
 | `429` | `rate_limited` | 超过请求频率限制 | 按 `Retry-After` 延迟重试 |
 | `500` | `internal_error` | 知识库内部临时错误 | 指数退避重试，并记录 `requestId` |
 | `503` | `agent_api_not_configured` | 知识库未正确配置固定 Token | 联系知识库运维配置 `KB_AGENT_API_TOKEN` |
+| `400` | `missing_idempotency_key` | 写请求缺少有效幂等键 | 生成幂等键，并在同一请求的所有重试中复用 |
+| `400` | `invalid_tiptap_content` | TipTap JSON、节点或引用不合法 | 按 `/capabilities` 返回的 schema 修正 |
+| `409` | `idempotency_conflict` | 同一幂等键被用于不同请求 | 为新操作生成新 key |
+| `409` | `revision_conflict` | 正文基准版本已过期 | 重新读取页面并生成新草稿 |
+| `409` | `metadata_conflict` | title、emoji 或封面基准已变化 | 重新读取页面和元数据并生成新草稿 |
+| `409` | `draft_not_active` | 草稿已提交、废弃、过期或失效 | 查询草稿状态或创建新草稿 |
+| `503` | `agent_write_api_disabled` | 生产环境尚未开启写能力 | 完成迁移和协作服务升级后开启 |
 
 建议只对 `429` 和 `500` 自动重试。`500` 可采用带随机抖动的指数退避，例如等待 1 秒、2 秒、4 秒，最多重试 3 次。
 
-## 12. 对接验收清单
+## 13. 对接验收清单
 
 - [ ] OA 后端与知识库配置相同的固定高熵 Token，且与其他系统密钥分开。
 - [ ] 固定 Token 仅放在 `Authorization` 请求头，未下发到浏览器，日志和错误中已脱敏。
@@ -409,3 +561,6 @@ curl "https://oa-kb.rwkvos.com/api/agent/v1/pages/FOLDER_ID/children?limit=20" \
 - [ ] 对 `404` 不区分“资源不存在”和“无权访问”。
 - [ ] 保存或透传 `X-Request-Id`，便于双方排查请求。
 - [ ] 已使用不同权限用户验证返回内容符合知识库 ACL。
+- [ ] 每个写操作生成独立 `Idempotency-Key`，网络重试复用同一 key。
+- [ ] 正文严格执行读取 revision、创建草稿、打开预览、用户确认、apply；`409` 后不会强制覆盖。
+- [ ] Agent 使用 `/capabilities` 的 TipTap schema，只引用目标页面附件和当前用户可见页面。

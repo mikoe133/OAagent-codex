@@ -54,14 +54,10 @@ export type AppConfig = {
   oaApiToolToken: string;
   /** 知识库 Agent API 地址。 */
   knowledgeBaseApiBaseUrl: string;
-  /** OA 后端与知识库共享的固定服务 Token。 */
+  /** 仅由服务端组装为知识库 Authorization Bearer header 的固定 Token。 */
   knowledgeBaseApiToken: string | null;
-  /** 知识库只读 OpenAPI 文档。 */
-  knowledgeBaseReadOpenapiPath: string;
-  /** 预留的知识库写 OpenAPI 文档；文件可暂不存在。 */
-  knowledgeBaseWriteOpenapiPath: string;
-  /** 知识库调用说明文档。 */
-  knowledgeBaseApiGuidePath: string;
+  /** 提供给 agent 的知识库统一读写 OpenAPI 文档。 */
+  knowledgeBaseOpenapiPath: string;
   /** OA 后端调用自动化模型目录与校验接口的专用 token。 */
   automationApiToken: string | null;
   /** Node 自动任务存储、认证与 maintenance 配置。 */
@@ -110,28 +106,13 @@ export function loadConfig(): AppConfig {
       `缺少本地兜底接口文档:${openapiPath} 不存在。远程 OpenAPI 不可用时必须使用该文件。`,
     );
   }
-  const knowledgeBaseReadOpenapiPath = path.join(
+  const knowledgeBaseOpenapiPath = path.join(
     projectRoot,
     "knowledgebaseapi",
     "knowledgebaseapi.yaml",
   );
-  const knowledgeBaseWriteOpenapiPath = path.join(
-    projectRoot,
-    "knowledgebaseapi",
-    "knowledgebase-write-api.yaml",
-  );
-  const knowledgeBaseApiGuidePath = path.join(
-    projectRoot,
-    "knowledgebaseapi",
-    "AGENT_API.md",
-  );
-  for (const requiredPath of [
-    knowledgeBaseReadOpenapiPath,
-    knowledgeBaseApiGuidePath,
-  ]) {
-    if (!existsSync(requiredPath)) {
-      throw new Error(`缺少知识库接口文档:${requiredPath} 不存在。`);
-    }
+  if (!existsSync(knowledgeBaseOpenapiPath)) {
+    throw new Error(`缺少知识库接口文档:${knowledgeBaseOpenapiPath} 不存在。`);
   }
 
   const modelProviders: Record<ModelProviderId, ModelProviderConfig> = {
@@ -214,10 +195,9 @@ export function loadConfig(): AppConfig {
         DEFAULT_KNOWLEDGE_BASE_API_BASE_URL,
       "OA_KNOWLEDGE_API_BASE_URL",
     ),
-    knowledgeBaseApiToken: process.env.OA_KNOWLEDGE_API_KEY?.trim() || null,
-    knowledgeBaseReadOpenapiPath,
-    knowledgeBaseWriteOpenapiPath,
-    knowledgeBaseApiGuidePath,
+    knowledgeBaseApiToken:
+      process.env.OA_KNOWLEDGE_BASE_API_KEY?.trim() || null,
+    knowledgeBaseOpenapiPath,
     automationApiToken: process.env.OA_AGENT_AUTOMATION_TOKEN?.trim() || null,
     automation: parseAutomationConfig(process.env),
     serverPort,

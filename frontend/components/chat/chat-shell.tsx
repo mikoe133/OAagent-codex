@@ -22,11 +22,15 @@ import {
 import { calculateResponseDurationMs, normalizeResponseDuration } from "@/lib/response-duration"
 import {
   drainChatSseBuffer,
+  finalizeToolSteps,
   isToolTimelineEvent,
   mergeMessageTraceDelta,
   mergeToolTimelineEvent,
+  normalizeKnowledgeSources,
+  requireCompletedChatRun,
   withTraceMessages,
   type ChatStreamEvent,
+  type KnowledgeSource,
   type TraceMessage,
   type ToolStep,
 } from "./chat-stream"
@@ -46,6 +50,7 @@ export interface Message {
   imageData?: string
   toolSteps?: ToolStep[]
   traceMessages?: TraceMessage[]
+  knowledgeSources?: KnowledgeSource[]
   status?: MessageStatus
   error?: string
   feedback?: MessageFeedback
@@ -84,6 +89,7 @@ type StoredMessage = {
   imageData?: unknown
   toolSteps?: unknown
   traceMessages?: unknown
+  knowledgeSources?: unknown
   status?: unknown
   error?: unknown
   feedback?: unknown
@@ -326,6 +332,9 @@ function normalizeStoredMessage(value: unknown): Message | null {
     ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
     ...(Array.isArray(message.traceMessages)
       ? { traceMessages: normalizeStoredTraceMessages(message.traceMessages) }
+      : {}),
+    ...(Array.isArray(message.knowledgeSources)
+      ? { knowledgeSources: normalizeKnowledgeSources(message.knowledgeSources) }
       : {}),
     ...(status ? { status } : {}),
     ...(messageError ? { error: messageError } : {}),
@@ -801,6 +810,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       let visibleContent = ""
       let currentToolSteps: ToolStep[] = []
       let currentTraceMessages: TraceMessage[] = []
+      let currentKnowledgeSources: KnowledgeSource[] = []
 
       const isCurrentSessionRun = () =>
         activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId
@@ -999,6 +1009,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         }
 
         let terminalStreamError: Error | null = null
+        let completedRunReceived = false
 
         const handleChatStreamEvent = (event: ChatStreamEvent) => {
           if (isToolTimelineEvent(stringValue(event.type))) {
@@ -1016,10 +1027,13 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           }
 
           if (event.type === "run.completed") {
-            const finalResponse = toRecord(event.result)?.finalResponse
+            completedRunReceived = true
+            const result = toRecord(event.result)
+            const finalResponse = result?.finalResponse
             if (typeof finalResponse === "string") {
               applyFinalContent(finalResponse)
             }
+            currentKnowledgeSources = normalizeKnowledgeSources(result?.knowledgeSources)
             return
           }
 
@@ -1051,6 +1065,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             await reader.cancel().catch(() => undefined)
             throw terminalStreamError
           }
+          requireCompletedChatRun(completedRunReceived)
         } else {
           while (true) {
             const { done, value } = await reader.read()
@@ -1061,14 +1076,13 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           }
 
           appendAssistantContent(decoder.decode())
+          completedRunReceived = true
         }
 
         const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
         await waitForTypewriterFlush()
         cancelTypewriter()
-        currentToolSteps = currentToolSteps.map((step) =>
-          step.status === "running" ? { ...step, status: "completed" as const } : step,
-        )
+        currentToolSteps = finalizeToolSteps(currentToolSteps, "completed")
 
         const completedMessages: Message[] = [
           ...conversationMessages,
@@ -1080,6 +1094,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
               status: "completed",
               durationMs,
               ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
+              ...(currentKnowledgeSources.length > 0 ? { knowledgeSources: currentKnowledgeSources } : {}),
             },
             currentTraceMessages,
           ),
@@ -1094,10 +1109,9 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         const wasStopped = e instanceof Error && e.name === "AbortError"
         const errorMessage = e instanceof Error ? e.message : "An error occurred"
         const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
-        currentToolSteps = currentToolSteps.map((step) =>
-          step.status === "running"
-            ? { ...step, status: wasStopped ? ("info" as const) : ("failed" as const) }
-            : step,
+        currentToolSteps = finalizeToolSteps(
+          currentToolSteps,
+          wasStopped ? "stopped" : "failed",
         )
 
         const terminalMessages: Message[] = [

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ThreadItem } from "@openai/codex-sdk";
 import {
+  buildIncompleteTurnContinuationPrompt,
+  hasTerminalAgentResponse,
   resolveStreamFailure,
   resolveStreamRecovery,
 } from "../src/application/agentService.js";
@@ -182,7 +184,7 @@ describe("resolveStreamRecovery", () => {
 
     const recovery = resolveStreamRecovery(
       finalResponse,
-      [successfulGetUserItem()],
+      [successfulGetUserItem(), agentMessageItem("final-answer", finalResponse)],
       [],
     );
 
@@ -192,10 +194,55 @@ describe("resolveStreamRecovery", () => {
     });
   });
 
+  it("does not treat a progress message before the last tool as a final response", () => {
+    const progress = "项目列表已返回，我现在继续精确定位。";
+    const items = [
+      agentMessageItem("progress", progress),
+      successfulGetUserItem(),
+    ];
+
+    assert.equal(hasTerminalAgentResponse(items), false);
+    assert.equal(resolveStreamRecovery(progress, items, []), null);
+  });
+
+  it("does not treat progress as final while a later OA tool is still active", () => {
+    const progress = "知识库结果已取得，我接着查询项目更新。";
+    const items = [agentMessageItem("progress", progress)];
+    const activeToolIds = new Set(["oa-project-query"]);
+
+    assert.equal(hasTerminalAgentResponse(items, activeToolIds), false);
+    assert.equal(
+      resolveStreamRecovery(progress, items, [], activeToolIds),
+      null,
+    );
+  });
+
+  it("accepts an agent response emitted after the last tool", () => {
+    const answer = "RWKV Chat 项目当前处于持续更新状态。";
+    const items = [
+      successfulGetUserItem(),
+      agentMessageItem("final-answer", answer),
+    ];
+
+    assert.equal(hasTerminalAgentResponse(items), true);
+  });
+
   it("does not turn a successful helper GET into a completed business task", () => {
     const recovery = resolveStreamRecovery("", [successfulGetUserItem()], []);
 
     assert.equal(recovery, null);
+  });
+
+  it("builds a domain-agnostic continuation that audits every pending user intent", () => {
+    const prompt = buildIncompleteTurnContinuationPrompt(
+      "请回答知识库制度，并查询相关项目的当前更新。",
+    );
+
+    assert.match(prompt, /拆分.*子问题|子问题.*拆分/);
+    assert.match(prompt, /逐项.*已有证据|已有证据.*逐项/);
+    assert.match(prompt, /只.*未完成|尚未完成/);
+    assert.match(prompt, /完整最终回答/);
+    assert.doesNotMatch(prompt, /发票|宽带|RWKV Chat/);
   });
 
   it("recovers from a successful confirmed mutation when no final response exists", () => {
@@ -259,6 +306,20 @@ describe("resolveStreamFailure", () => {
 
     assert.equal(failure.message, "Codex Exec exited with code 1");
   });
+
+  it("does not expose the malformed JSONL event payload in parse errors", () => {
+    const failure = resolveStreamFailure(
+      new Error(
+        'Failed to parse item: {"type":"item.completed","item":{"aggregated_output":"公司敏感正文"}}',
+      ),
+      null,
+      [],
+    );
+
+    assert.match(failure.message, /JSONL|事件流/);
+    assert.doesNotMatch(failure.message, /公司敏感正文|aggregated_output/);
+    assert.ok(failure.message.length < 300);
+  });
 });
 
 function successfulGetUserItem(): Extract<
@@ -313,5 +374,16 @@ function successfulConfirmedWeeklyReportWriteItem(): Extract<
     }),
     exit_code: 0,
     status: "completed",
+  };
+}
+
+function agentMessageItem(
+  id: string,
+  text: string,
+): Extract<ThreadItem, { type: "agent_message" }> {
+  return {
+    id,
+    type: "agent_message",
+    text,
   };
 }

@@ -20,50 +20,52 @@ export type ResolvedKnowledgeBaseContract = {
 export type ResolvedKnowledgeBaseContracts = {
   read: ResolvedKnowledgeBaseContract;
   write: ResolvedKnowledgeBaseContract | null;
-  writePath: string;
-  guidePath: string;
 };
 
 export async function resolveKnowledgeBaseContracts(
   config: AppConfig,
 ): Promise<ResolvedKnowledgeBaseContracts> {
-  const [read, write] = await Promise.all([
-    loadContract(config.knowledgeBaseReadOpenapiPath, "knowledge_base_read"),
-    loadOptionalWriteContract(config.knowledgeBaseWriteOpenapiPath),
-  ]);
+  const document = await loadDocument(config.knowledgeBaseOpenapiPath);
+  const read = buildCatalogContract(
+    document,
+    config.knowledgeBaseOpenapiPath,
+    "knowledge_base_read",
+  );
+  const write = buildCatalogContract(
+    document,
+    config.knowledgeBaseOpenapiPath,
+    "knowledge_base_write",
+  );
   return {
     read,
-    write,
-    writePath: config.knowledgeBaseWriteOpenapiPath,
-    guidePath: config.knowledgeBaseApiGuidePath,
+    write: write.index.operations.length > 0 ? write : null,
   };
 }
 
-async function loadOptionalWriteContract(
-  contractPath: string,
-): Promise<ResolvedKnowledgeBaseContract | null> {
-  try {
-    return await loadContract(contractPath, "knowledge_base_write");
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function loadContract(
+function buildCatalogContract(
+  document: unknown,
   contractPath: string,
   catalog: ResolvedKnowledgeBaseContract["catalog"],
-): Promise<ResolvedKnowledgeBaseContract> {
-  const contents = await readFile(contractPath, "utf8");
-  const document = parseKnowledgeBaseOpenApiDocument(contents, contractPath);
+): ResolvedKnowledgeBaseContract {
+  const index = buildOpenApiIndex(document, catalog);
   return {
     document,
-    index: buildOpenApiIndex(document, catalog),
+    index: {
+      ...index,
+      operations: index.operations.filter((operation) =>
+        catalog === "knowledge_base_read"
+          ? operation.method === "GET"
+          : operation.method !== "GET",
+      ),
+    },
     path: contractPath,
     catalog,
   };
+}
+
+async function loadDocument(contractPath: string): Promise<unknown> {
+  const contents = await readFile(contractPath, "utf8");
+  return parseKnowledgeBaseOpenApiDocument(contents, contractPath);
 }
 
 function parseKnowledgeBaseOpenApiDocument(
@@ -90,13 +92,4 @@ function parseKnowledgeBaseOpenApiDocument(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
 }

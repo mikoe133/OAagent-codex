@@ -28,6 +28,11 @@ import {
 import { mergeOpenApiIndexes } from "../infrastructure/oa/openApiIndex.js";
 import { resolveKnowledgeBaseContracts } from "../infrastructure/knowledgebase/knowledgeBaseContract.js";
 import {
+  beginKnowledgeBaseSourceTurn,
+  finishKnowledgeBaseSourceTurn,
+  type KnowledgeBaseSource,
+} from "../infrastructure/knowledgebase/knowledgeBaseSources.js";
+import {
   beginOaTurn,
   finishOaTurn,
   resolveOaQueryPolicy,
@@ -50,6 +55,7 @@ export type SendMessageResult = {
   model: string;
   finalResponse: string;
   executedCommands: string[];
+  knowledgeSources: KnowledgeBaseSource[];
   summary: string | null;
 };
 
@@ -193,18 +199,21 @@ export class AgentService {
       runtimeContext,
     );
     beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
+    beginKnowledgeBaseSourceTurn(input.sessionId);
+    let knowledgeSources: KnowledgeBaseSource[] = [];
     const turn = await (async () => {
       try {
         return await thread.run(prompt);
       } finally {
         finishOaTurn(input.sessionId);
+        knowledgeSources = finishKnowledgeBaseSourceTurn(input.sessionId);
       }
     })();
 
-    if (!turn.finalResponse.trim()) {
+    if (!turn.finalResponse.trim() || !hasTerminalAgentResponse(turn.items)) {
       const itemTypes = turn.items.map((item) => item.type).join(", ") || "无";
       throw new Error(
-        `agent 未返回最终回答(turn 已结束但没有 agent_message)。过程 items: ${itemTypes}。`,
+        `agent 未返回最终回答(turn 已结束或最后一次工具调用后没有 agent_message)。过程 items: ${itemTypes}。`,
       );
     }
 
@@ -226,6 +235,7 @@ export class AgentService {
       executedCommands: collectExecutedCommands(turn.items).map((command) =>
         redactSecrets(command, secrets),
       ),
+      knowledgeSources,
       summary,
     };
   }
@@ -277,6 +287,7 @@ export class AgentService {
         state.finalResponse,
         state.items,
         secrets,
+        state.activeToolIds,
       );
       if (!recovery) {
         return false;
@@ -297,12 +308,27 @@ export class AgentService {
     };
 
     beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
+    beginKnowledgeBaseSourceTurn(input.sessionId);
+    let knowledgeSources: KnowledgeBaseSource[] = [];
+    const runStreamedTurn = async (turnPrompt: string): Promise<void> => {
+      const { events } = await thread.runStreamed(turnPrompt, { signal });
+      for await (const event of events) {
+        throwIfAborted(signal);
+        await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+      }
+    };
     try {
-      const { events } = await thread.runStreamed(prompt, { signal });
       try {
-        for await (const event of events) {
-          throwIfAborted(signal);
-          await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+        await runStreamedTurn(prompt);
+        if (
+          !state.turnFailure &&
+          !hasTerminalAgentResponse(state.items, state.activeToolIds)
+        ) {
+          state.finalResponse = "";
+          state.activeToolIds.clear();
+          await runStreamedTurn(
+            buildIncompleteTurnContinuationPrompt(input.message),
+          );
         }
       } catch (error) {
         if (!(await recoverStream())) {
@@ -311,6 +337,7 @@ export class AgentService {
       }
     } finally {
       finishOaTurn(input.sessionId);
+      knowledgeSources = finishKnowledgeBaseSourceTurn(input.sessionId);
     }
 
     if (state.turnFailure) {
@@ -320,10 +347,13 @@ export class AgentService {
       }
     }
 
-    if (!state.finalResponse.trim()) {
+    if (
+      !state.finalResponse.trim() ||
+      !hasTerminalAgentResponse(state.items, state.activeToolIds)
+    ) {
       const itemTypes = state.items.map((item) => item.type).join(", ") || "无";
       throw new Error(
-        `agent 未返回最终回答(turn 已结束但没有 agent_message)。过程 items: ${itemTypes}。`,
+        `agent 未返回最终回答(turn 已结束或最后一次工具调用后没有 agent_message)。过程 items: ${itemTypes}。`,
       );
     }
 
@@ -348,6 +378,7 @@ export class AgentService {
       executedCommands: collectExecutedCommands(state.items).map((command) =>
         redactSecrets(command, secrets),
       ),
+      knowledgeSources,
       summary,
     };
 
@@ -407,6 +438,14 @@ export class AgentService {
     secrets: string[],
     emit: AgentStreamEmit,
   ): Promise<void> {
+    if (isToolThreadItem(item)) {
+      if (eventType === "item.completed") {
+        state.activeToolIds.delete(item.id);
+      } else {
+        state.activeToolIds.add(item.id);
+      }
+    }
+
     if (eventType === "item.completed") {
       state.items.push(item);
     }
@@ -624,6 +663,7 @@ export class AgentService {
 
 type AgentStreamState = {
   items: ThreadItem[];
+  activeToolIds: Set<string>;
   finalResponse: string;
   usage: Usage | null;
   turnFailure: string | null;
@@ -634,6 +674,7 @@ type AgentStreamState = {
 function createStreamState(): AgentStreamState {
   return {
     items: [],
+    activeToolIds: new Set(),
     finalResponse: "",
     usage: null,
     turnFailure: null,
@@ -664,6 +705,21 @@ function buildPromptForSession(
     "<user_task>",
     message,
     "</user_task>",
+  ].join("\n");
+}
+
+export function buildIncompleteTurnContinuationPrompt(message: string): string {
+  return [
+    "<continuation_task>",
+    "上一轮在工具调用后结束，但用户请求尚未形成完整最终回答。",
+    "先根据原始请求重新拆分独立子问题，并逐项核对当前 thread 中的已有证据，包括工具结果和业务结论。",
+    "只处理尚未完成、尚未确认未找到或尚未说明阻塞原因的子问题；不要重复已经完成的查询。",
+    "按缺失证据自主选择下一步，可以复用已有 OA responseId、知识库结果和其他上下文，不预设固定工具顺序或调用次数。",
+    "工具调用成功本身不代表子问题已回答；必须把工具证据转化为用户需要的业务结论。",
+    "不得重复已成功的相同请求，不得只说明下一步计划。",
+    "完成后必须在最后一次工具调用之后输出一条覆盖全部子问题的最终业务回答。",
+    `原始用户请求: ${message}`,
+    "</continuation_task>",
   ].join("\n");
 }
 
@@ -721,8 +777,12 @@ export function resolveStreamRecovery(
   finalResponse: string,
   items: ThreadItem[],
   secrets: string[],
+  activeToolIds: ReadonlySet<string> = new Set(),
 ): StreamRecoveryDecision | null {
-  if (finalResponse.trim()) {
+  if (
+    finalResponse.trim() &&
+    hasTerminalAgentResponse(items, activeToolIds)
+  ) {
     return {
       kind: "existing_response",
       response: finalResponse,
@@ -735,6 +795,37 @@ export function resolveStreamRecovery(
     : null;
 }
 
+export function hasTerminalAgentResponse(
+  items: ThreadItem[],
+  activeToolIds: ReadonlySet<string> = new Set(),
+): boolean {
+  if (activeToolIds.size > 0) {
+    return false;
+  }
+  let lastAgentMessageIndex = -1;
+  let lastToolIndex = -1;
+  items.forEach((item, index) => {
+    if (item.type === "agent_message") {
+      lastAgentMessageIndex = index;
+    } else if (
+      item.type === "command_execution" ||
+      item.type === "mcp_tool_call" ||
+      item.type === "file_change" ||
+      item.type === "web_search"
+    ) {
+      lastToolIndex = index;
+    }
+  });
+  return lastAgentMessageIndex >= 0 && lastAgentMessageIndex > lastToolIndex;
+}
+
+function isToolThreadItem(item: ThreadItem): boolean {
+  return item.type === "command_execution" ||
+    item.type === "mcp_tool_call" ||
+    item.type === "file_change" ||
+    item.type === "web_search";
+}
+
 export function resolveStreamFailure(
   caughtError: unknown,
   turnFailure: string | null,
@@ -743,6 +834,11 @@ export function resolveStreamFailure(
   const caughtMessage =
     caughtError instanceof Error ? caughtError.message : String(caughtError);
   const message = turnFailure?.trim() || caughtMessage;
+  if (message.startsWith("Failed to parse item:")) {
+    return new Error(
+      "Codex SDK 无法解析 JSONL 事件流。工具输出可能包含被 Node 24 误判为换行的 Unicode 分隔符，请重试；若持续发生，请改用 Node 22 运行服务。",
+    );
+  }
   return new Error(redactSecrets(message, secrets));
 }
 

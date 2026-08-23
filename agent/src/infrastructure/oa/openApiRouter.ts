@@ -411,6 +411,13 @@ function rankRoutedCandidates(
   const operationPriorities = new Map(
     route.operationIds.map((operationId, index) => [operationId, index]),
   );
+  const hasExplicitProjectOperation = index.operations.some(
+    (operation) =>
+      operationIds.has(operation.operationId) &&
+      operation.tags.includes("projects") &&
+      operation.operationId !==
+        "projects_list_projects_list_by_person_get",
+  );
   const terms = [task.toLowerCase(), ...route.searchTerms];
   return index.operations
     .filter((operation) =>
@@ -424,6 +431,11 @@ function rankRoutedCandidates(
       operation,
       score:
         scoreSemanticTerms(operation, terms, route.accessMode) +
+        scoreTaskSpecificPreference(
+          operation,
+          task,
+          hasExplicitProjectOperation,
+        ) +
         (operationIds.has(operation.operationId)
           ? 100_000 - (operationPriorities.get(operation.operationId) ?? 0)
           : 0),
@@ -435,6 +447,38 @@ function rankRoutedCandidates(
     )
     .slice(0, MAX_ROUTED_CANDIDATES)
     .map(({ operation }) => operation);
+}
+
+function scoreTaskSpecificPreference(
+  operation: OpenApiOperationIndexEntry,
+  task: string,
+  hasExplicitProjectOperation: boolean,
+): number {
+  if (hasExplicitProjectOperation || !isNamedProjectLookup(task)) {
+    return 0;
+  }
+  if (
+    operation.operationId ===
+    "projects_list_projects_list_by_project_get"
+  ) {
+    return 200_000;
+  }
+  if (
+    operation.operationId ===
+    "projects_list_projects_list_by_person_get"
+  ) {
+    return -50_000;
+  }
+  return 0;
+}
+
+function isNamedProjectLookup(task: string): boolean {
+  if (!/项目/i.test(task)) {
+    return false;
+  }
+  return !/(?:我|本人|谁|人员|员工|成员|负责人).{0,8}(?:参与|负责|名下|项目)|按人员/i.test(
+    task,
+  );
 }
 
 function inferFallbackCatalogs(task: string): OpenApiCatalog[] {

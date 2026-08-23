@@ -8,7 +8,7 @@ code, prompts, controlled OA API helper script, and OpenAPI contract.
 ```text
 agent/
   openapi/openapi.json     Local fallback for the OA OpenAPI contract
-  knowledgebaseapi/        Knowledge-base read contract, guide, and write placeholder
+  knowledgebaseapi/        Unified knowledge-base OpenAPI and developer-only guide
   prompts/                 Agent prompt files loaded in deterministic order
   scripts/                 Backend maintenance and controlled tool scripts
   src/
@@ -57,7 +57,7 @@ fall back to `agent/openapi/openapi.json`.
 
 Knowledge-document questions route separately through
 `agent/knowledgebaseapi/knowledgebaseapi.yaml`. Configure
-`OA_KNOWLEDGE_API_KEY` (and optionally `OA_KNOWLEDGE_API_BASE_URL`) to enable
-real reads. The reserved write contract is
-`agent/knowledgebaseapi/knowledgebase-write-api.yaml`; until it exists, the
-router will not substitute an OA operation for a knowledge-base mutation.
+`OA_KNOWLEDGE_BASE_API_KEY` (and optionally `OA_KNOWLEDGE_API_BASE_URL`) to enable
+controlled reads and confirmed writes. The unified OpenAPI is the only
+knowledge-base contract exposed to the agent; `agent/knowledgebaseapi/AGENT_API.md`
+is developer documentation and is not included in the runtime prompt.

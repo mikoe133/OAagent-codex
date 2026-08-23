@@ -67,7 +67,7 @@ Environment Variables:
 | --- | --- | --- |
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
-| 两者 | `OA_KNOWLEDGE_API_KEY` | 知识库固定服务 Token，配置为 Environment Secret |
+| 两者 | `OA_KNOWLEDGE_BASE_API_KEY` | 服务端组装知识库 `Authorization: Bearer` header 的固定 Token，配置为 Environment Secret |
 | 两者可选 | `OA_KNOWLEDGE_API_BASE_URL` | 知识库 Agent API 地址，默认使用生产地址 |
 | 两者 | `AUTOMATION_API_BASE_URL` | Compose 内固定为 `http://agent:3000`，无需配置 |
 | 两者可选 | `PROJECT_SYNC_API_BASE_URL` | 原 OA 项目同步服务地址；未配置时继承 `OA_DOCKER_API_BASE_URL` |

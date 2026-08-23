@@ -133,7 +133,7 @@ GitHub 仓库 -> Settings -> Environments
 | --- | --- | --- |
 | `test` | `OA_DOCKER_API_BASE_URL` | 测试 OA API 地址 |
 | `production` | `OA_DOCKER_API_BASE_URL` | 生产 OA API 地址 |
-| `test` / `production` | `OA_KNOWLEDGE_API_KEY` | 各环境独立的知识库固定服务 Token（Secret） |
+| `test` / `production` | `OA_KNOWLEDGE_BASE_API_KEY` | 各环境独立、仅用于服务端组装知识库 `Authorization: Bearer` header 的固定 Token（Secret） |
 | `test` / `production` | `OA_KNOWLEDGE_API_BASE_URL` | 知识库 Agent API 地址；未填时使用默认生产地址 |
 | `test` / `production` | `AUTOMATION_API_BASE_URL` | 无需配置；Compose 固定使用 `http://agent:3000` |
 | `test` / `production` | `PROJECT_SYNC_API_BASE_URL` | 原 OA 项目同步服务地址；未填时继承 `OA_DOCKER_API_BASE_URL` |

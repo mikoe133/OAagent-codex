@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: 元始知识库 OA Agent API
-  version: 1.0.0
-  description: OA 后端使用固定服务 Token 调用，并通过 X-OA-User-Id 指定权限用户的只读知识库接口。
+  version: 1.3.1
+  description: OA 后端使用固定服务 Token 调用，并通过 X-OA-User-Id 指定权限用户的知识库读写接口；正文写入必须经过 TipTap 草稿预览。
 servers:
   - url: https://oa-kb.rwkvos.com/api/agent/v1
     description: 生产环境（以接口提供方确认上线为准）
@@ -59,6 +59,24 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      operationId: createKnowledgeBaseNode
+      summary: 创建空页面或目录
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePageRequest' }
+      responses:
+        '201': { description: 已创建, content: { application/json: { schema: { $ref: '#/components/schemas/PageResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /pages/{id}:
     get:
       operationId: getKnowledgeBasePage
@@ -83,14 +101,36 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
-  /pages/{id}/children:
-    get:
-      operationId: listKnowledgeBasePageChildren
-      summary: 浏览目录子节点
+    patch:
+      operationId: updateKnowledgeBaseNodeMetadata
+      summary: 修改页面或目录元数据；正文不允许通过此接口写入
       parameters:
         - $ref: '#/components/parameters/OaUserId'
         - $ref: '#/components/parameters/PageId'
-        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdatePageRequest' }
+      responses:
+        '200': { description: 已更新, content: { application/json: { schema: { $ref: '#/components/schemas/PageResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /pages/{id}/children:
+    get:
+      operationId: listKnowledgeBasePageChildren
+      summary: 浏览目录的直接子节点或子孙节点
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+        - $ref: '#/components/parameters/Recursive'
+        - $ref: '#/components/parameters/MaxDepth'
+        - $ref: '#/components/parameters/Kind'
+        - $ref: '#/components/parameters/DirectoryLimit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
@@ -98,7 +138,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PageListResponse'
+                $ref: '#/components/schemas/DirectoryListResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -106,6 +146,238 @@ paths:
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /capabilities:
+    get:
+      operationId: getAgentCapabilities
+      summary: 获取写开关、限制与 TipTap schema
+      description: |
+        能力发现接口。`data` 是面向演进的能力描述对象：后端会在不提升主版本的前提下
+        持续新增字段，调用方必须忽略未知字段，不得使用拒绝额外字段的严格反序列化
+        （如 Pydantic `extra="forbid"`）。调用方只应对自身真正依赖的字段做名称和
+        类型校验。写能力关闭时本接口仍返回 200，且 `writeEnabled=false`。
+        与生产实现同步的完整脱敏响应样例见仓库
+        `docs/fixtures/agent-api/capabilities.success.json`。
+      parameters: [{ $ref: '#/components/parameters/OaUserId' }]
+      responses:
+        '200':
+          description: 能力描述
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapabilitiesResponse' }
+              example:
+                data:
+                  contentSchemaVersion: 1
+                  maxBytes: 2097152
+                  nodes: [blockquote, bulletList, callout, codeBlock, column, columns, doc, fileAttachment, fileUpload, hardBreak, heading, horizontalRule, image, listItem, orderedList, pageMention, paragraph, table, tableCell, tableHeader, tableRow, taskItem, taskList, text]
+                  marks: [bold, code, highlight, italic, link, strike, subscript, superscript, textStyle, underline]
+                  draftPageMetadata:
+                    fields: [title, icon, coverImage, coverPositionY]
+                    appliedAtomically: true
+                  customNodeExamples:
+                    callout:
+                      type: callout
+                      attrs: { color: gray, emoji: "💡" }
+                      content: [{ type: paragraph }]
+                    columns:
+                      type: columns
+                      content:
+                        - { type: column, content: [{ type: paragraph }] }
+                        - { type: column, content: [{ type: paragraph }] }
+                    pageMention:
+                      type: pageMention
+                      attrs: { pageId: PAGE_ID, label: 页面标题, icon: null }
+                    fileAttachment:
+                      type: fileAttachment
+                      attrs:
+                        filename: example.pdf
+                        mimeType: application/pdf
+                        size: 1234
+                        url: /api/attachments/ATTACHMENT_ID?download=1
+                  writeEnabled: true
+                  draftTtlSeconds: 86400
+                  attachmentLimits: { imageBytes: 10485760, fileBytes: 52428800 }
+                  mutationsRequireIdempotencyKey: true
+                  externalImageUrlsAllowed: false
+                requestId: 00000000-0000-4000-8000-000000000000
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /system-images:
+    get:
+      operationId: listSystemImages
+      summary: 浏览允许作为封面的系统图库
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - name: category
+          in: query
+          schema: { type: string, enum: [landscape, animals, art, colors, space] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: 系统图片列表 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /pages/{id}/location:
+    patch:
+      operationId: moveKnowledgeBaseNode
+      summary: 移动或重新排序页面/目录
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parentId, index]
+              properties:
+                parentId: { type: [string, 'null'] }
+                index: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: 已移动 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /pages/{id}/attachments:
+    post:
+      operationId: uploadKnowledgeBaseAttachment
+      summary: 上传页面图片或普通附件
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                kind: { type: string, enum: [image, file], default: image }
+                file: { type: string, format: binary }
+      responses:
+        '201': { description: 已上传；响应包含附件引用和 TipTap 节点 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/BadRequest' }
+        '415': { $ref: '#/components/responses/BadRequest' }
+  /pages/{id}/content-drafts:
+    post:
+      operationId: createPageContentDraft
+      summary: 创建 TipTap 正文及可选页面外观草稿和预览链接
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContentDraftRequest' }
+      responses:
+        '201': { description: 草稿已创建, content: { application/json: { schema: { $ref: '#/components/schemas/DraftResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /content-drafts/{draftId}:
+    get:
+      operationId: getPageContentDraft
+      summary: 读取正文草稿
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/DraftId'
+      responses:
+        '200': { description: 草稿, content: { application/json: { schema: { $ref: '#/components/schemas/DraftResponse' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: replacePageContentDraft
+      summary: 全量替换活动草稿正文、可选页面外观并续期 24 小时
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contentSchemaVersion, content]
+              properties:
+                contentSchemaVersion: { type: integer, const: 1 }
+                content: { $ref: '#/components/schemas/TipTapDocument' }
+                metadata:
+                  oneOf:
+                    - $ref: '#/components/schemas/DraftPageMetadataRequest'
+                    - type: 'null'
+              additionalProperties: false
+      responses:
+        '200': { description: 草稿已更新, content: { application/json: { schema: { $ref: '#/components/schemas/DraftResponse' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: discardPageContentDraft
+      summary: 废弃正文草稿
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { description: 草稿已废弃 }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /content-drafts/{draftId}/apply:
+    post:
+      operationId: applyPageContentDraft
+      summary: 用户确认后提交正文草稿
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/DraftId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { description: 草稿已持久化到 Yjs 和正式修订 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /pages/{id}/revisions:
+    get:
+      operationId: listPageRevisions
+      summary: 列出正文历史版本
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+      responses:
+        '200': { description: 历史版本摘要 }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /pages/{id}/revisions/{revision}:
+    get:
+      operationId: getPageRevision
+      summary: 读取指定历史 TipTap 内容
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+        - name: revision
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: 历史 TipTap 内容 }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /pages/{id}/backlinks:
+    get:
+      operationId: listPageBacklinks
+      summary: 查询当前用户可见的反向引用
+      parameters:
+        - $ref: '#/components/parameters/OaUserId'
+        - $ref: '#/components/parameters/PageId'
+      responses:
+        '200': { description: 反向引用页面 }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     agentApiToken:
@@ -142,15 +414,124 @@ components:
       in: path
       required: true
       schema: { type: string }
+    DraftId:
+      name: draftId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 同一写请求的所有重试必须复用；服务端保留结果 24 小时。
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    Recursive:
+      name: recursive
+      in: query
+      description: 为 true 时按目录树顺序返回子孙节点；默认为只返回直接子节点。
+      schema: { type: boolean, default: false }
+    MaxDepth:
+      name: maxDepth
+      in: query
+      description: 递归模式的最大相对深度；直接子节点深度为 1。
+      schema: { type: integer, minimum: 1, maximum: 20, default: 20 }
+    Kind:
+      name: kind
+      in: query
+      description: 只返回指定类型；筛选为 page 时仍会穿过目录查找后代。
+      schema: { type: string, enum: [page, folder] }
+    DirectoryLimit:
+      name: limit
+      in: query
+      description: 非递归模式范围为 1–50、默认 20；递归模式范围为 1–500、默认 200。
+      schema: { type: integer, minimum: 1, maximum: 500 }
   schemas:
     Envelope:
       type: object
       required: [requestId]
       properties:
-        requestId: { type: string }
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 服务端请求 ID，与响应头 `X-Request-Id` 相同。调用方提供符合 `^[a-zA-Z0-9._:-]{1,64}$` 的 `X-Request-Id` 时原样回显，否则由服务端生成 UUID。
+    CapabilitiesData:
+      type: object
+      description: 能力发现对象。后端会持续新增字段以描述新能力；调用方必须忽略未知字段（additionalProperties 恒为 true），只对自身依赖的字段做严格校验。
+      required: [contentSchemaVersion, maxBytes, nodes, marks, draftPageMetadata, customNodeExamples, writeEnabled, draftTtlSeconds, attachmentLimits, mutationsRequireIdempotencyKey, externalImageUrlsAllowed]
+      additionalProperties: true
+      properties:
+        contentSchemaVersion:
+          type: integer
+          const: 1
+          description: 当前正文 TipTap schema 版本。创建正文草稿时必须回传同一版本；不支持的版本会返回 409 `unsupported_content_schema`。
+        maxBytes:
+          type: integer
+          minimum: 1
+          description: 正文 TipTap JSON 序列化后的最大字节数。
+        nodes:
+          type: array
+          items: { type: string }
+          description: 支持的 TipTap 节点类型名，元素为纯字符串，按字母序排列。正文中出现列表之外的节点会被 400 拒绝。
+        marks:
+          type: array
+          items: { type: string }
+          description: 支持的 TipTap mark 类型名，元素为纯字符串，按字母序排列。
+        draftPageMetadata:
+          type: object
+          required: [fields, appliedAtomically]
+          additionalProperties: true
+          properties:
+            fields:
+              type: array
+              items: { type: string }
+              description: 草稿可携带的页面元数据字段名；当前为 title、icon、coverImage、coverPositionY，未来可能增加。
+            appliedAtomically:
+              type: boolean
+              description: 为 true 时草稿元数据在 apply 成功时与正文原子写入。
+          description: 正文草稿支持的页面元数据能力；是对象而不是字符串数组。
+        customNodeExamples:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: true
+          description: 自定义节点的示例 TipTap JSON，键为节点类型名，值为任意嵌套的 TipTap 节点对象。仅供调用方参考拼装，键集合可能随版本增加。
+        writeEnabled:
+          type: boolean
+          description: 服务端写能力开关。为 false 时所有写接口返回 503 `agent_write_api_disabled`，本接口仍返回 200。
+        draftTtlSeconds:
+          type: integer
+          minimum: 1
+          description: 正文草稿的有效期秒数，从创建或最近一次替换起算。
+        attachmentLimits:
+          type: object
+          required: [imageBytes, fileBytes]
+          additionalProperties: true
+          properties:
+            imageBytes:
+              type: integer
+              minimum: 1
+              description: 单张正文图片的最大字节数。
+            fileBytes:
+              type: integer
+              minimum: 1
+              description: 单个普通附件的最大字节数。
+        mutationsRequireIdempotencyKey:
+          type: boolean
+          description: 为 true 时所有写请求必须携带 Idempotency-Key 请求头。
+        externalImageUrlsAllowed:
+          type: boolean
+          description: 为 false 时正文和封面拒绝外部图片 URL，只接受本知识库附件和系统图库。
+    CapabilitiesResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: '#/components/schemas/CapabilitiesData' }
     PageSummary:
       type: object
-      required: [id, title, parentId, kind, space, permission, revision, updatedAt, updatedBy, updatedByOaUserId, sourceUrl]
+      required: [id, title, parentId, kind, space, permission, revision, icon, coverUrl, coverPositionY, contentMaxWidth, updatedAt, updatedBy, updatedByOaUserId, sourceUrl]
       properties:
         id: { type: string }
         title: { type: string }
@@ -159,6 +540,10 @@ components:
         space: { type: string, enum: [public, private] }
         permission: { type: string, enum: [viewer, editor, manager] }
         revision: { type: integer }
+        icon: { type: [string, 'null'] }
+        coverUrl: { type: [string, 'null'] }
+        coverPositionY: { type: integer, minimum: 0, maximum: 100 }
+        contentMaxWidth: { type: [integer, 'null'] }
         updatedAt: { type: string, format: date-time }
         updatedBy: { type: string }
         updatedByOaUserId:
@@ -175,6 +560,30 @@ components:
               type: array
               items: { $ref: '#/components/schemas/PageSummary' }
             nextCursor: { type: [string, 'null'] }
+    DirectoryPageSummary:
+      allOf:
+        - $ref: '#/components/schemas/PageSummary'
+        - type: object
+          required: [depth]
+          properties:
+            depth:
+              type: integer
+              minimum: 1
+              maximum: 20
+              description: 相对于请求目录的深度；直接子节点为 1。
+    DirectoryListResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [data, nextCursor, truncated]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/DirectoryPageSummary' }
+            nextCursor: { type: [string, 'null'] }
+            truncated:
+              type: boolean
+              description: 是否因分页上限截断；为 true 时 nextCursor 非 null。
     SearchResponse:
       allOf:
         - $ref: '#/components/schemas/Envelope'
@@ -222,6 +631,123 @@ components:
                         - type: object
                           additionalProperties: true
                     createdAt: { type: string, format: date-time }
+                    contentSchemaVersion: { type: integer, const: 1 }
+                    ancestors:
+                      type: array
+                      items:
+                        type: object
+                        required: [id, title]
+                        properties:
+                          id: { type: string }
+                          title: { type: string }
+    CoverImage:
+      oneOf:
+        - type: 'null'
+        - type: object
+          required: [source, url]
+          properties:
+            source: { type: string, const: system }
+            url: { type: string }
+        - type: object
+          required: [source, attachmentId]
+          properties:
+            source: { type: string, const: attachment }
+            attachmentId: { type: string, format: uuid }
+    CreatePageRequest:
+      type: object
+      required: [kind, title]
+      properties:
+        kind: { type: string, enum: [page, folder] }
+        title: { type: string, minLength: 1, maxLength: 180 }
+        parentId: { type: [string, 'null'] }
+        space: { type: string, enum: [public, private] }
+        icon: { type: [string, 'null'], maxLength: 32 }
+        coverImage: { $ref: '#/components/schemas/CoverImage' }
+        coverPositionY: { type: integer, minimum: 0, maximum: 100 }
+      additionalProperties: false
+    UpdatePageRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 180 }
+        icon: { type: [string, 'null'], maxLength: 32 }
+        coverImage: { $ref: '#/components/schemas/CoverImage' }
+        coverPositionY: { type: integer, minimum: 0, maximum: 100 }
+        accentColor: { type: string, enum: [gray, brown, orange, yellow, green, blue, purple, pink, red] }
+        accentIcon: { type: string }
+      minProperties: 1
+      additionalProperties: false
+    TipTapDocument:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, const: doc }
+        content: { type: array, items: { type: object, additionalProperties: true } }
+      additionalProperties: false
+    ContentDraftRequest:
+      type: object
+      required: [baseRevision, contentSchemaVersion]
+      properties:
+        baseRevision: { type: integer, minimum: 1 }
+        contentSchemaVersion: { type: integer, const: 1 }
+        content: { $ref: '#/components/schemas/TipTapDocument' }
+        sourceRevision: { type: integer, minimum: 1 }
+        metadata:
+          oneOf:
+            - $ref: '#/components/schemas/DraftPageMetadataRequest'
+            - type: 'null'
+      oneOf:
+        - required: [content]
+        - required: [sourceRevision]
+      additionalProperties: false
+    ContentDraft:
+      type: object
+      required: [draftId, pageId, baseRevision, contentSchemaVersion, content, contentHash, metadata, status, appliedRevision, previewUrl, expiresAt, createdAt, updatedAt, appliedAt]
+      properties:
+        draftId: { type: string, format: uuid }
+        pageId: { type: string }
+        baseRevision: { type: integer }
+        contentSchemaVersion: { type: integer, const: 1 }
+        content:
+          oneOf:
+            - $ref: '#/components/schemas/TipTapDocument'
+            - type: 'null'
+        contentHash: { type: string }
+        metadata:
+          oneOf:
+            - $ref: '#/components/schemas/DraftPageMetadata'
+            - type: 'null'
+        status: { type: string, enum: [active, applied, discarded, stale, expired] }
+        appliedRevision: { type: [integer, 'null'] }
+        previewUrl: { type: string, format: uri }
+        expiresAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        appliedAt: { type: [string, 'null'], format: date-time }
+    DraftPageMetadataRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 180 }
+        icon: { type: [string, 'null'], maxLength: 32 }
+        coverImage: { $ref: '#/components/schemas/CoverImage' }
+        coverPositionY: { type: integer, minimum: 0, maximum: 100 }
+      minProperties: 1
+      additionalProperties: false
+    DraftPageMetadata:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 180 }
+        icon: { type: [string, 'null'], maxLength: 32 }
+        coverUrl: { type: [string, 'null'] }
+        coverPositionY: { type: integer, minimum: 0, maximum: 100 }
+      minProperties: 1
+      additionalProperties: false
+    DraftResponse:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          required: [data]
+          properties:
+            data: { $ref: '#/components/schemas/ContentDraft' }
     Error:
       type: object
       required: [error, requestId]
@@ -245,6 +771,9 @@ components:
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
       description: 资源不存在或当前用户不可见
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: 幂等键、草稿状态或正文基准版本冲突
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     RateLimited:
       description: 超过当前分钟限额
