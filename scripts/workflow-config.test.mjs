@@ -65,6 +65,35 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.doesNotMatch(workflow, /docker login ghcr\.io/)
 })
 
+test("documents the shared knowledge-base key as one Repository Secret", async () => {
+  const cicd = await readFile(path.join(repoRoot, "docs/cicd.md"), "utf8")
+  const deployment = await readFile(
+    path.join(repoRoot, "docs/dual-environment-deployment.md"),
+    "utf8",
+  )
+  const cicdRepositorySecrets = cicd.slice(
+    cicd.indexOf("Repository Secrets:"),
+    cicd.indexOf("Repository Variables:"),
+  )
+  const cicdEnvironmentVariables = cicd.slice(
+    cicd.indexOf("Environment Variables:"),
+    cicd.indexOf("## 固定环境参数"),
+  )
+  const deploymentRepositorySecrets = deployment.slice(
+    deployment.indexOf("添加以下 Repository Secret:"),
+    deployment.indexOf("不需要配置:"),
+  )
+  const deploymentEnvironmentVariables = deployment.slice(
+    deployment.indexOf("分别添加 Environment Variable:"),
+    deployment.indexOf("再分别为两个 Environment 添加以下 Secret："),
+  )
+
+  assert.match(cicdRepositorySecrets, /`OA_KNOWLEDGE_BASE_API_KEY`/)
+  assert.doesNotMatch(cicdEnvironmentVariables, /`OA_KNOWLEDGE_BASE_API_KEY`/)
+  assert.match(deploymentRepositorySecrets, /`OA_KNOWLEDGE_BASE_API_KEY`/)
+  assert.doesNotMatch(deploymentEnvironmentVariables, /`OA_KNOWLEDGE_BASE_API_KEY`/)
+})
+
 test("runs the Node automation contract against a real MySQL 8 service", async () => {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
 
