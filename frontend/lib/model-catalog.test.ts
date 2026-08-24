@@ -75,9 +75,9 @@ test("labels DeepSeek V4 Pro in the OpenRouter model list", () => {
   assert.deepEqual(deepSeekModel, {
     id: "deepseek/deepseek-v4-pro",
     name: "DeepSeek V4 Pro",
-    icon: "/images/deepseek.svg",
+    icon: "/images/deepseek-color.png",
   })
-  assert.equal(existsSync(new URL("../public/images/deepseek.svg", import.meta.url)), true)
+  assert.equal(existsSync(new URL("../public/images/deepseek-color.png", import.meta.url)), true)
 })
 
 test("uses the official Z.ai icon for GLM-5.3", () => {

@@ -108,3 +108,10 @@ test("shows disabled models in gray with a hover hint", () => {
   assert.match(composerSource, /data-\[disabled\]:pointer-events-auto/)
   assert.doesNotMatch(composerSource, />暂不可用</)
 })
+
+test("keeps model names on one line in the selection dropdown", () => {
+  assert.match(
+    composerSource,
+    /<span className="whitespace-nowrap text-sm">\{model\.name\}<\/span>/,
+  )
+})
