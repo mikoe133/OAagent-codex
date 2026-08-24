@@ -3,7 +3,7 @@ import test from "node:test"
 
 import { POST } from "./route"
 
-test("POST forwards the selected model to the agent service", async () => {
+test("POST forwards the selected DeepSeek V4 Pro model to the agent service", async () => {
   const originalFetch = globalThis.fetch
   let forwardedBody: unknown = null
   let forwardedAuthorization: string | null = null
@@ -31,7 +31,7 @@ test("POST forwards the selected model to the agent service", async () => {
         body: JSON.stringify({
           sessionId: "model-switch-session",
           provider: "openrouter",
-          model: "z-ai/glm-5.3",
+          model: "deepseek/deepseek-v4-pro",
           messages: [{ role: "user", content: "hello" }],
         }),
       }),
@@ -41,7 +41,7 @@ test("POST forwards the selected model to the agent service", async () => {
     assert.deepEqual(forwardedBody, {
       message: "hello",
       provider: "openrouter",
-      model: "z-ai/glm-5.3",
+      model: "deepseek/deepseek-v4-pro",
     })
     assert.equal(forwardedAuthorization, "Bearer test-session-token")
     assert.match(responseText, /"knowledgeSources"/)
