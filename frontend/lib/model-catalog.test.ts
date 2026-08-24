@@ -31,12 +31,14 @@ test("keeps provider model lists isolated", () => {
     [
       "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
+      "deepseek/deepseek-v4-pro",
       "openai/gpt-5.6",
     ],
   )
   assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.3"), true)
   assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.2"), false)
   assert.equal(isModelForProvider("openrouter", "moonshotai/kimi-k3"), true)
+  assert.equal(isModelForProvider("openrouter", "deepseek/deepseek-v4-pro"), true)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.5"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4-mini"), false)
@@ -63,6 +65,19 @@ test("labels Kimi K3 in the OpenRouter model list", () => {
   )
 
   assert.equal(kimiModel?.name, "Kimi K3")
+})
+
+test("labels DeepSeek V4 Pro in the OpenRouter model list", () => {
+  const deepSeekModel = getModelsForProvider("openrouter").find(
+    (model) => model.id === "deepseek/deepseek-v4-pro",
+  )
+
+  assert.deepEqual(deepSeekModel, {
+    id: "deepseek/deepseek-v4-pro",
+    name: "DeepSeek V4 Pro",
+    icon: "/images/deepseek-color.png",
+  })
+  assert.equal(existsSync(new URL("../public/images/deepseek-color.png", import.meta.url)), true)
 })
 
 test("uses the official Z.ai icon for GLM-5.3", () => {

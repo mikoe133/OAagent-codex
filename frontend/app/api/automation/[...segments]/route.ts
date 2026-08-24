@@ -71,7 +71,7 @@ async function proxyAutomationRequest(
   try {
     const headers = new Headers({
       Accept: "application/json",
-      Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}`,
+      Cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`,
     })
     if (!upstreamPath.startsWith("/automation-prompt-profiles/")) {
       headers.set("Authorization", `Bearer ${sessionToken}`)

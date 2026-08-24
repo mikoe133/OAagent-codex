@@ -31,6 +31,7 @@ export const MODEL_CATALOG = {
   openrouter: [
     "z-ai/glm-5.3",
     "moonshotai/kimi-k3",
+    "deepseek/deepseek-v4-pro",
     "openai/gpt-5.5",
     "openai/gpt-5.4",
   ],
@@ -60,6 +61,9 @@ export function getModelDisplayName(model: string): string {
     .split("-")
     .map((part) => {
       const normalized = part.toLowerCase();
+      if (normalized === "deepseek") {
+        return "DeepSeek";
+      }
       return normalized === "gpt" || normalized === "glm"
         ? normalized.toUpperCase()
         : capitalize(part);
@@ -141,6 +145,9 @@ export function normalizeModelReasoningEffort<
   model: string,
   effort: ReasoningEffort,
 ): ReasoningEffort | "low" | "high" {
+  if (model === "deepseek/deepseek-v4-pro") {
+    return effort === "xhigh" ? effort : "high";
+  }
   if (model !== "z-ai/glm-5.3") {
     return effort;
   }

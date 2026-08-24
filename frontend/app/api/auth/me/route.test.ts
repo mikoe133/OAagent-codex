@@ -29,6 +29,31 @@ test("returns the canonical OA user for the HttpOnly session", async () => {
   }
 })
 
+test("forwards signed OA cookies without URL re-encoding", async () => {
+  const restore = configureAuthEnvironment()
+  const originalFetch = globalThis.fetch
+  const signedToken = "signed-token=="
+  let upstreamCookie: string | null = null
+  globalThis.fetch = async (_input, init) => {
+    upstreamCookie = new Headers(init?.headers).get("cookie")
+    return Response.json({ code: 200, success: true, data: { id: 7, email: "user@example.test" } })
+  }
+
+  try {
+    const response = await GET(
+      new NextRequest("http://localhost/api/auth/me", {
+        headers: { cookie: `sessionid=${encodeURIComponent(signedToken)}` },
+      }),
+    )
+
+    assert.equal(response.status, 200)
+    assert.equal(upstreamCookie, `sessionid=${signedToken}`)
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
 test("rejects a request without an Agent session", async () => {
   const response = await GET(new NextRequest("http://localhost/api/auth/me"))
 

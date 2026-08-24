@@ -6,6 +6,7 @@ import { DELETE, GET, PATCH, POST } from "./[...segments]/route"
 test("proxies the task list to the OA management API with the HttpOnly session", async () => {
   const restore = configureEnvironment()
   const originalFetch = globalThis.fetch
+  const signedToken = "oa-session-token=="
   let upstreamUrl = ""
   let upstreamHeaders = new Headers()
   globalThis.fetch = async (input, init) => {
@@ -17,15 +18,15 @@ test("proxies the task list to the OA management API with the HttpOnly session",
   try {
     const response = await GET(
       new Request("http://localhost/api/automation/jobs?page=2", {
-        headers: { cookie: "sessionid=oa-session-token" },
+        headers: { cookie: `sessionid=${encodeURIComponent(signedToken)}` },
       }),
       context("jobs"),
     )
 
     assert.equal(response.status, 200)
     assert.equal(upstreamUrl, "https://automation.example.test/automation-jobs?page=2&alias=frontend-test")
-    assert.equal(upstreamHeaders.get("authorization"), "Bearer oa-session-token")
-    assert.equal(upstreamHeaders.get("cookie"), "sessionid=oa-session-token")
+    assert.equal(upstreamHeaders.get("authorization"), `Bearer ${signedToken}`)
+    assert.equal(upstreamHeaders.get("cookie"), `sessionid=${signedToken}`)
     assert.equal(response.headers.get("cache-control"), "no-store")
   } finally {
     globalThis.fetch = originalFetch

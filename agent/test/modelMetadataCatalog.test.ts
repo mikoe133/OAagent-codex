@@ -6,15 +6,19 @@ import test from "node:test";
 
 import { resolveCodexModelCatalogPath } from "../src/infrastructure/codex/modelMetadataCatalog.js";
 
-test("loads custom Codex metadata for GLM, Terra, and Kimi", () => {
+test("loads custom Codex metadata for GLM, Terra, Kimi, and DeepSeek", () => {
   const glmCatalogPath = resolveCodexModelCatalogPath("z-ai/glm-5.3");
   const terraCatalogPath = resolveCodexModelCatalogPath("gpt-5.6-terra");
   const kimiCatalogPath = resolveCodexModelCatalogPath("moonshotai/kimi-k3");
+  const deepSeekCatalogPath = resolveCodexModelCatalogPath(
+    "deepseek/deepseek-v4-pro",
+  );
 
   assert.ok(glmCatalogPath);
   assert.equal(terraCatalogPath, glmCatalogPath);
   assert.ok(terraCatalogPath);
   assert.equal(kimiCatalogPath, terraCatalogPath);
+  assert.equal(deepSeekCatalogPath, kimiCatalogPath);
   assert.equal(resolveCodexModelCatalogPath("gpt-5.5"), undefined);
 
   const require = createRequire(import.meta.url);
@@ -37,6 +41,7 @@ test("loads custom Codex metadata for GLM, Terra, and Kimi", () => {
   const metadata = Object.fromEntries(catalog.models.map((model) => [model.slug, model]));
 
   assert.deepEqual(catalog.models.map((model) => model.slug).sort(), [
+    "deepseek/deepseek-v4-pro",
     "gpt-5.6-terra",
     "moonshotai/kimi-k3",
     "z-ai/glm-5.3",
@@ -49,4 +54,14 @@ test("loads custom Codex metadata for GLM, Terra, and Kimi", () => {
   assert.equal(metadata["gpt-5.6-terra"]?.auto_compact_token_limit, 258_400);
   assert.equal(metadata["moonshotai/kimi-k3"]?.context_window, 1_048_576);
   assert.equal(metadata["moonshotai/kimi-k3"]?.auto_compact_token_limit, 996_147);
+  assert.equal(metadata["deepseek/deepseek-v4-pro"]?.display_name, "DeepSeek V4 Pro");
+  assert.equal(metadata["deepseek/deepseek-v4-pro"]?.context_window, 1_048_576);
+  assert.equal(
+    metadata["deepseek/deepseek-v4-pro"]?.auto_compact_token_limit,
+    996_147,
+  );
+  assert.equal(
+    metadata["deepseek/deepseek-v4-pro"]?.supports_parallel_tool_calls,
+    false,
+  );
 });

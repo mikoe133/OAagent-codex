@@ -24,6 +24,11 @@ export const MODELS_BY_PROVIDER = {
   openrouter: [
     { id: "z-ai/glm-5.3", name: "GLM-5.3", icon: "/images/z-ai.svg" },
     { id: "moonshotai/kimi-k3", name: "Kimi K3", icon: "/images/moonshot-ai.svg" },
+    {
+      id: "deepseek/deepseek-v4-pro",
+      name: "DeepSeek V4 Pro",
+      icon: "/images/deepseek-color.png",
+    },
     { id: "openai/gpt-5.6", name: "GPT-5.6", icon: "/images/gpt.png", disabled: true },
   ],
 } as const satisfies Record<ModelProvider, readonly ModelOption[]>

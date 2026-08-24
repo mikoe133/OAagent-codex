@@ -546,7 +546,7 @@ export function Composer({
                   align="start"
                   side="top"
                   sideOffset={8}
-                  className="w-40 px-2 py-2 rounded-2xl z-[9999]"
+                  className="w-max min-w-40 px-2 py-2 rounded-2xl z-[9999]"
                 >
                   {availableModels.map((model) => {
                     const modelDisabled = "disabled" in model && model.disabled
@@ -574,9 +574,9 @@ export function Composer({
                           alt={model.name}
                           width={20}
                           height={20}
-                          className="rounded-sm object-contain w-4 h-4"
+                          className="h-4 w-4 shrink-0 rounded-sm object-contain"
                         />
-                        <span className="text-sm">{model.name}</span>
+                        <span className="whitespace-nowrap text-sm">{model.name}</span>
                       </DropdownMenuItem>
                     )
                   })}
