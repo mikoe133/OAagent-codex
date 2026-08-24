@@ -7,13 +7,14 @@ import { validateOaToken } from "../src/infrastructure/oa/oaTokenVerifier.js";
 test("validates the OA token against the authenticated current-user endpoint", async () => {
   let requestUrl: URL | null = null;
   let requestHeaders: Headers | null = null;
+  const signedToken = "oa-session-token==";
 
   const result = await validateOaToken(
     {
       oaApiBaseUrl: "https://oa.example.test/api/",
       oaAuthAlias: "production",
     },
-    "oa-session-token",
+    signedToken,
     async (input, init) => {
       requestUrl = new URL(String(input));
       requestHeaders = new Headers(init?.headers);
@@ -32,8 +33,8 @@ test("validates the OA token against the authenticated current-user endpoint", a
   });
   assert.equal(requestUrl?.pathname, "/user/user");
   assert.equal(requestUrl?.searchParams.get("alias"), "production");
-  assert.equal(requestHeaders?.get("cookie"), "sessionid=oa-session-token");
-  assert.equal(requestHeaders?.get("authorization"), "Bearer oa-session-token");
+  assert.equal(requestHeaders?.get("cookie"), `sessionid=${signedToken}`);
+  assert.equal(requestHeaders?.get("authorization"), `Bearer ${signedToken}`);
 });
 
 test("rejects an OA token rejected by the authenticated endpoint", async () => {
