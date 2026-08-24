@@ -32,6 +32,7 @@ describe("model provider selection", () => {
     assert.deepEqual(MODEL_CATALOG.openrouter, [
       "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
+      "deepseek/deepseek-v4-pro",
       "openai/gpt-5.5",
       "openai/gpt-5.4",
     ]);
@@ -47,14 +48,26 @@ describe("model provider selection", () => {
       resolveRequestedModel("openrouter", "moonshotai/kimi-k3", "z-ai/glm-5.3"),
       "moonshotai/kimi-k3",
     );
+    assert.equal(
+      resolveRequestedModel(
+        "openrouter",
+        "deepseek/deepseek-v4-pro",
+        "z-ai/glm-5.3",
+      ),
+      "deepseek/deepseek-v4-pro",
+    );
     assert.throws(
       () => resolveRequestedModel("openrouter", "z-ai/glm-5.2", "z-ai/glm-5.3"),
       /不支持模型/,
     );
   });
 
-  it("formats the GLM acronym in model catalogs", () => {
+  it("formats model brand names in model catalogs", () => {
     assert.equal(getModelDisplayName("z-ai/glm-5.3"), "GLM 5.3");
+    assert.equal(
+      getModelDisplayName("deepseek/deepseek-v4-pro"),
+      "DeepSeek V4 Pro",
+    );
   });
 
   it("rejects unknown providers and cross-provider models", () => {
@@ -105,6 +118,30 @@ describe("model provider selection", () => {
     assert.throws(
       () => decodeAutomationModelParameters({ max_output_tokens: 100 }),
       /256-4096/,
+    );
+  });
+
+  it("allows DeepSeek V4 Pro for automation tasks", () => {
+    assert.deepEqual(
+      resolveAutomationModelSelection(
+        {
+          modelProvider: "openrouter",
+          modelId: "deepseek/deepseek-v4-pro",
+          modelParameters: {
+            reasoning_effort: "high",
+            max_output_tokens: 2_048,
+          },
+        },
+        { modelProvider: "nexttoken", modelId: "gpt-5.6-terra" },
+      ),
+      {
+        modelProvider: "openrouter",
+        modelId: "deepseek/deepseek-v4-pro",
+        modelParameters: {
+          reasoning_effort: "high",
+          max_output_tokens: 2_048,
+        },
+      },
     );
   });
 
