@@ -895,7 +895,7 @@ function buildOaHeaders(sessionToken: string, contentType?: string): Headers {
   const headers = new Headers({
     Accept: "application/json",
     Authorization: toBearerToken(sessionToken),
-    Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}`,
+    Cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`,
   })
 
   if (contentType) {

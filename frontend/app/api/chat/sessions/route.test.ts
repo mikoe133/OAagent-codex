@@ -9,13 +9,16 @@ test("GET sorts merged sessions from newest to oldest creation time", async () =
   const originalFetch = globalThis.fetch
   const originalOaApiBaseUrl = process.env.OA_API_BASE_URL
   const originalAgentApiBaseUrl = process.env.AGENT_API_BASE_URL
+  const signedToken = "test-session-token=="
   process.env.OA_API_BASE_URL = "https://oa.example.test"
   process.env.AGENT_API_BASE_URL = "https://agent.example.test"
 
   let agentAuthorization: string | null = null
+  let oaCookie: string | null = null
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input))
     if (url.hostname === "oa.example.test") {
+      oaCookie = new Headers(init?.headers).get("cookie")
       return Response.json({
         data: {
           items: [
@@ -46,7 +49,7 @@ test("GET sorts merged sessions from newest to oldest creation time", async () =
   try {
     const response = await sessionsRoute.GET(
       new Request("http://localhost/api/chat/sessions", {
-        headers: { cookie: "sessionid=test-session-token" },
+        headers: { cookie: `sessionid=${encodeURIComponent(signedToken)}` },
       }),
     )
     const payload = (await response.json()) as { sessions: Array<{ sessionId: string }> }
@@ -56,7 +59,8 @@ test("GET sorts merged sessions from newest to oldest creation time", async () =
       payload.sessions.map((session) => session.sessionId),
       ["newer-created", "older-created"],
     )
-    assert.equal(agentAuthorization, "Bearer test-session-token")
+    assert.equal(agentAuthorization, `Bearer ${signedToken}`)
+    assert.equal(oaCookie, `sessionid=${signedToken}`)
   } finally {
     globalThis.fetch = originalFetch
     restoreEnv("OA_API_BASE_URL", originalOaApiBaseUrl)

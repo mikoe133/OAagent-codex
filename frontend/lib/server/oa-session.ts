@@ -53,7 +53,7 @@ export async function resolveOaSessionToken(
       headers: new Headers({
         Accept: "application/json",
         Authorization: `Bearer ${token}`,
-        Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+        Cookie: `${SESSION_COOKIE_NAME}=${token}`,
       }),
       cache: "no-store",
       signal: AbortSignal.timeout(VALIDATION_TIMEOUT_MS),
