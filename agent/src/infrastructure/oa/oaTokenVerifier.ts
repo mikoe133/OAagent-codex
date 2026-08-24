@@ -94,6 +94,6 @@ function buildOaSessionHeaders(token: string): Headers {
   return new Headers({
     Accept: "application/json",
     Authorization: `Bearer ${token}`,
-    Cookie: `sessionid=${encodeURIComponent(token)}`,
+    Cookie: `sessionid=${token}`,
   });
 }
