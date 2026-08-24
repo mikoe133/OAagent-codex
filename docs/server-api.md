@@ -301,6 +301,7 @@ GET /v1/models
     "openrouter": [
       "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
+      "deepseek/deepseek-v4-pro",
       "openai/gpt-5.5",
       "openai/gpt-5.4"
     ]

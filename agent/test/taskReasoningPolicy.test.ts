@@ -56,4 +56,37 @@ describe("task reasoning policy", () => {
       "low",
     );
   });
+
+  it("maps unsupported DeepSeek V4 Pro reasoning efforts to high", () => {
+    const config = {
+      model: "deepseek/deepseek-v4-pro",
+      oaApiBaseUrl: null,
+      projectRoot: "/tmp/agent",
+    } as AppConfig;
+
+    assert.equal(
+      createThreadOptions(
+        config,
+        "deepseek/deepseek-v4-pro",
+        "medium",
+      ).modelReasoningEffort,
+      "high",
+    );
+    assert.equal(
+      createThreadOptions(
+        config,
+        "deepseek/deepseek-v4-pro",
+        "low",
+      ).modelReasoningEffort,
+      "high",
+    );
+    assert.equal(
+      createThreadOptions(
+        config,
+        "deepseek/deepseek-v4-pro",
+        "xhigh",
+      ).modelReasoningEffort,
+      "xhigh",
+    );
+  });
 });

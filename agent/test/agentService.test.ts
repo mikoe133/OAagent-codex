@@ -128,7 +128,7 @@ describe("model provider selection", () => {
           modelProvider: "openrouter",
           modelId: "deepseek/deepseek-v4-pro",
           modelParameters: {
-            reasoning_effort: "high",
+            reasoning_effort: "medium",
             max_output_tokens: 2_048,
           },
         },
