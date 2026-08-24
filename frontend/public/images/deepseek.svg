@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title">
-  <title>DeepSeek</title>
-  <rect width="48" height="48" rx="12" fill="#4d6bfe"/>
-  <path
-    d="M12 14h11.5C32 14 37 18.2 37 24s-5 10-13.5 10H12V14Zm7 6v8h4.2c4.5 0 6.8-1.4 6.8-4s-2.3-4-6.8-4H19Z"
-    fill="#fff"
-  />
-  <circle cx="36" cy="13" r="4" fill="#8ee9ff"/>
-</svg>
