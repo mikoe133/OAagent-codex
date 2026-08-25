@@ -38,6 +38,10 @@ import {
   resolveOaQueryPolicy,
 } from "../infrastructure/oa/oaQueryPolicy.js";
 import { resolveTaskReasoningEffort } from "./taskReasoningPolicy.js";
+import type {
+  ChatLatencyStage,
+  ChatLatencyTrace,
+} from "../infrastructure/observability/chatLatency.js";
 
 export type SendMessageInput = {
   sessionId: string;
@@ -46,6 +50,7 @@ export type SendMessageInput = {
   model?: string | null;
   oaApiToken?: string | null;
   oaUserId?: string | null;
+  latency?: ChatLatencyTrace;
 };
 
 export type SendMessageResult = {
@@ -58,6 +63,24 @@ export type SendMessageResult = {
   knowledgeSources: KnowledgeBaseSource[];
   summary: string | null;
 };
+
+export type AgentProgressEvent = {
+  type: "progress";
+  sessionId: string;
+  itemId?: string;
+  status?: "in_progress" | "completed" | "failed";
+  message: string;
+  detail?: unknown;
+};
+
+type RequestRoutingProgressEvent = AgentProgressEvent & {
+  itemId: "request-routing";
+  status: "in_progress" | "completed" | "failed";
+};
+
+type RequestRoutingProgressEmit = (
+  event: RequestRoutingProgressEvent,
+) => void | Promise<void>;
 
 export type AgentStreamEvent =
   | {
@@ -77,12 +100,7 @@ export type AgentStreamEvent =
       type: "turn.started";
       sessionId: string;
     }
-  | {
-      type: "progress";
-      sessionId: string;
-      message: string;
-      detail?: unknown;
-    }
+  | AgentProgressEvent
   | {
       type: "message.delta";
       sessionId: string;
@@ -133,6 +151,43 @@ export type AgentStreamEvent =
 
 export type AgentStreamEmit = (event: AgentStreamEvent) => void | Promise<void>;
 
+export async function runRequestRoutingWithProgress<T>(
+  sessionId: string,
+  emit: RequestRoutingProgressEmit,
+  route: () => Promise<T>,
+): Promise<T> {
+  await emit({
+    type: "progress",
+    sessionId,
+    itemId: "request-routing",
+    status: "in_progress",
+    message: "正在理解请求并选择合适的数据源…",
+  });
+
+  let result: T;
+  try {
+    result = await route();
+  } catch (error) {
+    await emit({
+      type: "progress",
+      sessionId,
+      itemId: "request-routing",
+      status: "failed",
+      message: "数据能力准备失败。",
+    });
+    throw error;
+  }
+
+  await emit({
+    type: "progress",
+    sessionId,
+    itemId: "request-routing",
+    status: "completed",
+    message: "已准备好相关数据能力，正在生成回答…",
+  });
+  return result;
+}
+
 export type StreamRecoveryDecision =
   | {
       kind: "existing_response";
@@ -152,7 +207,11 @@ export class AgentService {
   ) {}
 
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
-    return this.enqueue(input.sessionId, () => this.runMessage(input));
+    return this.enqueue(
+      input.sessionId,
+      () => this.runMessage(input),
+      input.latency,
+    );
   }
 
   async streamMessage(
@@ -161,20 +220,32 @@ export class AgentService {
     signal?: AbortSignal,
   ): Promise<void> {
     await emit({ type: "run.queued", sessionId: input.sessionId });
-    return this.enqueue(input.sessionId, () =>
-      this.runMessageStream(input, emit, signal),
+    return this.enqueue(
+      input.sessionId,
+      () => this.runMessageStream(input, emit, signal),
+      input.latency,
     );
   }
 
   private async runMessage(input: SendMessageInput): Promise<SendMessageResult> {
-    const session = await this.prepareSession(input);
+    input.latency?.mark("routing_started");
+    const finishRouting = input.latency?.startStage("request_routing");
+    const session = await measureLatencyStage(
+      input.latency,
+      "session_prepare",
+      () => this.prepareSession(input),
+    );
     const resolvedRun = await resolveRunConfig(
       this.config,
       input.provider,
       input.model,
       input.message,
       session.summary,
+      undefined,
+      input.latency,
     );
+    finishRouting?.();
+    input.latency?.mark("routing_completed");
     const runConfig = resolvedRun.config;
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
@@ -201,6 +272,7 @@ export class AgentService {
     beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
     beginKnowledgeBaseSourceTurn(input.sessionId);
     let knowledgeSources: KnowledgeBaseSource[] = [];
+    input.latency?.markOnce("codex_invoked");
     const turn = await (async () => {
       try {
         return await thread.run(prompt);
@@ -209,6 +281,9 @@ export class AgentService {
         knowledgeSources = finishKnowledgeBaseSourceTurn(input.sessionId);
       }
     })();
+    input.latency?.markOnce("first_message");
+    input.latency?.mark("turn_completed");
+    input.latency?.mark("codex_stream_closed");
 
     if (!turn.finalResponse.trim() || !hasTerminalAgentResponse(turn.items)) {
       const itemTypes = turn.items.map((item) => item.type).join(", ") || "无";
@@ -221,9 +296,13 @@ export class AgentService {
       throw new Error("agent turn 已完成,但 SDK 未返回 thread id。");
     }
 
-    await this.sessions.updateThreadId(input.sessionId, thread.id);
+    await measureLatencyStage(input.latency, "persistence", () =>
+      this.sessions.updateThreadId(input.sessionId, thread.id!),
+    );
     const summary = buildNextSummary(session.summary, input.message, turn.finalResponse);
-    await this.sessions.updateSummary(input.sessionId, summary);
+    await measureLatencyStage(input.latency, "persistence", () =>
+      this.sessions.updateSummary(input.sessionId, summary),
+    );
 
     const secrets = this.getSecrets(runtimeContext.sessionOaApiToken);
     return {
@@ -248,15 +327,31 @@ export class AgentService {
     throwIfAborted(signal);
     await emit({ type: "run.started", sessionId: input.sessionId });
 
-    const session = await this.prepareSession(input);
-    const resolvedRun = await resolveRunConfig(
-      this.config,
-      input.provider,
-      input.model,
-      input.message,
-      session.summary,
-      signal,
+    input.latency?.mark("routing_started");
+    const finishRouting = input.latency?.startStage("request_routing");
+    const { session, resolvedRun } = await runRequestRoutingWithProgress(
+      input.sessionId,
+      emit,
+      async () => {
+        const session = await measureLatencyStage(
+          input.latency,
+          "session_prepare",
+          () => this.prepareSession(input),
+        );
+        const resolvedRun = await resolveRunConfig(
+          this.config,
+          input.provider,
+          input.model,
+          input.message,
+          session.summary,
+          signal,
+          input.latency,
+        );
+        return { session, resolvedRun };
+      },
     );
+    finishRouting?.();
+    input.latency?.mark("routing_completed");
     const runConfig = resolvedRun.config;
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
@@ -311,11 +406,20 @@ export class AgentService {
     beginKnowledgeBaseSourceTurn(input.sessionId);
     let knowledgeSources: KnowledgeBaseSource[] = [];
     const runStreamedTurn = async (turnPrompt: string): Promise<void> => {
+      input.latency?.markOnce("codex_invoked");
       const { events } = await thread.runStreamed(turnPrompt, { signal });
       for await (const event of events) {
         throwIfAborted(signal);
-        await this.emitCodexEvent(input.sessionId, event, state, secrets, emit);
+        await this.emitCodexEvent(
+          input.sessionId,
+          event,
+          state,
+          secrets,
+          emit,
+          input.latency,
+        );
       }
+      input.latency?.mark("codex_stream_closed");
     };
     try {
       try {
@@ -361,13 +465,17 @@ export class AgentService {
       throw new Error("agent turn 已完成,但 SDK 未返回 thread id。");
     }
 
-    await this.sessions.updateThreadId(input.sessionId, thread.id);
+    await measureLatencyStage(input.latency, "persistence", () =>
+      this.sessions.updateThreadId(input.sessionId, thread.id!),
+    );
     const summary = buildNextSummary(
       session.summary,
       input.message,
       state.finalResponse,
     );
-    await this.sessions.updateSummary(input.sessionId, summary);
+    await measureLatencyStage(input.latency, "persistence", () =>
+      this.sessions.updateSummary(input.sessionId, summary),
+    );
 
     const result: SendMessageResult = {
       sessionId: input.sessionId,
@@ -396,9 +504,12 @@ export class AgentService {
     state: AgentStreamState,
     secrets: string[],
     emit: AgentStreamEmit,
+    latency?: ChatLatencyTrace,
   ): Promise<void> {
     if (event.type === "thread.started") {
-      await this.sessions.updateThreadId(sessionId, event.thread_id);
+      await measureLatencyStage(latency, "persistence", () =>
+        this.sessions.updateThreadId(sessionId, event.thread_id),
+      );
       await emit({
         type: "thread.started",
         sessionId,
@@ -408,12 +519,14 @@ export class AgentService {
     }
 
     if (event.type === "turn.started") {
+      latency?.markOnce("turn_started");
       await emit({ type: "turn.started", sessionId });
       return;
     }
 
     if (event.type === "turn.completed") {
       state.usage = event.usage;
+      latency?.mark("turn_completed");
       return;
     }
 
@@ -427,7 +540,15 @@ export class AgentService {
       return;
     }
 
-    await this.emitItemEvent(sessionId, event.type, event.item, state, secrets, emit);
+    await this.emitItemEvent(
+      sessionId,
+      event.type,
+      event.item,
+      state,
+      secrets,
+      emit,
+      latency,
+    );
   }
 
   private async emitItemEvent(
@@ -437,12 +558,15 @@ export class AgentService {
     state: AgentStreamState,
     secrets: string[],
     emit: AgentStreamEmit,
+    latency?: ChatLatencyTrace,
   ): Promise<void> {
     if (isToolThreadItem(item)) {
       if (eventType === "item.completed") {
         state.activeToolIds.delete(item.id);
+        latency?.toolCompleted(item.id);
       } else {
         state.activeToolIds.add(item.id);
+        latency?.toolStarted(item.id, item.type);
       }
     }
 
@@ -459,6 +583,7 @@ export class AgentService {
         state.finalResponse = text;
       }
       if (delta) {
+        latency?.markOnce("first_message");
         await emit({
           type: "message.delta",
           sessionId,
@@ -613,9 +738,14 @@ export class AgentService {
   private async enqueue<T>(
     sessionId: string,
     operation: () => Promise<T>,
+    latency?: ChatLatencyTrace,
   ): Promise<T> {
     const previous = this.queues.get(sessionId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(operation);
+    const finishQueueWait = latency?.startStage("queue_wait");
+    const current = previous.catch(() => undefined).then(() => {
+      finishQueueWait?.();
+      return operation();
+    });
     const queueTail = current.catch(() => undefined).finally(() => {
       if (this.queues.get(sessionId) === queueTail) {
         this.queues.delete(sessionId);
@@ -730,24 +860,33 @@ async function resolveRunConfig(
   task: string,
   conversationMemory: string | null,
   signal?: AbortSignal,
+  latency?: ChatLatencyTrace,
 ) {
   const modelProvider = resolveRequestedProvider(requestedProvider, config.modelProvider);
   const fallbackModel =
     modelProvider === config.modelProvider ? config.model : getDefaultModel(modelProvider);
   const model = resolveRequestedModel(modelProvider, requestedModel, fallbackModel);
-  const [openapi, knowledgeBase] = await Promise.all([
-    resolveOpenApiContract(config),
-    resolveKnowledgeBaseContracts(config),
-  ]);
-  const runConfig = { ...config, modelProvider, model, openapiPath: openapi.path };
-  const route = await routeOpenApiRequest(
-    runConfig,
-    mergeOpenApiIndexes([
-      openapi.index,
-      knowledgeBase.read.index,
-      ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
+  const [openapi, knowledgeBase] = await measureLatencyStage(
+    latency,
+    "contracts",
+    () => Promise.all([
+      resolveOpenApiContract(config),
+      resolveKnowledgeBaseContracts(config),
     ]),
-    { task, conversationMemory, signal },
+  );
+  const runConfig = { ...config, modelProvider, model, openapiPath: openapi.path };
+  const route = await measureLatencyStage(
+    latency,
+    "semantic_route",
+    () => routeOpenApiRequest(
+      runConfig,
+      mergeOpenApiIndexes([
+        openapi.index,
+        knowledgeBase.read.index,
+        ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
+      ]),
+      { task, conversationMemory, signal },
+    ),
   );
   return {
     config: runConfig,
@@ -757,6 +896,19 @@ async function resolveRunConfig(
     reasoningEffort: resolveTaskReasoningEffort(task),
     oaQueryPolicy: resolveOaQueryPolicy(task),
   };
+}
+
+async function measureLatencyStage<T>(
+  latency: ChatLatencyTrace | undefined,
+  stage: ChatLatencyStage,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const finish = latency?.startStage(stage);
+  try {
+    return await operation();
+  } finally {
+    finish?.();
+  }
 }
 
 function buildNextSummary(

@@ -13,6 +13,10 @@ import {
   beginKnowledgeBaseSourceTurn,
   finishKnowledgeBaseSourceTurn,
 } from "../src/infrastructure/knowledgebase/knowledgeBaseSources.js";
+import {
+  ChatLatencyMetricsRecorder,
+  type ChatLatencyRecord,
+} from "../src/infrastructure/observability/chatLatency.js";
 import { SessionStore } from "../src/infrastructure/persistence/sessionStore.js";
 
 test("protects public agent routes with a validated OA token", async () => {
@@ -358,6 +362,95 @@ test("registers controlled knowledge API sources for the active session turn", a
   }
 });
 
+test("records authenticated streaming chat latency without logging request secrets", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-chat-latency-"));
+  const originalFetch = globalThis.fetch;
+  let now = 0;
+  const records: ChatLatencyRecord[] = [];
+  const latencyMetrics = new ChatLatencyMetricsRecorder({
+    now: () => now,
+    wallNow: () => new Date(0),
+    logger: (record) => records.push(record),
+  });
+  const config = {
+    oaApiBaseUrl: "https://oa.example.test",
+    oaAuthAlias: "default",
+    oaUserTokenHeader: "Authorization",
+    oaUserTokenPrefix: "Bearer",
+    modelProvider: "nexttoken",
+    model: "gpt-5.6-terra",
+  } as AppConfig;
+  const agentService = {
+    async streamMessage(
+      input: { latency?: { mark: (name: string) => void } },
+      emit: (event: unknown) => Promise<void>,
+    ) {
+      assert.ok(input.latency);
+      input.latency.mark("codex_invoked");
+      await emit({ type: "run.started", sessionId: "latency-session" });
+      await emit({
+        type: "run.completed",
+        sessionId: "latency-session",
+        result: {
+          sessionId: "latency-session",
+          threadId: "thread-1",
+          provider: "nexttoken",
+          model: "gpt-5.6-terra",
+          finalResponse: "ok",
+          executedCommands: [],
+          knowledgeSources: [],
+          summary: null,
+        },
+        usage: null,
+      });
+    },
+  } as unknown as AgentService;
+  const server = createAgentHttpServer(
+    config,
+    agentService,
+    new SessionStore(path.join(directory, "sessions.json")),
+    undefined,
+    latencyMetrics,
+  );
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  globalThis.fetch = async () => {
+    now = 7;
+    return Response.json({
+      code: 200,
+      success: true,
+      data: { id: 19, email: "latency@example.test" },
+    });
+  };
+
+  try {
+    const response = await requestStream(
+      address.port,
+      "/v1/sessions/latency-session/messages/stream",
+      "secret-page-token",
+      { message: "hello", provider: "nexttoken", model: "gpt-5.6-terra" },
+    );
+
+    assert.equal(response.status, 200);
+    assert.match(response.body, /event: run\.completed/);
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.status, "completed");
+    assert.equal(records[0]?.provider, "nexttoken");
+    assert.equal(records[0]?.model, "gpt-5.6-terra");
+    assert.equal(records[0]?.durationsMs.auth, 7);
+    assert.equal(records[0]?.milestonesMs.stream_connected, 7);
+    assert.doesNotMatch(JSON.stringify(records[0]), /secret-page-token|hello/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function requestJson(
   port: number,
   pathname: string,
@@ -425,5 +518,39 @@ function requestAutomationJson(
       request.write(JSON.stringify(body));
     }
     request.end();
+  });
+}
+
+function requestStream(
+  port: number,
+  pathname: string,
+  token: string,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        path: pathname,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    request.on("error", reject);
+    request.end(JSON.stringify(body));
   });
 }

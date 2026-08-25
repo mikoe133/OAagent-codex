@@ -221,8 +221,41 @@ test("completed knowledge answers end with clickable source references", () => {
   assert.doesNotMatch(html, /OA Knowledge/)
   assert.doesNotMatch(html, /bg-gradient-to-r/)
   assert.doesNotMatch(html, /data-slot="knowledge-source-preview"/)
+  assert.doesNotMatch(html, /data-slot="knowledge-source-collapsible"/)
   assert.doesNotMatch(html, /data-slot="knowledge-source-showcase"[^>]*max-w-2xl/)
   assert.match(html, /w-2\/3 truncate/)
+})
+
+test("knowledge references beyond the first three are collapsed and expandable", () => {
+  const message = {
+    id: "assistant-with-many-knowledge-sources",
+    role: "assistant",
+    content: "这是包含多条引用的知识库回答。",
+    createdAt: new Date("2026-07-10T10:00:00.000Z"),
+    status: "completed",
+    knowledgeSources: Array.from({ length: 5 }, (_, index) => ({
+      title: `知识库文档 ${index + 1}`,
+      description: `文档 ${index + 1} 的摘要。`,
+      originalContent: `文档 ${index + 1} 的原文。`,
+      sourceUrl: `https://oa-kb.example.test/wiki/page-${index + 1}`,
+    })),
+  } as Message
+
+  const html = renderToStaticMarkup(<MessageBubble message={message} oaNavigationUrl={OA_NAVIGATION_URL} />)
+  const collapsibleTag = html.match(/<details data-slot="knowledge-source-collapsible"[^>]*>/)?.[0]
+  const sourceListTag = html.match(/<div data-slot="knowledge-source-list"[^>]*>/)?.[0]
+
+  assert.ok(collapsibleTag, "expected the additional knowledge references to be collapsible")
+  assert.ok(sourceListTag, "expected the knowledge source list")
+  assert.doesNotMatch(collapsibleTag, /\bopen(?:=|\s|>)/)
+  assert.doesNotMatch(collapsibleTag, /\bborder-(?:t|b)\b/)
+  assert.doesNotMatch(sourceListTag, /\bborder-b\b/)
+  assert.match(html, /data-slot="knowledge-source-toggle"/)
+  assert.match(html, /data-slot="knowledge-source-row" data-bottom-border="hidden"[^>]*>[\s\S]*?知识库文档 3/)
+  assert.match(html, />展开其余 2 条引用</)
+  assert.match(html, /data-slot="knowledge-source-collapsed-list"/)
+  assert.match(html, />知识库文档 1</)
+  assert.match(html, />知识库文档 5</)
 })
 
 test("ordinary assistant answers do not render a source section", () => {
@@ -416,6 +449,64 @@ test("Command traces use a dark square terminal icon with softer gray title and 
   assert.match(html, /lucide-square-terminal[^>]*text-stone-700/)
   assert.match(html, /text-stone-500[^>]*>Command<\/span>/)
   assert.match(html, /data-slot="trace-tool-status"[^>]*text-stone-400[^>]*>Complete<\/span>/)
+})
+
+test("request routing traces use a Signpost with Command trace gray styling", () => {
+  const message = {
+    id: "assistant-request-routing-trace",
+    role: "assistant",
+    content: "",
+    createdAt: new Date("2026-07-10T10:02:00.000Z"),
+    status: "streaming",
+    toolSteps: [
+      {
+        id: "request-routing",
+        type: "request_routing",
+        status: "completed",
+        title: "任务编排",
+        description: "已准备好相关数据能力，正在生成回答…",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(
+    <MessageBubble message={message} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
+
+  assert.match(html, /data-trace-tool-type="request_routing"[^>]*bg-white/)
+  assert.match(html, /lucide-signpost[^>]*text-stone-700/)
+  assert.match(html, /text-stone-500[^>]*>任务编排<\/span>/)
+  assert.match(html, /data-slot="trace-tool-status"[^>]*text-stone-400[^>]*>Complete<\/span>/)
+  assert.match(html, /text-stone-500[^>]*>已准备好相关数据能力，正在生成回答…<\/p>/)
+})
+
+test("running request routing traces use gray status text", () => {
+  const message = {
+    id: "assistant-running-request-routing-trace",
+    role: "assistant",
+    content: "",
+    createdAt: new Date("2026-07-10T10:02:00.000Z"),
+    status: "streaming",
+    toolSteps: [
+      {
+        id: "request-routing",
+        type: "request_routing",
+        status: "running",
+        title: "任务编排",
+        description: "正在识别问题所需能力…",
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(
+    <MessageBubble message={message} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
+
+  assert.match(
+    html,
+    /data-slot="trace-tool-status"[^>]*text-stone-400[^>]*theme-dark:text-zinc-500[^>]*>Running<\/span>/,
+  )
+  assert.doesNotMatch(html, /data-slot="trace-tool-status"[^>]*text-(?:emerald|cyan)/)
 })
 
 test("OA and knowledge-base traces use matching semantic icon, title, and completion colors", () => {

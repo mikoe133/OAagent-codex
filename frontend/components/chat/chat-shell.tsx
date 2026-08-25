@@ -21,6 +21,7 @@ import {
 } from "@/lib/model-catalog"
 import { calculateResponseDurationMs, normalizeResponseDuration } from "@/lib/response-duration"
 import {
+  createRequestRoutingTraceGate,
   drainChatSseBuffer,
   finalizeToolSteps,
   isToolTimelineEvent,
@@ -806,6 +807,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       void persistMessages(currentAgentSessionId, activeRecordId, newMessages)
 
       let cancelPendingTypewriter = () => {}
+      let dismissPendingRoutingTrace = () => {}
       let accumulatedContent = ""
       let visibleContent = ""
       let currentToolSteps: ToolStep[] = []
@@ -889,6 +891,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           )
           publishSessionMessages(nextMessages)
         }
+
+        const routingTraceGate = createRequestRoutingTraceGate((event) => {
+          updateAssistantToolSteps(mergeToolTimelineEvent(currentToolSteps, event))
+        })
+        dismissPendingRoutingTrace = () => routingTraceGate.dismiss()
 
         const updateAssistantTraceMessages = (nextTraceMessages: TraceMessage[]) => {
           currentTraceMessages = nextTraceMessages
@@ -1012,12 +1019,18 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         let completedRunReceived = false
 
         const handleChatStreamEvent = (event: ChatStreamEvent) => {
+          if (routingTraceGate.push(event)) {
+            return
+          }
+
           if (isToolTimelineEvent(stringValue(event.type))) {
+            routingTraceGate.dismiss()
             updateAssistantToolSteps(mergeToolTimelineEvent(currentToolSteps, event))
             return
           }
 
           if (event.type === "message.delta" && typeof event.delta === "string") {
+            routingTraceGate.dismiss()
             const latestToolStepId = currentToolSteps[currentToolSteps.length - 1]?.id ?? null
             updateAssistantTraceMessages(
               mergeMessageTraceDelta(currentTraceMessages, event, latestToolStepId),
@@ -1027,6 +1040,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           }
 
           if (event.type === "run.completed") {
+            routingTraceGate.dismiss()
             completedRunReceived = true
             const result = toRecord(event.result)
             const finalResponse = result?.finalResponse
@@ -1038,6 +1052,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           }
 
           if (event.type === "run.failed") {
+            routingTraceGate.dismiss()
             terminalStreamError = new Error(typeof event.error === "string" ? event.error : "Agent run failed")
           }
         }
@@ -1072,6 +1087,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
             if (done) break
 
+            routingTraceGate.dismiss()
             appendAssistantContent(decoder.decode(value, { stream: true }))
           }
 
@@ -1138,6 +1154,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
         void persistMessages(currentAgentSessionId, activeRecordId, terminalMessages)
       } finally {
+        dismissPendingRoutingTrace()
         if (activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId) {
           activeSessionRunsRef.current.delete(currentAgentSessionId)
           setRunningSessionIds((current) => {

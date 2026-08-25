@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  createRequestRoutingTraceGate,
   drainChatSseBuffer,
   finalizeToolSteps,
   mergeMessageTraceDelta,
@@ -150,6 +151,119 @@ test("mergeToolTimelineEvent keeps one tool row and accumulates streamed output"
     input: "npm run build",
     output: "Compiling...\nBuild complete",
   })
+})
+
+test("mergeToolTimelineEvent updates request routing progress in one trace row", () => {
+  let steps: ToolStep[] = []
+
+  steps = mergeToolTimelineEvent(steps, {
+    type: "progress",
+    itemId: "request-routing",
+    status: "in_progress",
+    message: "正在理解请求并选择合适的数据源…",
+  })
+  steps = mergeToolTimelineEvent(steps, {
+    type: "progress",
+    itemId: "request-routing",
+    status: "completed",
+    message: "已准备好相关数据能力，正在生成回答…",
+  })
+
+  assert.deepEqual(steps, [
+    {
+      id: "request-routing",
+      type: "request_routing",
+      status: "completed",
+      title: "任务编排",
+      description: "已准备好相关数据能力，正在生成回答…",
+    },
+  ])
+})
+
+test("request routing trace waits five seconds and reveals only its latest state", () => {
+  const visibleEvents: ChatStreamEvent[] = []
+  let scheduledCallback: () => void = () => {
+    assert.fail("routing trace callback was not scheduled")
+  }
+  let scheduledDelayMs: number | null = null
+  const gate = createRequestRoutingTraceGate(
+    (event) => visibleEvents.push(event),
+    (callback, delayMs) => {
+      scheduledCallback = callback
+      scheduledDelayMs = delayMs
+      return () => undefined
+    },
+  )
+
+  assert.equal(
+    gate.push({
+      type: "progress",
+      itemId: "request-routing",
+      status: "in_progress",
+      message: "正在理解请求并选择合适的数据源…",
+    }),
+    true,
+  )
+  assert.equal(
+    gate.push({
+      type: "progress",
+      itemId: "request-routing",
+      status: "completed",
+      message: "已准备好相关数据能力，正在生成回答…",
+    }),
+    true,
+  )
+  assert.equal(scheduledDelayMs, 5_000)
+  assert.deepEqual(visibleEvents, [])
+
+  scheduledCallback()
+  assert.deepEqual(visibleEvents, [
+    {
+      type: "progress",
+      itemId: "request-routing",
+      status: "completed",
+      message: "已准备好相关数据能力，正在生成回答…",
+    },
+  ])
+})
+
+test("request routing trace stays hidden when another response arrives first", () => {
+  const visibleEvents: ChatStreamEvent[] = []
+  let scheduledCallback: () => void = () => {
+    assert.fail("routing trace callback was not scheduled")
+  }
+  let cancelled = false
+  const gate = createRequestRoutingTraceGate(
+    (event) => visibleEvents.push(event),
+    (callback) => {
+      scheduledCallback = callback
+      return () => {
+        cancelled = true
+      }
+    },
+  )
+
+  gate.push({
+    type: "progress",
+    itemId: "request-routing",
+    status: "in_progress",
+    message: "正在理解请求并选择合适的数据源…",
+  })
+  gate.dismiss()
+
+  assert.equal(cancelled, true)
+  scheduledCallback()
+  assert.deepEqual(visibleEvents, [])
+  assert.equal(
+    gate.push({
+      type: "progress",
+      itemId: "request-routing",
+      status: "completed",
+      message: "已准备好相关数据能力，正在生成回答…",
+    }),
+    true,
+  )
+  assert.deepEqual(visibleEvents, [])
 })
 
 test("mergeToolTimelineEvent keeps structured MCP input and result", () => {

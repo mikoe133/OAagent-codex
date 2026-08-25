@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { ArrowUpRight, Check, Copy } from "lucide-react"
+import { ArrowUpRight, Check, ChevronDown, Copy } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -14,6 +14,8 @@ type PreviewPosition = {
   x: number
   y: number
 }
+
+const KNOWLEDGE_SOURCE_COLLAPSE_THRESHOLD = 3
 
 // 暂时关闭知识库引用的悬浮预览，恢复时改为 true。
 const KNOWLEDGE_SOURCE_PREVIEW_ENABLED = false
@@ -63,6 +65,9 @@ export function KnowledgeSourceShowcase({ sources }: { sources: KnowledgeSource[
   }
 
   const hoveredSource = hoveredIndex === null ? null : sources[hoveredIndex]
+  const visibleSources = sources.slice(0, KNOWLEDGE_SOURCE_COLLAPSE_THRESHOLD)
+  const collapsedSources = sources.slice(KNOWLEDGE_SOURCE_COLLAPSE_THRESHOLD)
+  const hasCollapsedSources = collapsedSources.length > 0
   const previewLayer = KNOWLEDGE_SOURCE_PREVIEW_ENABLED && isMounted
     ? createPortal(
         <div
@@ -110,47 +115,111 @@ export function KnowledgeSourceShowcase({ sources }: { sources: KnowledgeSource[
 
       {previewLayer}
 
-      <div className="border-y border-stone-200/80 theme-dark:border-zinc-800">
-        {sources.map((source, index) => (
-          <div
+      <div
+        data-slot="knowledge-source-list"
+        className={cn(
+          "border-t border-stone-200/80 theme-dark:border-zinc-800",
+          !hasCollapsedSources && "border-b",
+        )}
+      >
+        {visibleSources.map((source, index) => (
+          <KnowledgeSourceRow
             key={source.sourceUrl}
+            source={source}
+            hideBottomBorder={hasCollapsedSources && index === visibleSources.length - 1}
             onMouseEnter={KNOWLEDGE_SOURCE_PREVIEW_ENABLED ? () => setHoveredIndex(index) : undefined}
             onMouseLeave={KNOWLEDGE_SOURCE_PREVIEW_ENABLED ? () => setHoveredIndex(null) : undefined}
-            className="group/source relative flex items-start gap-3 border-b border-stone-200/80 px-3 py-4 transition-colors duration-200 last:border-b-0 hover:bg-stone-50/80 focus-within:bg-sky-50/70 theme-dark:border-zinc-800 theme-dark:hover:bg-zinc-900/70 theme-dark:focus-within:bg-sky-950/30"
-          >
-            <a
-              href={source.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
-              aria-label={`打开知识库引用：${source.title}`}
-            >
-              <div className="min-w-0">
-                <div className="inline-flex max-w-full items-center gap-2">
-                  <h3 className="truncate text-[0.9375rem] font-medium tracking-tight text-stone-900 theme-dark:text-zinc-100">
-                    {source.title}
-                  </h3>
-                  <ArrowUpRight
-                    className="h-4 w-4 shrink-0 -translate-x-1 translate-y-1 text-stone-400 opacity-0 transition-all duration-200 group-hover/source:translate-x-0 group-hover/source:translate-y-0 group-hover/source:opacity-100 group-focus-visible/source:translate-x-0 group-focus-visible/source:translate-y-0 group-focus-visible/source:opacity-100 theme-dark:text-zinc-500"
-                    aria-hidden="true"
-                  />
-                </div>
-                <p
-                  className={cn(
-                    "mt-1 w-2/3 truncate text-xs leading-5 text-stone-500 transition-colors duration-200",
-                    "group-hover/source:text-stone-700 group-focus-visible/source:text-stone-700",
-                    "theme-dark:text-zinc-500 theme-dark:group-hover/source:text-zinc-300 theme-dark:group-focus-visible/source:text-zinc-300",
-                  )}
-                >
-                  {source.description}
-                </p>
-              </div>
-            </a>
-            <KnowledgeSourceCopyButton source={source} />
-          </div>
+          />
         ))}
+        {hasCollapsedSources && (
+          <details
+            data-slot="knowledge-source-collapsible"
+            className="group"
+          >
+            <summary
+              data-slot="knowledge-source-toggle"
+              className="flex cursor-pointer list-none items-center justify-center gap-1.5 px-3 py-3 text-xs font-medium text-stone-500 outline-none transition-colors hover:bg-stone-50/80 hover:text-stone-800 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500/50 theme-dark:text-zinc-400 theme-dark:hover:bg-zinc-900/70 theme-dark:hover:text-zinc-200 [&::-webkit-details-marker]:hidden"
+            >
+              <span className="group-open:hidden">展开其余 {collapsedSources.length} 条引用</span>
+              <span className="hidden group-open:inline">收起其余 {collapsedSources.length} 条引用</span>
+              <ChevronDown
+                className="h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180"
+                aria-hidden="true"
+              />
+            </summary>
+            <div data-slot="knowledge-source-collapsed-list">
+              {collapsedSources.map((source, index) => (
+                <KnowledgeSourceRow
+                  key={source.sourceUrl}
+                  source={source}
+                  onMouseEnter={
+                    KNOWLEDGE_SOURCE_PREVIEW_ENABLED
+                      ? () => setHoveredIndex(index + KNOWLEDGE_SOURCE_COLLAPSE_THRESHOLD)
+                      : undefined
+                  }
+                  onMouseLeave={KNOWLEDGE_SOURCE_PREVIEW_ENABLED ? () => setHoveredIndex(null) : undefined}
+                />
+              ))}
+            </div>
+          </details>
+        )}
       </div>
     </section>
+  )
+}
+
+function KnowledgeSourceRow({
+  source,
+  onMouseEnter,
+  onMouseLeave,
+  hideBottomBorder = false,
+}: {
+  source: KnowledgeSource
+  onMouseEnter?: () => void
+  onMouseLeave?: () => void
+  hideBottomBorder?: boolean
+}) {
+  return (
+    <div
+      data-slot="knowledge-source-row"
+      data-bottom-border={hideBottomBorder ? "hidden" : "visible"}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className={cn(
+        "group/source relative flex items-start gap-3 px-3 py-4 transition-colors duration-200 hover:bg-stone-50/80 focus-within:bg-sky-50/70 theme-dark:hover:bg-zinc-900/70 theme-dark:focus-within:bg-sky-950/30",
+        !hideBottomBorder && "border-b border-stone-200/80 last:border-b-0 theme-dark:border-zinc-800",
+      )}
+    >
+      <a
+        href={source.sourceUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="min-w-0 flex-1 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
+        aria-label={`打开知识库引用：${source.title}`}
+      >
+        <div className="min-w-0">
+          <div className="inline-flex max-w-full items-center gap-2">
+            <h3 className="truncate text-[0.9375rem] font-medium tracking-tight text-stone-900 theme-dark:text-zinc-100">
+              {source.title}
+            </h3>
+            <ArrowUpRight
+              className="h-4 w-4 shrink-0 -translate-x-1 translate-y-1 text-stone-400 opacity-0 transition-all duration-200 group-hover/source:translate-x-0 group-hover/source:translate-y-0 group-hover/source:opacity-100 group-focus-visible/source:translate-x-0 group-focus-visible/source:translate-y-0 group-focus-visible/source:opacity-100 theme-dark:text-zinc-500"
+              aria-hidden="true"
+            />
+          </div>
+          <p
+            className={cn(
+              "mt-1 w-2/3 truncate text-xs leading-5 text-stone-500 transition-colors duration-200",
+              "group-hover/source:text-stone-700 group-focus-visible/source:text-stone-700",
+              "theme-dark:text-zinc-500 theme-dark:group-hover/source:text-zinc-300 theme-dark:group-focus-visible/source:text-zinc-300",
+            )}
+          >
+            {source.description}
+          </p>
+        </div>
+      </a>
+      <KnowledgeSourceCopyButton source={source} />
+    </div>
   )
 }
 

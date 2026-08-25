@@ -17,6 +17,58 @@ export type ToolStep = {
 
 const OA_API_TOOL_TYPE = "oa_api"
 const KNOWLEDGE_BASE_API_TOOL_TYPE = "knowledge_base_api"
+const REQUEST_ROUTING_TOOL_TYPE = "request_routing"
+const REQUEST_ROUTING_ITEM_ID = "request-routing"
+const REQUEST_ROUTING_TRACE_DELAY_MS = 5_000
+
+type RequestRoutingTraceSchedule = (
+  callback: () => void,
+  delayMs: number,
+) => () => void
+
+export function createRequestRoutingTraceGate(
+  onReveal: (event: ChatStreamEvent) => void,
+  schedule: RequestRoutingTraceSchedule = scheduleRequestRoutingTrace,
+) {
+  let latestEvent: ChatStreamEvent | null = null
+  let cancelScheduledReveal: (() => void) | null = null
+  let revealed = false
+  let dismissed = false
+
+  return {
+    push(event: ChatStreamEvent): boolean {
+      if (!isRequestRoutingProgress(event)) {
+        return false
+      }
+      if (dismissed) {
+        return true
+      }
+
+      latestEvent = event
+      if (revealed) {
+        onReveal(event)
+        return true
+      }
+      if (!cancelScheduledReveal) {
+        cancelScheduledReveal = schedule(() => {
+          cancelScheduledReveal = null
+          if (dismissed || !latestEvent) {
+            return
+          }
+          revealed = true
+          onReveal(latestEvent)
+        }, REQUEST_ROUTING_TRACE_DELAY_MS)
+      }
+      return true
+    },
+    dismiss(): void {
+      dismissed = true
+      latestEvent = null
+      cancelScheduledReveal?.()
+      cancelScheduledReveal = null
+    },
+  }
+}
 
 export type TraceMessage = {
   id: string
@@ -155,10 +207,13 @@ export function finalizeToolSteps(
 
 function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | null): ToolStep {
   const eventType = stringValue(event.type)
+  const requestRouting = isRequestRoutingProgress(event)
   const previousRawToolType = previous?.type === OA_API_TOOL_TYPE || previous?.type === KNOWLEDGE_BASE_API_TOOL_TYPE
     ? "command_execution"
     : previous?.type
-  const rawToolType = stringValue(event.toolType) || previousRawToolType || (eventType === "progress" ? "progress" : "tool")
+  const rawToolType = requestRouting
+    ? REQUEST_ROUTING_TOOL_TYPE
+    : stringValue(event.toolType) || previousRawToolType || (eventType === "progress" ? "progress" : "tool")
   const name = stringValue(event.name)
   const toolType = resolveToolStepType(rawToolType, name, previous)
   const error = stringValue(event.error)
@@ -239,7 +294,22 @@ function resolveToolTitle(toolType: string, name: string | null, previous: ToolS
   if (toolType === "progress") {
     return "Progress"
   }
+  if (toolType === REQUEST_ROUTING_TOOL_TYPE) {
+    return "任务编排"
+  }
   return previous?.title || "Tool"
+}
+
+function isRequestRoutingProgress(event: ChatStreamEvent): boolean {
+  return event.type === "progress" && event.itemId === REQUEST_ROUTING_ITEM_ID
+}
+
+function scheduleRequestRoutingTrace(
+  callback: () => void,
+  delayMs: number,
+): () => void {
+  const timer = setTimeout(callback, delayMs)
+  return () => clearTimeout(timer)
 }
 
 function resolveToolDescription(

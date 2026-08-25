@@ -120,3 +120,48 @@ test("POST converts an upstream EOF without a terminal run event into run.failed
     globalThis.fetch = originalFetch
   }
 })
+
+test("POST streams request routing progress to the browser unchanged", async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () =>
+    new Response(
+      [
+        'event: progress\ndata: {"type":"progress","sessionId":"routing-session","itemId":"request-routing","status":"in_progress","message":"正在理解请求并选择合适的数据源…"}\n\n',
+        'event: progress\ndata: {"type":"progress","sessionId":"routing-session","itemId":"request-routing","status":"completed","message":"已准备好相关数据能力，正在生成回答…"}\n\n',
+        'event: run.completed\ndata: {"type":"run.completed","result":{"finalResponse":"完成"}}\n\n',
+      ].join(""),
+      {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      },
+    )
+
+  try {
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "sessionid=test-session-token",
+        },
+        body: JSON.stringify({
+          sessionId: "routing-session",
+          messages: [{ role: "user", content: "查看项目进展" }],
+        }),
+      }),
+    )
+    const responseText = await response.text()
+
+    assert.match(
+      responseText,
+      /"itemId":"request-routing","status":"in_progress"/,
+    )
+    assert.match(
+      responseText,
+      /"itemId":"request-routing","status":"completed"/,
+    )
+    assert.match(responseText, /event: run\.completed/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})

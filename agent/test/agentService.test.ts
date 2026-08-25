@@ -4,6 +4,7 @@ import type { ThreadItem } from "@openai/codex-sdk";
 import {
   buildIncompleteTurnContinuationPrompt,
   hasTerminalAgentResponse,
+  runRequestRoutingWithProgress,
   resolveStreamFailure,
   resolveStreamRecovery,
 } from "../src/application/agentService.js";
@@ -305,6 +306,71 @@ describe("resolveStreamRecovery", () => {
     const recovery = resolveStreamRecovery("", [item], []);
 
     assert.equal(recovery, null);
+  });
+});
+
+describe("request routing progress", () => {
+  it("emits one stable trace step around request routing", async () => {
+    const timeline: string[] = [];
+
+    const result = await runRequestRoutingWithProgress(
+      "session-routing-progress",
+      async (event) => {
+        timeline.push(
+          `${event.itemId}:${event.status}:${event.message}`,
+        );
+      },
+      async () => {
+        timeline.push("route:running");
+        return "routed";
+      },
+    );
+
+    assert.equal(result, "routed");
+    assert.deepEqual(timeline, [
+      "request-routing:in_progress:正在理解请求并选择合适的数据源…",
+      "route:running",
+      "request-routing:completed:已准备好相关数据能力，正在生成回答…",
+    ]);
+  });
+
+  it("updates the routing trace with a safe failure message", async () => {
+    const events: Array<{
+      itemId: string;
+      status: string;
+      message: string;
+    }> = [];
+
+    await assert.rejects(
+      runRequestRoutingWithProgress(
+        "session-routing-failure",
+        async (event) => {
+          events.push(event);
+        },
+        async () => {
+          throw new Error("secret upstream routing details");
+        },
+      ),
+      /secret upstream routing details/,
+    );
+
+    assert.deepEqual(events, [
+      {
+        type: "progress",
+        sessionId: "session-routing-failure",
+        itemId: "request-routing",
+        status: "in_progress",
+        message: "正在理解请求并选择合适的数据源…",
+      },
+      {
+        type: "progress",
+        sessionId: "session-routing-failure",
+        itemId: "request-routing",
+        status: "failed",
+        message: "数据能力准备失败。",
+      },
+    ]);
+    assert.doesNotMatch(JSON.stringify(events), /secret upstream/);
   });
 });
 
