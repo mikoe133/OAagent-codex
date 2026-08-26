@@ -423,6 +423,36 @@ test("running trace nodes use the mint icon color", () => {
   assert.match(html, /lucide-loader-circle[^>]*text-\[#b4fbde\]/)
 })
 
+test("developer trace steps render their duration after the status", () => {
+  const message = {
+    id: "assistant-trace-duration",
+    role: "assistant",
+    content: "完成。",
+    createdAt: new Date("2026-07-10T10:02:00.000Z"),
+    status: "streaming",
+    toolSteps: [
+      {
+        id: "request-routing",
+        type: "request_routing",
+        status: "completed",
+        title: "任务编排",
+        description: "已准备好相关数据能力。",
+        durationMs: 2_345,
+      },
+    ],
+  } satisfies Message
+
+  const html = renderToStaticMarkup(
+    <MessageBubble message={message} isStreaming oaNavigationUrl={OA_NAVIGATION_URL} />,
+  )
+
+  assert.match(html, /data-slot="trace-step-duration"/)
+  assert.match(html, /2\.3 秒/)
+  const statusIndex = html.indexOf(">Complete<")
+  assert.ok(statusIndex >= 0)
+  assert.ok(statusIndex < html.indexOf("2.3 秒"))
+})
+
 test("Command traces use a dark square terminal icon with softer gray title and completion text", () => {
   const message = {
     id: "assistant-command-trace",

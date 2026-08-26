@@ -13,6 +13,7 @@ export type ToolStep = {
   description: string
   input?: string
   output?: string
+  durationMs?: number
 }
 
 const OA_API_TOOL_TYPE = "oa_api"
@@ -80,6 +81,7 @@ export type ChatStreamEvent = {
   type?: unknown
   delta?: unknown
   detail?: unknown
+  durationMs?: unknown
   error?: unknown
   exitCode?: unknown
   input?: unknown
@@ -220,6 +222,7 @@ function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | 
   const status = normalizeToolStatus(event.status, eventType, Boolean(error))
   const input = resolveToolInput(rawToolType, event, name, previous)
   const output = resolveToolOutput(rawToolType, event, error, previous)
+  const durationMs = normalizeStepDuration(event.durationMs) ?? previous?.durationMs
 
   return {
     id,
@@ -229,7 +232,14 @@ function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | 
     description: resolveToolDescription(toolType, event, name, status, previous),
     ...(input ? { input } : {}),
     ...(output ? { output } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
   }
+}
+
+function normalizeStepDuration(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined
 }
 
 function resolveToolStepType(rawToolType: string, name: string | null, previous: ToolStep | null): string {
@@ -296,6 +306,21 @@ function resolveToolTitle(toolType: string, name: string | null, previous: ToolS
   }
   if (toolType === REQUEST_ROUTING_TOOL_TYPE) {
     return "任务编排"
+  }
+  if (toolType === "session_prepare") {
+    return "会话准备"
+  }
+  if (toolType === "contracts") {
+    return "接口契约"
+  }
+  if (toolType === "semantic_route") {
+    return "语义路由"
+  }
+  if (toolType === "codex_startup") {
+    return "模型启动"
+  }
+  if (toolType === "model_inference") {
+    return "模型首字"
   }
   return previous?.title || "Tool"
 }

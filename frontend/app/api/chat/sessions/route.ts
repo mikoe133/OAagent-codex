@@ -74,6 +74,7 @@ type NormalizedToolStep = {
   description: string
   input?: string
   output?: string
+  durationMs?: number
 }
 
 type NormalizedTraceMessage = {
@@ -870,6 +871,7 @@ function normalizeToolStep(value: unknown): NormalizedToolStep | null {
   const description = stringField(item, "description")
   const input = stringField(item, "input")
   const output = stringField(item, "output")
+  const durationMs = normalizeResponseDuration(item.durationMs)
 
   if (!id || !type || !status || !title || !description) {
     return null
@@ -883,6 +885,7 @@ function normalizeToolStep(value: unknown): NormalizedToolStep | null {
     description,
     ...(input ? { input } : {}),
     ...(output ? { output } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
   }
 }
 

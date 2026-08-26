@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import type { ThreadItem } from "@openai/codex-sdk";
 import {
   buildIncompleteTurnContinuationPrompt,
+  formatSemanticRouteTraceMessage,
   hasTerminalAgentResponse,
+  resolveRouterConfig,
   runRequestRoutingWithProgress,
   resolveStreamFailure,
   resolveStreamRecovery,
@@ -11,16 +13,47 @@ import {
 import type { AppConfig } from "../src/config/config.js";
 import {
   MODEL_CATALOG,
+  ROUTER_MODEL_CATALOG,
   decodeAutomationModelParameters,
   getModelDisplayName,
   resolveAutomationModelSelection,
   resolveRequestedProvider,
   resolveRequestedModel,
+  resolveRequestedRouterModel,
 } from "../src/config/modelCatalog.js";
 import { parseCodexSandboxMode } from "../src/config/config.js";
 import { createThreadOptions } from "../src/infrastructure/codex/codexClient.js";
 
 describe("model provider selection", () => {
+  it("isolates lightweight router models from answer models", () => {
+    assert.deepEqual(ROUTER_MODEL_CATALOG, [
+      "z-ai/glm-4.7-flash",
+      "qwen/qwen3.5-flash-02-23",
+      "deepseek/deepseek-v4-flash",
+    ]);
+    assert.equal(
+      resolveRequestedRouterModel("qwen/qwen3.5-flash-02-23"),
+      "qwen/qwen3.5-flash-02-23",
+    );
+    assert.throws(() => resolveRequestedRouterModel("z-ai/glm-5.3"), /路由模型/);
+    assert.throws(() => resolveRequestedRouterModel(undefined), /路由模型:空/);
+  });
+
+  it("uses the dedicated OpenRouter model only for semantic routing", () => {
+    const answerConfig = {
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+    } as AppConfig;
+
+    const routerConfig = resolveRouterConfig(answerConfig, "z-ai/glm-4.7-flash");
+
+    assert.equal(routerConfig.modelProvider, "openrouter");
+    assert.equal(routerConfig.model, "z-ai/glm-4.7-flash");
+    assert.equal(answerConfig.modelProvider, "nexttoken");
+    assert.equal(answerConfig.model, "gpt-5.6-terra");
+    assert.equal(resolveRouterConfig(answerConfig), answerConfig);
+  });
+
   it("exposes isolated provider model whitelists", () => {
     assert.deepEqual(MODEL_CATALOG.nexttoken, [
       "gpt-5.4",
@@ -310,6 +343,101 @@ describe("resolveStreamRecovery", () => {
 });
 
 describe("request routing progress", () => {
+  it("describes route fallback reason and final catalogs in developer trace", () => {
+    assert.equal(
+      formatSemanticRouteTraceMessage({
+        catalogs: ["oa", "knowledge_base_read"],
+        candidates: [],
+        diagnostics: {
+          strategy: "fallback",
+          failureReason: "路由模型服务暂时不可用",
+        },
+      }),
+      "路由模型失败，已启用安全降级；原因：路由模型服务暂时不可用；最终接口域：OA、知识库读取",
+    );
+  });
+
+  it("shows the final catalog for successful semantic routing in developer trace", () => {
+    assert.equal(
+      formatSemanticRouteTraceMessage({
+        catalogs: ["knowledge_base_read"],
+        candidates: [],
+        diagnostics: { strategy: "semantic" },
+      }),
+      "路由模型选择完成；最终接口域：知识库读取",
+    );
+  });
+
+  it("shows when semantic routing switches to a fallback model", () => {
+    assert.equal(
+      formatSemanticRouteTraceMessage({
+        catalogs: ["knowledge_base_read"],
+        candidates: [],
+        diagnostics: {
+          strategy: "semantic",
+          usedFallbackModel: true,
+          primaryFailureReason: "路由模型返回结果无效",
+        },
+      }),
+      "首选路由模型失败（路由模型返回结果无效），已切换备用语义模型；最终接口域：知识库读取",
+    );
+  });
+
+  it("describes a fallback model that wins the concurrent race", () => {
+    assert.equal(
+      formatSemanticRouteTraceMessage({
+        catalogs: ["knowledge_base_read"],
+        candidates: [],
+        diagnostics: {
+          strategy: "semantic",
+          usedFallbackModel: true,
+        },
+      }),
+      "备用语义模型先完成路由，已取消较慢的首选模型；最终接口域：知识库读取",
+    );
+  });
+
+  it("adds elapsed routing time in developer mode", async () => {
+    const events: Array<{ durationMs?: number }> = [];
+    const timestamps = [100, 2_445];
+
+    await runRequestRoutingWithProgress(
+      "session-routing-duration",
+      async (event) => events.push(event),
+      async () => "routed",
+      {
+        includeDuration: true,
+        now: () => timestamps.shift() ?? 2_445,
+      },
+    );
+
+    assert.equal(events[0]?.durationMs, undefined);
+    assert.equal(events[1]?.durationMs, 2_345);
+  });
+
+  it("keeps elapsed time when developer-mode routing fails", async () => {
+    const events: Array<{ status?: string; durationMs?: number }> = [];
+    const timestamps = [100, 600];
+
+    await assert.rejects(
+      runRequestRoutingWithProgress(
+        "session-routing-duration-failure",
+        async (event) => events.push(event),
+        async () => {
+          throw new Error("router unavailable");
+        },
+        {
+          includeDuration: true,
+          now: () => timestamps.shift() ?? 600,
+        },
+      ),
+      /router unavailable/,
+    );
+
+    assert.equal(events[1]?.status, "failed");
+    assert.equal(events[1]?.durationMs, 500);
+  });
+
   it("emits one stable trace step around request routing", async () => {
     const timeline: string[] = [];
 

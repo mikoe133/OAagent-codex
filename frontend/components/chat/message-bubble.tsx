@@ -599,6 +599,14 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
           >
             {statusLabel(step.status)}
           </span>
+          {step.durationMs !== undefined ? (
+            <span
+              data-slot="trace-step-duration"
+              className="text-[0.6875rem] tabular-nums text-stone-400 theme-dark:text-zinc-500"
+            >
+              {formatResponseDuration(step.durationMs)}
+            </span>
+          ) : null}
         </div>
         <p className="mt-0.5 break-words text-xs leading-5 text-stone-500 theme-dark:text-zinc-400">{step.description}</p>
         {hasDetails && (

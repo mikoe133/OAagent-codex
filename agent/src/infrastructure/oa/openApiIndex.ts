@@ -7,6 +7,7 @@ const INDEX_FILE_NAME = "openapi-index.json";
 const OPENAPI_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 const MAX_RESPONSE_FIELDS = 32;
 const MAX_RESPONSE_DEPTH = 4;
+const MAX_OPENAPI_CANDIDATES = 40;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -147,7 +148,10 @@ export function selectOpenApiCandidates(
   task: string,
   requestedLimit = 5,
 ): OpenApiOperationIndexEntry[] {
-  const limit = Math.min(5, Math.max(3, Math.trunc(requestedLimit) || 5));
+  const limit = Math.min(
+    MAX_OPENAPI_CANDIDATES,
+    Math.max(3, Math.trunc(requestedLimit) || 5),
+  );
   const terms = buildSearchTerms(task);
   const adminIntent = /管理员|管理后台|后台管理|权限管理|全员管理/i.test(task);
   const writeIntent =

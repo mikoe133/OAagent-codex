@@ -180,6 +180,90 @@ test("mergeToolTimelineEvent updates request routing progress in one trace row",
   ])
 })
 
+test("mergeToolTimelineEvent preserves completed step durations", () => {
+  const steps = mergeToolTimelineEvent([], {
+    type: "progress",
+    itemId: "request-routing",
+    status: "completed",
+    message: "已准备好相关数据能力，正在生成回答…",
+    durationMs: 2_345,
+  })
+
+  assert.equal(steps[0]?.durationMs, 2_345)
+})
+
+test("mergeToolTimelineEvent labels individual developer latency stages", () => {
+  const stages = [
+    ["session_prepare", "会话准备"],
+    ["contracts", "接口契约"],
+    ["semantic_route", "语义路由"],
+    ["codex_startup", "模型启动"],
+    ["model_inference", "模型首字"],
+  ] as const
+
+  for (const [toolType, title] of stages) {
+    const steps = mergeToolTimelineEvent([], {
+      type: "progress",
+      itemId: `latency-${toolType}`,
+      toolType,
+      status: "completed",
+      message: "阶段执行完成",
+      durationMs: 820,
+    })
+
+    assert.equal(steps[0]?.title, title)
+    assert.equal(steps[0]?.durationMs, 820)
+  }
+})
+
+test("mergeToolTimelineEvent preserves route degradation diagnostics and actual duration", () => {
+  const description =
+    "路由模型失败，已启用安全降级；原因：路由模型超时（8 秒）；最终接口域：OA、知识库读取"
+  const steps = mergeToolTimelineEvent([], {
+    type: "progress",
+    itemId: "latency-semantic-route",
+    toolType: "semantic_route",
+    status: "completed",
+    message: description,
+    durationMs: 45_012,
+  })
+
+  assert.equal(steps[0]?.title, "语义路由")
+  assert.equal(steps[0]?.description, description)
+  assert.equal(steps[0]?.durationMs, 45_012)
+})
+
+test("mergeToolTimelineEvent ignores invalid durations and preserves valid prior timing", () => {
+  const completed = mergeToolTimelineEvent([], {
+    type: "tool.completed",
+    itemId: "timed-tool",
+    toolType: "command_execution",
+    name: "callOaApi",
+    status: "completed",
+    durationMs: 249.8,
+  })
+  const repeated = mergeToolTimelineEvent(completed, {
+    type: "tool.completed",
+    itemId: "timed-tool",
+    toolType: "command_execution",
+    name: "callOaApi",
+    status: "completed",
+    durationMs: -1,
+  })
+
+  assert.equal(completed[0]?.durationMs, 250)
+  assert.equal(repeated[0]?.durationMs, 250)
+  assert.equal(
+    mergeToolTimelineEvent([], {
+      type: "progress",
+      itemId: "invalid-duration",
+      message: "invalid",
+      durationMs: Number.POSITIVE_INFINITY,
+    })[0]?.durationMs,
+    undefined,
+  )
+})
+
 test("request routing trace waits five seconds and reveals only its latest state", () => {
   const visibleEvents: ChatStreamEvent[] = []
   let scheduledCallback: () => void = () => {

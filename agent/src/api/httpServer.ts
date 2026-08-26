@@ -14,12 +14,15 @@ import type { AppConfig } from "../config/config.js";
 import {
   MODEL_CATALOG,
   MODEL_CATALOG_VERSION,
+  ROUTER_MODEL_CATALOG,
   getDefaultModel,
   getModelDisplayName,
   resolveAutomationModelSelection,
   resolveRequestedModel,
   resolveRequestedProvider,
+  resolveRequestedRouterModel,
   type ModelProviderId,
+  type RouterModelId,
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { callKnowledgeBaseApiTool } from "../infrastructure/knowledgebase/knowledgeBaseApiTool.js";
@@ -314,6 +317,8 @@ async function routeRequest(
       message,
       provider: selection.provider,
       model: selection.model,
+      developerMode: selection.developerMode,
+      routerModel: selection.routerModel,
       oaApiToken,
       oaUserId: tokenValidation.oaUserId,
       latency,
@@ -360,6 +365,8 @@ async function routeRequest(
       message,
       provider: selection.provider,
       model: selection.model,
+      developerMode: selection.developerMode,
+      routerModel: selection.routerModel,
       oaApiToken,
       oaUserId: tokenValidation.oaUserId,
       latency,
@@ -660,7 +667,12 @@ function resolveMessageSelection(
   config: AppConfig,
   body: JsonObject,
   response: ServerResponse,
-): { provider: ModelProviderId; model: string } | null {
+): {
+  provider: ModelProviderId;
+  model: string;
+  developerMode?: boolean;
+  routerModel?: RouterModelId;
+} | null {
   const rawProvider = body.provider;
   if (rawProvider !== undefined && typeof rawProvider !== "string") {
     writeJson(response, 400, { error: "provider 必须是字符串" });
@@ -671,6 +683,28 @@ function resolveMessageSelection(
     writeJson(response, 400, { error: "model 必须是字符串" });
     return null;
   }
+  const rawDeveloperMode = body.developerMode;
+  if (
+    rawDeveloperMode !== undefined &&
+    typeof rawDeveloperMode !== "boolean"
+  ) {
+    writeJson(response, 400, { error: "developerMode 必须是布尔值" });
+    return null;
+  }
+  const rawRouterModel = body.routerModel;
+  if (
+    rawRouterModel !== undefined &&
+    typeof rawRouterModel !== "string"
+  ) {
+    writeJson(response, 400, { error: "routerModel 必须是字符串" });
+    return null;
+  }
+  const requestedRouterModel =
+    typeof rawRouterModel === "string"
+      ? rawRouterModel
+      : rawDeveloperMode === true
+        ? ROUTER_MODEL_CATALOG[0]
+        : undefined;
 
   try {
     const provider = resolveRequestedProvider(rawProvider, config.modelProvider);
@@ -679,6 +713,10 @@ function resolveMessageSelection(
     return {
       provider,
       model: resolveRequestedModel(provider, rawModel, fallbackModel),
+      ...(rawDeveloperMode === true ? { developerMode: true } : {}),
+      ...(requestedRouterModel === undefined
+        ? {}
+        : { routerModel: resolveRequestedRouterModel(requestedRouterModel) }),
     };
   } catch (error) {
     writeJson(response, 400, {

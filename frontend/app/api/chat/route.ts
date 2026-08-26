@@ -4,9 +4,11 @@ import { resolve } from "node:path"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
 import {
+  DEFAULT_ROUTER_MODEL,
   DEFAULT_MODEL_PROVIDER,
   isModelForProvider,
   isModelProvider,
+  isRouterModel,
   type ModelProvider,
 } from "@/lib/model-catalog"
 
@@ -15,6 +17,8 @@ type ChatRequestBody = {
   sessionId?: unknown
   provider?: unknown
   model?: unknown
+  developerMode?: unknown
+  routerModel?: unknown
 }
 
 type ChatMessage = {
@@ -67,10 +71,26 @@ export async function POST(req: Request) {
     if (body.model !== undefined && !model) {
       return jsonResponse({ error: "Invalid model" }, 400)
     }
+    if (body.developerMode !== undefined && typeof body.developerMode !== "boolean") {
+      return jsonResponse({ error: "Invalid developer mode" }, 400)
+    }
+    const developerMode = body.developerMode === true
+    const routerModel = body.routerModel === undefined
+      ? developerMode ? DEFAULT_ROUTER_MODEL : undefined
+      : body.routerModel
+    if (routerModel !== undefined && !isRouterModel(routerModel)) {
+      return jsonResponse({ error: "Invalid router model" }, 400)
+    }
     const agentResponse = await fetch(buildAgentStreamUrl(sessionId), {
       method: "POST",
       headers: buildAgentHeaders(sessionToken),
-      body: JSON.stringify({ message, provider, ...(model ? { model } : {}) }),
+      body: JSON.stringify({
+        message,
+        provider,
+        ...(model ? { model } : {}),
+        ...(developerMode ? { developerMode: true } : {}),
+        ...(routerModel ? { routerModel } : {}),
+      }),
       signal: req.signal,
       cache: "no-store",
     })

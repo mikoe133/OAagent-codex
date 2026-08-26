@@ -6,7 +6,10 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { AgentService } from "../src/application/agentService.js";
+import type {
+  AgentService,
+  SendMessageInput,
+} from "../src/application/agentService.js";
 import { createAgentHttpServer } from "../src/api/httpServer.js";
 import type { AppConfig } from "../src/config/config.js";
 import {
@@ -442,6 +445,133 @@ test("records authenticated streaming chat latency without logging request secre
     assert.equal(records[0]?.durationsMs.auth, 7);
     assert.equal(records[0]?.milestonesMs.stream_connected, 7);
     assert.doesNotMatch(JSON.stringify(records[0]), /secret-page-token|hello/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("forwards only approved router models regardless of developer mode", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-router-model-"));
+  const originalFetch = globalThis.fetch;
+  const inputs: SendMessageInput[] = [];
+  const config = {
+    oaApiBaseUrl: "https://oa.example.test",
+    oaAuthAlias: "default",
+    oaUserTokenHeader: "Authorization",
+    oaUserTokenPrefix: "Bearer",
+    modelProvider: "nexttoken",
+    model: "gpt-5.6-terra",
+  } as AppConfig;
+  const agentService = {
+    async streamMessage(
+      input: SendMessageInput,
+      emit: (event: unknown) => Promise<void>,
+    ) {
+      inputs.push(input);
+      await emit({
+        type: "run.completed",
+        sessionId: input.sessionId,
+        result: {
+          sessionId: input.sessionId,
+          threadId: "thread-1",
+          provider: input.provider,
+          model: input.model,
+          finalResponse: "ok",
+          executedCommands: [],
+          knowledgeSources: [],
+          summary: null,
+        },
+        usage: null,
+      });
+    },
+  } as unknown as AgentService;
+  const server = createAgentHttpServer(
+    config,
+    agentService,
+    new SessionStore(path.join(directory, "sessions.json")),
+    undefined,
+    new ChatLatencyMetricsRecorder({ logger: () => undefined }),
+  );
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  globalThis.fetch = async () =>
+    Response.json({
+      code: 200,
+      success: true,
+      data: { id: 19, email: "developer@example.test" },
+    });
+
+  try {
+    const accepted = await requestStream(
+      address.port,
+      "/v1/sessions/developer-session/messages/stream",
+      "valid-token",
+      {
+        message: "hello",
+        provider: "nexttoken",
+        model: "gpt-5.6-terra",
+        developerMode: true,
+        routerModel: "qwen/qwen3.5-flash-02-23",
+      },
+    );
+
+    assert.equal(accepted.status, 200);
+    assert.equal(inputs[0]?.provider, "nexttoken");
+    assert.equal(inputs[0]?.model, "gpt-5.6-terra");
+    assert.equal(inputs[0]?.developerMode, true);
+    assert.equal(inputs[0]?.routerModel, "qwen/qwen3.5-flash-02-23");
+
+    const acceptedWithoutDeveloperMode = await requestStream(
+      address.port,
+      "/v1/sessions/developer-session/messages/stream",
+      "valid-token",
+      {
+        message: "hello",
+        provider: "nexttoken",
+        model: "gpt-5.6-terra",
+        developerMode: false,
+        routerModel: "deepseek/deepseek-v4-flash",
+      },
+    );
+
+    assert.equal(acceptedWithoutDeveloperMode.status, 200);
+    assert.equal(inputs[1]?.developerMode, undefined);
+    assert.equal(inputs[1]?.routerModel, "deepseek/deepseek-v4-flash");
+
+    const rejected = await requestStream(
+      address.port,
+      "/v1/sessions/developer-session/messages/stream",
+      "valid-token",
+      {
+        message: "hello",
+        developerMode: true,
+        routerModel: "z-ai/glm-5.3",
+      },
+    );
+
+    assert.equal(rejected.status, 400);
+    assert.match(rejected.body, /路由模型/);
+
+    const rejectedWithoutDeveloperMode = await requestStream(
+      address.port,
+      "/v1/sessions/developer-session/messages/stream",
+      "valid-token",
+      {
+        message: "hello",
+        developerMode: false,
+        routerModel: "z-ai/glm-5.3",
+      },
+    );
+
+    assert.equal(rejectedWithoutDeveloperMode.status, 400);
+    assert.match(rejectedWithoutDeveloperMode.body, /路由模型/);
+    assert.equal(inputs.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
     await new Promise<void>((resolve, reject) =>

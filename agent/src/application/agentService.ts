@@ -4,7 +4,9 @@ import {
   getDefaultModel,
   resolveRequestedModel,
   resolveRequestedProvider,
+  ROUTER_MODEL_CATALOG,
   type ModelProviderId,
+  type RouterModelId,
 } from "../config/modelCatalog.js";
 import {
   createCodexClient,
@@ -23,7 +25,9 @@ import type {
 } from "../infrastructure/persistence/sessionStore.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
 import {
-  routeOpenApiRequest,
+  routeOpenApiRequestWithFallback,
+  createOpenApiSemanticRouter,
+  type OpenApiRouteResult,
 } from "../infrastructure/oa/openApiRouter.js";
 import { mergeOpenApiIndexes } from "../infrastructure/oa/openApiIndex.js";
 import { resolveKnowledgeBaseContracts } from "../infrastructure/knowledgebase/knowledgeBaseContract.js";
@@ -48,6 +52,8 @@ export type SendMessageInput = {
   message: string;
   provider?: string | null;
   model?: string | null;
+  developerMode?: boolean;
+  routerModel?: RouterModelId | null;
   oaApiToken?: string | null;
   oaUserId?: string | null;
   latency?: ChatLatencyTrace;
@@ -71,6 +77,8 @@ export type AgentProgressEvent = {
   status?: "in_progress" | "completed" | "failed";
   message: string;
   detail?: unknown;
+  toolType?: string;
+  durationMs?: number;
 };
 
 type RequestRoutingProgressEvent = AgentProgressEvent & {
@@ -81,6 +89,13 @@ type RequestRoutingProgressEvent = AgentProgressEvent & {
 type RequestRoutingProgressEmit = (
   event: RequestRoutingProgressEvent,
 ) => void | Promise<void>;
+
+type LatencyStageProgress = (
+  stage: ChatLatencyStage,
+  status: "in_progress" | "completed" | "failed",
+  durationMs?: number,
+  messageOverride?: string,
+) => Promise<void>;
 
 export type AgentStreamEvent =
   | {
@@ -136,6 +151,7 @@ export type AgentStreamEvent =
       outputDelta?: string;
       result?: unknown;
       error?: string;
+      durationMs?: number;
     }
   | {
       type: "run.completed";
@@ -155,7 +171,13 @@ export async function runRequestRoutingWithProgress<T>(
   sessionId: string,
   emit: RequestRoutingProgressEmit,
   route: () => Promise<T>,
+  options: {
+    includeDuration?: boolean;
+    now?: () => number;
+  } = {},
 ): Promise<T> {
+  const now = options.now ?? (() => performance.now());
+  const startedAt = options.includeDuration ? now() : null;
   await emit({
     type: "progress",
     sessionId,
@@ -174,6 +196,9 @@ export async function runRequestRoutingWithProgress<T>(
       itemId: "request-routing",
       status: "failed",
       message: "数据能力准备失败。",
+      ...(startedAt === null
+        ? {}
+        : { durationMs: Math.max(0, Math.round(now() - startedAt)) }),
     });
     throw error;
   }
@@ -184,6 +209,9 @@ export async function runRequestRoutingWithProgress<T>(
     itemId: "request-routing",
     status: "completed",
     message: "已准备好相关数据能力，正在生成回答…",
+    ...(startedAt === null
+      ? {}
+      : { durationMs: Math.max(0, Math.round(now() - startedAt)) }),
   });
   return result;
 }
@@ -243,6 +271,7 @@ export class AgentService {
       session.summary,
       undefined,
       input.latency,
+      input.routerModel,
     );
     finishRouting?.();
     input.latency?.mark("routing_completed");
@@ -327,6 +356,10 @@ export class AgentService {
     throwIfAborted(signal);
     await emit({ type: "run.started", sessionId: input.sessionId });
 
+    const stageProgress = input.developerMode
+      ? createLatencyStageProgress(input.sessionId, emit, input.routerModel)
+      : undefined;
+
     input.latency?.mark("routing_started");
     const finishRouting = input.latency?.startStage("request_routing");
     const { session, resolvedRun } = await runRequestRoutingWithProgress(
@@ -337,6 +370,7 @@ export class AgentService {
           input.latency,
           "session_prepare",
           () => this.prepareSession(input),
+          stageProgress,
         );
         const resolvedRun = await resolveRunConfig(
           this.config,
@@ -346,9 +380,12 @@ export class AgentService {
           session.summary,
           signal,
           input.latency,
+          input.routerModel,
+          stageProgress,
         );
         return { session, resolvedRun };
       },
+      { includeDuration: input.developerMode === true },
     );
     finishRouting?.();
     input.latency?.mark("routing_completed");
@@ -375,7 +412,7 @@ export class AgentService {
       input.message,
       runtimeContext,
     );
-    const state = createStreamState();
+    const state = createStreamState(input.developerMode === true);
     const secrets = this.getSecrets(runtimeContext.sessionOaApiToken);
     const recoverStream = async (): Promise<boolean> => {
       const recovery = resolveStreamRecovery(
@@ -407,6 +444,10 @@ export class AgentService {
     let knowledgeSources: KnowledgeBaseSource[] = [];
     const runStreamedTurn = async (turnPrompt: string): Promise<void> => {
       input.latency?.markOnce("codex_invoked");
+      if (stageProgress && state.modelStartupStartedAt === undefined) {
+        state.modelStartupStartedAt = performance.now();
+        await stageProgress("codex_startup", "in_progress");
+      }
       const { events } = await thread.runStreamed(turnPrompt, { signal });
       for await (const event of events) {
         throwIfAborted(signal);
@@ -417,6 +458,7 @@ export class AgentService {
           secrets,
           emit,
           input.latency,
+          stageProgress,
         );
       }
       input.latency?.mark("codex_stream_closed");
@@ -505,6 +547,7 @@ export class AgentService {
     secrets: string[],
     emit: AgentStreamEmit,
     latency?: ChatLatencyTrace,
+    stageProgress?: LatencyStageProgress,
   ): Promise<void> {
     if (event.type === "thread.started") {
       await measureLatencyStage(latency, "persistence", () =>
@@ -520,6 +563,16 @@ export class AgentService {
 
     if (event.type === "turn.started") {
       latency?.markOnce("turn_started");
+      if (stageProgress && state.modelStartupStartedAt !== undefined) {
+        await stageProgress(
+          "codex_startup",
+          "completed",
+          elapsedMilliseconds(state.modelStartupStartedAt),
+        );
+        state.modelStartupStartedAt = undefined;
+        state.modelInferenceStartedAt = performance.now();
+        await stageProgress("model_inference", "in_progress");
+      }
       await emit({ type: "turn.started", sessionId });
       return;
     }
@@ -548,6 +601,7 @@ export class AgentService {
       secrets,
       emit,
       latency,
+      stageProgress,
     );
   }
 
@@ -559,14 +613,24 @@ export class AgentService {
     secrets: string[],
     emit: AgentStreamEmit,
     latency?: ChatLatencyTrace,
+    stageProgress?: LatencyStageProgress,
   ): Promise<void> {
+    let durationMs: number | undefined;
     if (isToolThreadItem(item)) {
       if (eventType === "item.completed") {
         state.activeToolIds.delete(item.id);
         latency?.toolCompleted(item.id);
+        const startedAt = state.toolStartedAt.get(item.id);
+        if (startedAt !== undefined) {
+          durationMs = Math.max(0, Math.round(performance.now() - startedAt));
+          state.toolStartedAt.delete(item.id);
+        }
       } else {
         state.activeToolIds.add(item.id);
         latency?.toolStarted(item.id, item.type);
+        if (state.captureStepDurations && !state.toolStartedAt.has(item.id)) {
+          state.toolStartedAt.set(item.id, performance.now());
+        }
       }
     }
 
@@ -584,6 +648,14 @@ export class AgentService {
       }
       if (delta) {
         latency?.markOnce("first_message");
+        if (stageProgress && state.modelInferenceStartedAt !== undefined) {
+          await stageProgress(
+            "model_inference",
+            "completed",
+            elapsedMilliseconds(state.modelInferenceStartedAt),
+          );
+          state.modelInferenceStartedAt = undefined;
+        }
         await emit({
           type: "message.delta",
           sessionId,
@@ -626,6 +698,7 @@ export class AgentService {
           status: item.status,
           exitCode: item.exit_code,
           outputDelta: outputDelta || undefined,
+          ...(durationMs === undefined ? {} : { durationMs }),
         });
         return;
       }
@@ -667,6 +740,7 @@ export class AgentService {
           error: item.error
             ? redactSecrets(item.error.message, secrets)
             : undefined,
+          ...(durationMs === undefined ? {} : { durationMs }),
         });
         return;
       }
@@ -691,6 +765,7 @@ export class AgentService {
           toolType: "web_search",
           name: "web_search",
           result: { query },
+          ...(durationMs === undefined ? {} : { durationMs }),
         });
         return;
       }
@@ -799,9 +874,13 @@ type AgentStreamState = {
   turnFailure: string | null;
   messageTexts: Map<string, string>;
   commandOutputs: Map<string, string>;
+  captureStepDurations: boolean;
+  toolStartedAt: Map<string, number>;
+  modelStartupStartedAt?: number;
+  modelInferenceStartedAt?: number;
 };
 
-function createStreamState(): AgentStreamState {
+function createStreamState(captureStepDurations = false): AgentStreamState {
   return {
     items: [],
     activeToolIds: new Set(),
@@ -810,6 +889,8 @@ function createStreamState(): AgentStreamState {
     turnFailure: null,
     messageTexts: new Map(),
     commandOutputs: new Map(),
+    captureStepDurations,
+    toolStartedAt: new Map(),
   };
 }
 
@@ -861,6 +942,8 @@ async function resolveRunConfig(
   conversationMemory: string | null,
   signal?: AbortSignal,
   latency?: ChatLatencyTrace,
+  routerModel?: RouterModelId | null,
+  stageProgress?: LatencyStageProgress,
 ) {
   const modelProvider = resolveRequestedProvider(requestedProvider, config.modelProvider);
   const fallbackModel =
@@ -873,20 +956,36 @@ async function resolveRunConfig(
       resolveOpenApiContract(config),
       resolveKnowledgeBaseContracts(config),
     ]),
+    stageProgress,
   );
   const runConfig = { ...config, modelProvider, model, openapiPath: openapi.path };
+  const routingIndex = mergeOpenApiIndexes([
+    openapi.index,
+    knowledgeBase.read.index,
+    ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
+  ]);
+  const primaryRouterConfig = resolveRouterConfig(runConfig, routerModel);
+  const fallbackRouterModel = ROUTER_MODEL_CATALOG[0];
+  const fallbackRouterConfig = resolveRouterConfig(
+    runConfig,
+    fallbackRouterModel,
+  );
+  const fallbackRouter =
+    primaryRouterConfig.model === fallbackRouterConfig.model
+      ? undefined
+      : createOpenApiSemanticRouter(fallbackRouterConfig);
   const route = await measureLatencyStage(
     latency,
     "semantic_route",
-    () => routeOpenApiRequest(
-      runConfig,
-      mergeOpenApiIndexes([
-        openapi.index,
-        knowledgeBase.read.index,
-        ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
-      ]),
+    () => routeOpenApiRequestWithFallback(
+      primaryRouterConfig,
+      routingIndex,
       { task, conversationMemory, signal },
+      createOpenApiSemanticRouter(primaryRouterConfig),
+      fallbackRouter,
     ),
+    stageProgress,
+    formatSemanticRouteTraceMessage,
   );
   return {
     config: runConfig,
@@ -898,17 +997,109 @@ async function resolveRunConfig(
   };
 }
 
+export function resolveRouterConfig(
+  config: AppConfig,
+  routerModel?: RouterModelId | null,
+): AppConfig {
+  if (!routerModel) {
+    return config;
+  }
+  return { ...config, modelProvider: "openrouter", model: routerModel };
+}
+
 async function measureLatencyStage<T>(
   latency: ChatLatencyTrace | undefined,
   stage: ChatLatencyStage,
   operation: () => Promise<T>,
+  stageProgress?: LatencyStageProgress,
+  formatCompletionMessage?: (result: T) => string,
 ): Promise<T> {
   const finish = latency?.startStage(stage);
+  const startedAt = stageProgress ? performance.now() : undefined;
+  if (stageProgress) {
+    await stageProgress(stage, "in_progress");
+  }
   try {
-    return await operation();
+    const result = await operation();
+    if (stageProgress && startedAt !== undefined) {
+      await stageProgress(
+        stage,
+        "completed",
+        elapsedMilliseconds(startedAt),
+        formatCompletionMessage?.(result),
+      );
+    }
+    return result;
+  } catch (error) {
+    if (stageProgress && startedAt !== undefined) {
+      await stageProgress(stage, "failed", elapsedMilliseconds(startedAt));
+    }
+    throw error;
   } finally {
     finish?.();
   }
+}
+
+function createLatencyStageProgress(
+  sessionId: string,
+  emit: AgentStreamEmit,
+  routerModel?: RouterModelId | null,
+): LatencyStageProgress {
+  const stageNames: Partial<Record<ChatLatencyStage, string>> = {
+    session_prepare: "准备会话上下文",
+    contracts: "准备 OA 与知识库接口契约",
+    semantic_route: routerModel
+      ? `使用 ${routerModel} 分析请求`
+      : "分析请求并选择业务接口",
+    codex_startup: "启动正式回答模型",
+    model_inference: "等待模型生成首段回复",
+  };
+
+  return async (stage, status, durationMs, messageOverride) => {
+    const message = messageOverride ?? stageNames[stage];
+    if (!message) {
+      return;
+    }
+    await emit({
+      type: "progress",
+      sessionId,
+      itemId: `latency-${stage.replaceAll("_", "-")}`,
+      toolType: stage,
+      status,
+      message,
+      ...(durationMs === undefined ? {} : { durationMs }),
+    });
+  };
+}
+
+export function formatSemanticRouteTraceMessage(
+  route: OpenApiRouteResult,
+): string {
+  const catalogs = route.catalogs.map(formatRouteCatalog).join("、");
+  if (route.diagnostics.strategy === "fallback") {
+    return `路由模型失败，已启用安全降级；原因：${route.diagnostics.failureReason}；最终接口域：${catalogs}`;
+  }
+  if (route.diagnostics.usedFallbackModel) {
+    if (!route.diagnostics.primaryFailureReason) {
+      return `备用语义模型先完成路由，已取消较慢的首选模型；最终接口域：${catalogs}`;
+    }
+    return `首选路由模型失败（${route.diagnostics.primaryFailureReason ?? "返回结果无效"}），已切换备用语义模型；最终接口域：${catalogs}`;
+  }
+  return `路由模型选择完成；最终接口域：${catalogs}`;
+}
+
+function formatRouteCatalog(catalog: OpenApiRouteResult["catalogs"][number]): string {
+  if (catalog === "oa") {
+    return "OA";
+  }
+  if (catalog === "knowledge_base_read") {
+    return "知识库读取";
+  }
+  return "知识库写入";
+}
+
+function elapsedMilliseconds(startedAt: number): number {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
 function buildNextSummary(

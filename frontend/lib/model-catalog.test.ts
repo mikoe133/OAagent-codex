@@ -3,12 +3,15 @@ import { existsSync } from "node:fs"
 import test from "node:test"
 
 import {
+  DEFAULT_ROUTER_MODEL,
   DEFAULT_MODEL_PROVIDER,
   MODEL_PROVIDERS,
+  ROUTER_MODELS,
   getDefaultModel,
   getModelsForProvider,
   isModelForProvider,
   isModelProvider,
+  isRouterModel,
 } from "./model-catalog"
 
 test("defaults to OpenRouter while exposing both provider choices", () => {
@@ -21,6 +24,20 @@ test("defaults to OpenRouter while exposing both provider choices", () => {
   assert.equal(isModelProvider("nexttoken"), true)
   assert.equal(isModelProvider("openrouter"), true)
   assert.equal(isModelProvider("unknown"), false)
+})
+
+test("exposes the dedicated lightweight router model choices", () => {
+  assert.equal(DEFAULT_ROUTER_MODEL, "z-ai/glm-4.7-flash")
+  assert.deepEqual(
+    ROUTER_MODELS.map((model) => model.id),
+    [
+      "z-ai/glm-4.7-flash",
+      "qwen/qwen3.5-flash-02-23",
+      "deepseek/deepseek-v4-flash",
+    ],
+  )
+  assert.equal(isRouterModel("qwen/qwen3.5-flash-02-23"), true)
+  assert.equal(isRouterModel("z-ai/glm-5.3"), false)
 })
 
 test("keeps provider model lists isolated", () => {
