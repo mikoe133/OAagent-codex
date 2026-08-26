@@ -15,6 +15,15 @@ type CustomModelDefinition = {
 };
 
 const CUSTOM_MODEL_DEFINITIONS = {
+  "z-ai/glm-4.7-flash": {
+    baseSlug: "gpt-5.5",
+    displayName: "GLM 4.7 Flash",
+    description: "Z.ai GLM 4.7 Flash semantic router served through OpenRouter.",
+    contextWindow: 202_752,
+    autoCompactTokenLimit: 192_614,
+    supportsParallelToolCalls: false,
+    supportVerbosity: false,
+  },
   "z-ai/glm-5.3": {
     baseSlug: "gpt-5.5",
     displayName: "GLM 5.3",
@@ -37,6 +46,24 @@ const CUSTOM_MODEL_DEFINITIONS = {
     baseSlug: "gpt-5.5",
     displayName: "Kimi K3",
     description: "MoonshotAI Kimi K3 served through OpenRouter.",
+    contextWindow: 1_048_576,
+    autoCompactTokenLimit: 996_147,
+    supportsParallelToolCalls: false,
+    supportVerbosity: false,
+  },
+  "qwen/qwen3.5-flash-02-23": {
+    baseSlug: "gpt-5.5",
+    displayName: "Qwen 3.5 Flash",
+    description: "Alibaba Qwen 3.5 Flash semantic router served through OpenRouter.",
+    contextWindow: 1_000_000,
+    autoCompactTokenLimit: 950_000,
+    supportsParallelToolCalls: false,
+    supportVerbosity: false,
+  },
+  "deepseek/deepseek-v4-flash": {
+    baseSlug: "gpt-5.5",
+    displayName: "DeepSeek V4 Flash",
+    description: "DeepSeek V4 Flash semantic router served through OpenRouter.",
     contextWindow: 1_048_576,
     autoCompactTokenLimit: 996_147,
     supportsParallelToolCalls: false,

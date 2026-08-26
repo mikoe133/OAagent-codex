@@ -62,6 +62,12 @@ test("Composer uses the composition-aware keyboard guard before sending", () => 
   assert.match(composerSource, /shouldSubmitComposerOnKeyDown\(/)
 })
 
+test("the composer masks replies after they scroll beneath the input", () => {
+  assert.match(composerSource, /data-slot="chat-composer-mask"/)
+  assert.match(composerSource, /absolute -bottom-4 left-0 right-4 top-0 bg-stone-50 theme-dark:bg-zinc-950/)
+  assert.match(composerSource, /relative z-10 max-w-2xl mx-auto pointer-events-auto/)
+})
+
 test("the current nexttoken model opens model selection while voice and upload controls stay hidden", async () => {
   const { Composer } = await import("./composer")
   const html = renderToStaticMarkup(

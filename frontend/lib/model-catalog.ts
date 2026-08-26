@@ -12,6 +12,16 @@ export type ModelOption = {
   disabled?: boolean
 }
 
+export const ROUTER_MODELS = [
+  { id: "z-ai/glm-4.7-flash", name: "GLM 4.7 Flash" },
+  { id: "qwen/qwen3.5-flash-02-23", name: "Qwen 3.5 Flash" },
+  { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+] as const
+
+export type RouterModel = (typeof ROUTER_MODELS)[number]["id"]
+
+export const DEFAULT_ROUTER_MODEL: RouterModel = "z-ai/glm-4.7-flash"
+
 export const MODELS_BY_PROVIDER = {
   nexttoken: [
     { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", icon: "/images/gpt.png" },
@@ -64,4 +74,8 @@ export function isModelForProvider(provider: ModelProvider, value: unknown): val
 
 export function isAIModel(value: unknown): value is AIModel {
   return isModelForProvider("nexttoken", value) || isModelForProvider("openrouter", value)
+}
+
+export function isRouterModel(value: unknown): value is RouterModel {
+  return typeof value === "string" && ROUTER_MODELS.some((model) => model.id === value)
 }

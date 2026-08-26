@@ -106,6 +106,34 @@ html[data-font-size="extra-large"] {
     rgba(0, 0, 0, 0.4) 0 18px 42px -18px !important;
 }
 
+.chat-message-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+  border: 0;
+}
+
+.chat-message-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.chat-message-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.chat-message-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 22%, transparent);
+  border: 0;
+  border-radius: 9999px;
+  box-shadow: none;
+}
+
+.chat-message-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--foreground) 34%, transparent);
+}
+
 @theme inline {
   --font-sans: sans-serif;
   --font-mono: sans-serif;

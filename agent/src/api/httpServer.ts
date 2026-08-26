@@ -14,12 +14,15 @@ import type { AppConfig } from "../config/config.js";
 import {
   MODEL_CATALOG,
   MODEL_CATALOG_VERSION,
+  ROUTER_MODEL_CATALOG,
   getDefaultModel,
   getModelDisplayName,
   resolveAutomationModelSelection,
   resolveRequestedModel,
   resolveRequestedProvider,
+  resolveRequestedRouterModel,
   type ModelProviderId,
+  type RouterModelId,
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { callKnowledgeBaseApiTool } from "../infrastructure/knowledgebase/knowledgeBaseApiTool.js";
@@ -27,6 +30,10 @@ import { recordKnowledgeBaseSourceResult } from "../infrastructure/knowledgebase
 import { validateOaToken } from "../infrastructure/oa/oaTokenVerifier.js";
 import type { SessionStore } from "../infrastructure/persistence/sessionStore.js";
 import type { AutomationHttpApplication } from "../automation/http/automationHttpApplication.js";
+import {
+  chatLatencyMetrics,
+  type ChatLatencyMetricsRecorder,
+} from "../infrastructure/observability/chatLatency.js";
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -69,6 +76,7 @@ export function createAgentHttpServer(
   agentService: AgentService,
   sessionStore: SessionStore,
   automationHttp?: AutomationHttpApplication,
+  latencyMetrics: ChatLatencyMetricsRecorder = chatLatencyMetrics,
 ) {
   return createServer(async (request, response) => {
     try {
@@ -79,6 +87,7 @@ export function createAgentHttpServer(
         request,
         response,
         automationHttp,
+        latencyMetrics,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -94,9 +103,28 @@ async function routeRequest(
   request: IncomingMessage,
   response: ServerResponse,
   automationHttp?: AutomationHttpApplication,
+  latencyMetrics: ChatLatencyMetricsRecorder = chatLatencyMetrics,
 ): Promise<void> {
   const method = request.method || "GET";
   const url = new URL(request.url || "/", "http://localhost");
+  const latency = isChatMessagePath(method, url.pathname)
+    ? latencyMetrics.start({ requestId: randomUUID() })
+    : undefined;
+  if (latency) {
+    response.once("finish", () => {
+      latency.finish({
+        status: response.statusCode >= 400 ? "failed" : "completed",
+        ...(response.statusCode >= 400
+          ? { errorCode: `http_${response.statusCode}` }
+          : {}),
+      });
+    });
+    response.once("close", () => {
+      if (!response.writableFinished) {
+        latency.finish({ status: "aborted", errorCode: "client_disconnected" });
+      }
+    });
+  }
 
   if (method === "GET" && url.pathname === "/health") {
     writeJson(response, 200, { status: "ok" });
@@ -188,12 +216,15 @@ async function routeRequest(
     return;
   }
 
+  const finishAuth = latency?.startStage("auth");
   const oaApiToken = readOaApiTokenFromRequest(config, request);
   if (!oaApiToken) {
+    finishAuth?.();
     writeJson(response, 401, { error: "unauthorized" });
     return;
   }
   const tokenValidation = await validateOaToken(config, oaApiToken);
+  finishAuth?.();
   if (tokenValidation.status === "invalid") {
     writeJson(response, 401, { error: "unauthorized" });
     return;
@@ -286,8 +317,16 @@ async function routeRequest(
       message,
       provider: selection.provider,
       model: selection.model,
+      developerMode: selection.developerMode,
+      routerModel: selection.routerModel,
       oaApiToken,
       oaUserId: tokenValidation.oaUserId,
+      latency,
+    });
+    latency?.finish({
+      status: "completed",
+      provider: result.provider,
+      model: result.model,
     });
     writeJson(response, 200, result);
     return;
@@ -326,8 +365,11 @@ async function routeRequest(
       message,
       provider: selection.provider,
       model: selection.model,
+      developerMode: selection.developerMode,
+      routerModel: selection.routerModel,
       oaApiToken,
       oaUserId: tokenValidation.oaUserId,
+      latency,
     });
     return;
   }
@@ -625,7 +667,12 @@ function resolveMessageSelection(
   config: AppConfig,
   body: JsonObject,
   response: ServerResponse,
-): { provider: ModelProviderId; model: string } | null {
+): {
+  provider: ModelProviderId;
+  model: string;
+  developerMode?: boolean;
+  routerModel?: RouterModelId;
+} | null {
   const rawProvider = body.provider;
   if (rawProvider !== undefined && typeof rawProvider !== "string") {
     writeJson(response, 400, { error: "provider 必须是字符串" });
@@ -636,6 +683,28 @@ function resolveMessageSelection(
     writeJson(response, 400, { error: "model 必须是字符串" });
     return null;
   }
+  const rawDeveloperMode = body.developerMode;
+  if (
+    rawDeveloperMode !== undefined &&
+    typeof rawDeveloperMode !== "boolean"
+  ) {
+    writeJson(response, 400, { error: "developerMode 必须是布尔值" });
+    return null;
+  }
+  const rawRouterModel = body.routerModel;
+  if (
+    rawRouterModel !== undefined &&
+    typeof rawRouterModel !== "string"
+  ) {
+    writeJson(response, 400, { error: "routerModel 必须是字符串" });
+    return null;
+  }
+  const requestedRouterModel =
+    typeof rawRouterModel === "string"
+      ? rawRouterModel
+      : rawDeveloperMode === true
+        ? ROUTER_MODEL_CATALOG[0]
+        : undefined;
 
   try {
     const provider = resolveRequestedProvider(rawProvider, config.modelProvider);
@@ -644,6 +713,10 @@ function resolveMessageSelection(
     return {
       provider,
       model: resolveRequestedModel(provider, rawModel, fallbackModel),
+      ...(rawDeveloperMode === true ? { developerMode: true } : {}),
+      ...(requestedRouterModel === undefined
+        ? {}
+        : { routerModel: resolveRequestedRouterModel(requestedRouterModel) }),
     };
   } catch (error) {
     writeJson(response, 400, {
@@ -693,6 +766,7 @@ async function streamAgentMessage(
   });
   response.flushHeaders();
   response.write(": connected\n\n");
+  input.latency?.mark("stream_connected");
 
   try {
     await agentService.streamMessage(
@@ -700,7 +774,20 @@ async function streamAgentMessage(
       async (event) => writeSseEvent(response, event),
       abortController.signal,
     );
+    input.latency?.finish({
+      status: "completed",
+      provider: input.provider ?? undefined,
+      model: input.model ?? undefined,
+    });
   } catch (error) {
+    input.latency?.finish({
+      status: abortController.signal.aborted ? "aborted" : "failed",
+      provider: input.provider ?? undefined,
+      model: input.model ?? undefined,
+      errorCode: abortController.signal.aborted
+        ? "client_disconnected"
+        : "agent_failed",
+    });
     if (!closed && !response.writableEnded) {
       const message = error instanceof Error ? error.message : String(error);
       writeSseEvent(response, {
@@ -715,6 +802,11 @@ async function streamAgentMessage(
       response.end();
     }
   }
+}
+
+function isChatMessagePath(method: string, pathname: string): boolean {
+  return method === "POST" &&
+    /^\/v1\/sessions\/[^/]+\/messages(?:\/stream)?$/.test(pathname);
 }
 
 function writeSseEvent(

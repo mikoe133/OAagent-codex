@@ -158,7 +158,7 @@ export function MessageList({
       }}
       onTouchMove={() => setAutoScroll(false)}
       className={cn(
-        "absolute inset-0 border-none",
+        "chat-message-scrollbar absolute inset-0 border-none",
         resolveMessageListOverflow({
           messageCount: messages.length,
           isStreaming,

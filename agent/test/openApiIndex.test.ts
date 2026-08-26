@@ -86,6 +86,18 @@ describe("OpenAPI operation index", () => {
     assert.notEqual(candidates[0]?.permissionLevel, "admin");
   });
 
+  it("supports a bounded Top 20 shortlist and Top 40 routing fallback", async () => {
+    const contract = JSON.parse(
+      await readFile(new URL("../openapi/openapi.json", import.meta.url), "utf8"),
+    ) as unknown;
+    const index = buildOpenApiIndex(contract);
+
+    assert.equal(selectOpenApiCandidates(index, "查看项目最近进展", 20).length, 20);
+    assert.equal(selectOpenApiCandidates(index, "查看项目最近进展", 40).length, 40);
+    assert.equal(selectOpenApiCandidates(index, "查看项目最近进展", 100).length, 40);
+    assert.equal(selectOpenApiCandidates(index, "查看项目最近进展").length, 5);
+  });
+
   it("prefers person lookup before dependent skill endpoints for mixed person skill queries", async () => {
     const contract = JSON.parse(
       await readFile(new URL("../openapi/openapi.json", import.meta.url), "utf8"),
@@ -252,7 +264,7 @@ describe("OpenAPI operation index", () => {
     ]);
     assert.ok(operation?.mainResponseFields.includes("result"));
     assert.equal(selectOpenApiCandidates(mainIndex, "用户信息", 1).length, 3);
-    assert.equal(selectOpenApiCandidates(mainIndex, "用户信息", 10).length, 5);
+    assert.equal(selectOpenApiCandidates(mainIndex, "用户信息", 10).length, 8);
     assert.equal(
       selectOpenApiCandidates(mainIndex, "管理员用户列表")[0]?.permissionLevel,
       "admin",

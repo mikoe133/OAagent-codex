@@ -12,15 +12,19 @@ import Sider, {
   type SessionIndicatorState,
 } from "@/components/siderbar/Sider"
 import {
+  DEFAULT_ROUTER_MODEL,
   DEFAULT_MODEL_PROVIDER,
   getDefaultModel,
   isModelForProvider,
   isModelProvider,
+  isRouterModel,
   type AIModel,
   type ModelProvider,
+  type RouterModel,
 } from "@/lib/model-catalog"
 import { calculateResponseDurationMs, normalizeResponseDuration } from "@/lib/response-duration"
 import {
+  createRequestRoutingTraceGate,
   drainChatSseBuffer,
   finalizeToolSteps,
   isToolTimelineEvent,
@@ -62,6 +66,8 @@ export type { ToolStep, ToolStepStatus, TraceMessage } from "./chat-stream"
 const STORAGE_KEY = "chat-messages"
 const MODEL_STORAGE_KEY = "chat-selected-model"
 const MODEL_PROVIDER_STORAGE_KEY = "chat-model-provider"
+const DEVELOPER_MODE_STORAGE_KEY = "chat-developer-mode"
+const ROUTER_MODEL_STORAGE_KEY = "chat-router-model"
 const AGENT_SESSION_STORAGE_KEY = "chat-agent-session-id"
 const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
 const SIDEBAR_WIDTH = 320
@@ -396,6 +402,7 @@ function normalizeStoredToolStep(value: unknown): ToolStep | null {
   const status = normalizeStoredToolStatus(step.status)
   const input = typeof step.input === "string" && step.input.trim() ? step.input : null
   const output = typeof step.output === "string" && step.output.trim() ? step.output : null
+  const durationMs = normalizeResponseDuration(step.durationMs)
 
   if (!id || !type || !title || !description) {
     return null
@@ -409,6 +416,7 @@ function normalizeStoredToolStep(value: unknown): ToolStep | null {
     status,
     ...(input ? { input } : {}),
     ...(output ? { output } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
   }
 }
 
@@ -431,6 +439,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [error, setError] = useState<string | null>(null)
   const [selectedProvider, setSelectedProvider] = useState<ModelProvider>(DEFAULT_MODEL_PROVIDER)
   const [selectedModel, setSelectedModel] = useState<AIModel>(() => getDefaultModel(DEFAULT_MODEL_PROVIDER))
+  const [developerMode, setDeveloperMode] = useState(false)
+  const [selectedRouterModel, setSelectedRouterModel] = useState<RouterModel>(DEFAULT_ROUTER_MODEL)
   const [agentSessionId, setAgentSessionId] = useState("")
   const [activeRecordId, setActiveRecordId] = useState<string | number | null>(null)
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
@@ -475,6 +485,13 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         const defaultModel = getDefaultModel(provider)
         setSelectedModel(defaultModel)
         localStorage.setItem(MODEL_STORAGE_KEY, defaultModel)
+      }
+      setDeveloperMode(localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) === "enabled")
+      const savedRouterModel = localStorage.getItem(ROUTER_MODEL_STORAGE_KEY)
+      if (isRouterModel(savedRouterModel)) {
+        setSelectedRouterModel(savedRouterModel)
+      } else {
+        localStorage.setItem(ROUTER_MODEL_STORAGE_KEY, DEFAULT_ROUTER_MODEL)
       }
       const currentSessionId = getOrCreateAgentSessionId()
       activeSessionIdRef.current = currentSessionId
@@ -652,6 +669,19 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     localStorage.setItem(MODEL_STORAGE_KEY, defaultModel)
   }, [])
 
+  const handleDeveloperModeChange = useCallback((enabled: boolean) => {
+    setDeveloperMode(enabled)
+    localStorage.setItem(DEVELOPER_MODE_STORAGE_KEY, enabled ? "enabled" : "disabled")
+  }, [])
+
+  const handleRouterModelChange = useCallback((model: RouterModel) => {
+    if (!isRouterModel(model)) {
+      return
+    }
+    setSelectedRouterModel(model)
+    localStorage.setItem(ROUTER_MODEL_STORAGE_KEY, model)
+  }, [])
+
   const persistMessages = useCallback(
     (sessionId: string, recordId: string | number | null, nextMessages: Message[]) => {
       if (deletedSessionIdsRef.current.has(sessionId)) {
@@ -806,6 +836,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       void persistMessages(currentAgentSessionId, activeRecordId, newMessages)
 
       let cancelPendingTypewriter = () => {}
+      let dismissPendingRoutingTrace = () => {}
       let accumulatedContent = ""
       let visibleContent = ""
       let currentToolSteps: ToolStep[] = []
@@ -845,6 +876,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             })),
             provider: selectedProvider,
             model: selectedModel,
+            developerMode,
+            routerModel: selectedRouterModel,
           }),
           signal: controller.signal,
         })
@@ -889,6 +922,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           )
           publishSessionMessages(nextMessages)
         }
+
+        const routingTraceGate = createRequestRoutingTraceGate((event) => {
+          updateAssistantToolSteps(mergeToolTimelineEvent(currentToolSteps, event))
+        })
+        dismissPendingRoutingTrace = () => routingTraceGate.dismiss()
 
         const updateAssistantTraceMessages = (nextTraceMessages: TraceMessage[]) => {
           currentTraceMessages = nextTraceMessages
@@ -1012,12 +1050,18 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         let completedRunReceived = false
 
         const handleChatStreamEvent = (event: ChatStreamEvent) => {
+          if (!developerMode && routingTraceGate.push(event)) {
+            return
+          }
+
           if (isToolTimelineEvent(stringValue(event.type))) {
+            routingTraceGate.dismiss()
             updateAssistantToolSteps(mergeToolTimelineEvent(currentToolSteps, event))
             return
           }
 
           if (event.type === "message.delta" && typeof event.delta === "string") {
+            routingTraceGate.dismiss()
             const latestToolStepId = currentToolSteps[currentToolSteps.length - 1]?.id ?? null
             updateAssistantTraceMessages(
               mergeMessageTraceDelta(currentTraceMessages, event, latestToolStepId),
@@ -1027,6 +1071,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           }
 
           if (event.type === "run.completed") {
+            routingTraceGate.dismiss()
             completedRunReceived = true
             const result = toRecord(event.result)
             const finalResponse = result?.finalResponse
@@ -1038,6 +1083,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           }
 
           if (event.type === "run.failed") {
+            routingTraceGate.dismiss()
             terminalStreamError = new Error(typeof event.error === "string" ? event.error : "Agent run failed")
           }
         }
@@ -1072,6 +1118,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
             if (done) break
 
+            routingTraceGate.dismiss()
             appendAssistantContent(decoder.decode(value, { stream: true }))
           }
 
@@ -1138,6 +1185,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
         void persistMessages(currentAgentSessionId, activeRecordId, terminalMessages)
       } finally {
+        dismissPendingRoutingTrace()
         if (activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId) {
           activeSessionRunsRef.current.delete(currentAgentSessionId)
           setRunningSessionIds((current) => {
@@ -1152,6 +1200,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     [
       selectedProvider,
       selectedModel,
+      developerMode,
+      selectedRouterModel,
       agentSessionId,
       activeRecordId,
       persistMessages,
@@ -1436,6 +1486,10 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         refreshKey={sessionListRefreshKey}
         selectedProvider={selectedProvider}
         onProviderChange={handleProviderChange}
+        developerMode={developerMode}
+        onDeveloperModeChange={handleDeveloperModeChange}
+        selectedRouterModel={selectedRouterModel}
+        onRouterModelChange={handleRouterModelChange}
         providerSwitchDisabled={isStreaming}
         sessionIndicatorStates={sessionIndicatorStates}
       />

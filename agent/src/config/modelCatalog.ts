@@ -37,6 +37,14 @@ export const MODEL_CATALOG = {
   ],
 } as const satisfies Record<ModelProviderId, readonly string[]>;
 
+export const ROUTER_MODEL_CATALOG = [
+  "z-ai/glm-4.7-flash",
+  "qwen/qwen3.5-flash-02-23",
+  "deepseek/deepseek-v4-flash",
+] as const;
+
+export type RouterModelId = (typeof ROUTER_MODEL_CATALOG)[number];
+
 export const MODEL_CATALOG_VERSION = `sha256:${createHash("sha256")
   .update(JSON.stringify(MODEL_CATALOG))
   .digest("hex")
@@ -103,6 +111,18 @@ export function resolveRequestedModel(
     );
   }
   return normalized;
+}
+
+export function resolveRequestedRouterModel(
+  requestedModel: string | null | undefined,
+): RouterModelId {
+  const normalized = requestedModel?.trim() ?? "";
+  if (!ROUTER_MODEL_CATALOG.some((model) => model === normalized)) {
+    throw new Error(
+      `不支持路由模型:${normalized || "空"}。可选路由模型:${ROUTER_MODEL_CATALOG.join(", ")}。`,
+    );
+  }
+  return normalized as RouterModelId;
 }
 
 export function resolveAutomationModelSelection(
