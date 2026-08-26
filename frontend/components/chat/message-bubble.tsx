@@ -18,6 +18,7 @@ import {
   MessageSquareText,
   Plus,
   SearchCode,
+  Signpost,
   SquareTerminal,
   ThumbsDown,
   ThumbsUp,
@@ -582,7 +583,7 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
                 ? "text-sky-600/75 theme-dark:text-sky-400/80"
                 : apiTraceType === "knowledge_base_api"
                   ? "text-amber-700/75 theme-dark:text-amber-400/80"
-                  : step.type === "command_execution"
+                  : step.type === "command_execution" || step.type === "request_routing"
                     ? "text-stone-500 theme-dark:text-zinc-400"
                     : "text-stone-800 theme-dark:text-zinc-200",
             )}
@@ -598,6 +599,14 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
           >
             {statusLabel(step.status)}
           </span>
+          {step.durationMs !== undefined ? (
+            <span
+              data-slot="trace-step-duration"
+              className="text-[0.6875rem] tabular-nums text-stone-400 theme-dark:text-zinc-500"
+            >
+              {formatResponseDuration(step.durationMs)}
+            </span>
+          ) : null}
         </div>
         <p className="mt-0.5 break-words text-xs leading-5 text-stone-500 theme-dark:text-zinc-400">{step.description}</p>
         {hasDetails && (
@@ -672,6 +681,17 @@ function ToolIcon({ step, apiTraceType }: { step: ToolStep; apiTraceType: ApiTra
       />
     )
   }
+  if (step.type === "request_routing") {
+    return (
+      <Signpost
+        className={cn(
+          "h-3.5 w-3.5 text-stone-700 theme-dark:text-zinc-300",
+          step.status === "running" && "animate-pulse",
+        )}
+        aria-hidden="true"
+      />
+    )
+  }
   if (step.status === "running") {
     return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[#b4fbde]" aria-hidden="true" />
   }
@@ -702,6 +722,9 @@ function statusClass(
   apiTraceType: ApiTraceType = null,
   toolType?: ToolStep["type"],
 ): string {
+  if (status === "running" && toolType === "request_routing") {
+    return "text-stone-400 theme-dark:text-zinc-500"
+  }
   if (status === "running") return "text-[#c6e5ec] theme-dark:text-cyan-300"
   if (status === "completed" && apiTraceType === "oa_api") {
     return "text-sky-600/60 theme-dark:text-sky-400/70"
@@ -709,7 +732,10 @@ function statusClass(
   if (status === "completed" && apiTraceType === "knowledge_base_api") {
     return "text-amber-700/60 theme-dark:text-amber-400/70"
   }
-  if (status === "completed" && toolType === "command_execution") {
+  if (
+    status === "completed" &&
+    (toolType === "command_execution" || toolType === "request_routing")
+  ) {
     return "text-stone-400 theme-dark:text-zinc-500"
   }
   if (status === "completed") return "text-[#00619a] theme-dark:text-sky-400"

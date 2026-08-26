@@ -1,7 +1,7 @@
 "use client"
 
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
-import { ChevronsUpDown, Clock, LogOut, Network, Pin, Search, SquarePen, SunMoon, Trash2, Type, UserRound, X } from "lucide-react"
+import { ChevronsUpDown, Clock, Code2, LogOut, Network, Pin, Route, Search, SquarePen, SunMoon, Trash2, Type, UserRound, X } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
@@ -11,6 +11,7 @@ import { ShiningText } from "@/components/ui/shining-text"
 import { matchesSessionIdentity, resolveStableSessionOrder, sortSessionItemsByPinnedOrder } from "./session-list-order"
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
@@ -21,7 +22,15 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MODEL_PROVIDERS, isModelProvider, type ModelProvider } from "@/lib/model-catalog"
+import {
+  MODEL_PROVIDERS,
+  ROUTER_MODELS,
+  DEFAULT_ROUTER_MODEL,
+  isModelProvider,
+  isRouterModel,
+  type ModelProvider,
+  type RouterModel,
+} from "@/lib/model-catalog"
 
 type NavItem = {
   name: string
@@ -78,6 +87,10 @@ type SiderProps = {
   onDeleteSession: (session: ChatSessionListItem) => Promise<void>
   selectedProvider: ModelProvider
   onProviderChange: (provider: ModelProvider) => void
+  developerMode: boolean
+  onDeveloperModeChange: (enabled: boolean) => void
+  selectedRouterModel: RouterModel
+  onRouterModelChange: (model: RouterModel) => void
   providerSwitchDisabled?: boolean
   sessionIndicatorStates: ReadonlyMap<string, SessionIndicatorState>
   refreshKey?: number
@@ -192,12 +205,20 @@ const UserInfo = ({
   onLogout,
   selectedProvider,
   onProviderChange,
+  developerMode,
+  onDeveloperModeChange,
+  selectedRouterModel,
+  onRouterModelChange,
   providerSwitchDisabled = false,
 }: {
   user: SiderUser
   onLogout: () => void
   selectedProvider: ModelProvider
   onProviderChange: (provider: ModelProvider) => void
+  developerMode: boolean
+  onDeveloperModeChange: (enabled: boolean) => void
+  selectedRouterModel: RouterModel
+  onRouterModelChange: (model: RouterModel) => void
   providerSwitchDisabled?: boolean
 }) => (
   <div className="flex w-full items-center gap-3 px-6 py-4 text-left">
@@ -220,6 +241,73 @@ const UserInfo = ({
         sideOffset={10}
         className="z-[9999] w-48 overflow-visible rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
       >
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger
+            disabled={providerSwitchDisabled}
+            className="h-11 rounded-lg px-3 text-sm text-slate-700 focus:bg-slate-100 data-[state=open]:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800"
+          >
+            <Code2 className="h-4 w-4 text-slate-500 theme-dark:text-zinc-400" aria-hidden="true" />
+            开发模式
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent
+            sideOffset={8}
+            className="z-[10000] w-40 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
+          >
+            <DropdownMenuRadioGroup
+              value={developerMode ? "enabled" : "disabled"}
+              onValueChange={(value) => onDeveloperModeChange(value === "enabled")}
+            >
+              <DropdownMenuRadioItem
+                value="disabled"
+                className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+              >
+                关闭
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem
+                value="enabled"
+                className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+              >
+                开启
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        {developerMode ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger
+              disabled={providerSwitchDisabled}
+              className="h-11 rounded-lg px-3 text-sm text-slate-700 focus:bg-slate-100 data-[state=open]:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800 theme-dark:data-[state=open]:bg-zinc-800"
+            >
+              <Route className="h-4 w-4 text-slate-500 theme-dark:text-zinc-400" aria-hidden="true" />
+              路由模型配置
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent
+              sideOffset={8}
+              className="z-[10000] w-52 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
+            >
+              {ROUTER_MODELS.map((model) => {
+                const isDefaultFallback = model.id === DEFAULT_ROUTER_MODEL
+                const isChecked = isDefaultFallback || model.id === selectedRouterModel
+
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={model.id}
+                    checked={isChecked}
+                    disabled={providerSwitchDisabled || isDefaultFallback}
+                    onCheckedChange={() => {
+                      if (!isDefaultFallback && isRouterModel(model.id)) {
+                        onRouterModelChange(model.id)
+                      }
+                    }}
+                    className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+                  >
+                    {model.name}
+                  </DropdownMenuCheckboxItem>
+                )
+              })}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ) : null}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger
             disabled={providerSwitchDisabled}
@@ -537,6 +625,10 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       onDeleteSession,
       selectedProvider,
       onProviderChange,
+      developerMode,
+      onDeveloperModeChange,
+      selectedRouterModel,
+      onRouterModelChange,
       providerSwitchDisabled = false,
       sessionIndicatorStates,
       refreshKey = 0,
@@ -867,6 +959,10 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             onLogout={handleLogout}
             selectedProvider={selectedProvider}
             onProviderChange={onProviderChange}
+            developerMode={developerMode}
+            onDeveloperModeChange={onDeveloperModeChange}
+            selectedRouterModel={selectedRouterModel}
+            onRouterModelChange={onRouterModelChange}
             providerSwitchDisabled={providerSwitchDisabled}
           />
         </div>

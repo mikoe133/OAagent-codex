@@ -358,7 +358,12 @@ export function Composer({
       ref={layoutRef}
       className={cn("fixed bottom-4 left-0 right-0 px-4 pointer-events-none z-10 sm:left-80", hasAnimated && "composer-intro")}
     >
-      <div className="relative max-w-2xl mx-auto pointer-events-auto">
+      <div
+        data-slot="chat-composer-mask"
+        aria-hidden="true"
+        className="absolute -bottom-4 left-0 right-4 top-0 bg-stone-50 theme-dark:bg-zinc-950"
+      />
+      <div className="relative z-10 max-w-2xl mx-auto pointer-events-auto">
         <div
           data-slot="chat-composer"
           className={cn(

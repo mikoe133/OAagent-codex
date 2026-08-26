@@ -1,9 +1,5 @@
-import type { ThreadOptions } from "@openai/codex-sdk";
 import type { AppConfig } from "../../config/config.js";
-import {
-  createCodexClient,
-  createThreadOptions,
-} from "../codex/codexClient.js";
+import type { RouterModelId } from "../../config/modelCatalog.js";
 import { isChatOpenApiOperationAllowed } from "./openApiChatPolicy.js";
 import {
   selectOpenApiCandidates,
@@ -12,35 +8,31 @@ import {
   type OpenApiOperationIndexEntry,
 } from "./openApiIndex.js";
 
-const ROUTER_TIMEOUT_MS = 45_000;
+const ROUTER_TIMEOUT_MS = 8_000;
+const ROUTER_MAX_OUTPUT_TOKENS = 512;
+const ROUTER_NO_REASONING_MODEL: RouterModelId = "qwen/qwen3.5-flash-02-23";
 const MAX_ROUTE_ATTEMPTS = 2;
 const MAX_ROUTED_TAGS = 3;
 const MAX_ROUTED_CATALOGS = 3;
 const MAX_ROUTED_OPERATION_IDS = 8;
 const MAX_SEARCH_TERMS = 8;
 const MAX_ROUTED_CANDIDATES = 16;
-const MAX_MEMORY_LENGTH = 4_000;
+const MAX_INITIAL_ROUTE_CANDIDATES = 20;
+const MAX_EXPANDED_ROUTE_CANDIDATES = 40;
+const MAX_CANDIDATES_PER_ROUTING_QUERY = 4;
+const MAX_ROUTING_QUERIES = 4;
+const MAX_CONTEXT_QUERY_LENGTH = 300;
+const MAX_OPERATION_PARAMETER_NAMES = 4;
+const MAX_MEMORY_LENGTH = 1_000;
 
 type AccessMode = "read" | "write" | "mixed";
-
-type SemanticRouterTurnOptions = {
-  outputSchema?: unknown;
-  signal?: AbortSignal;
-};
-
-type SemanticRouterCodex = {
-  startThread(options?: ThreadOptions): {
-    run(
-      input: string,
-      options?: SemanticRouterTurnOptions,
-    ): Promise<{ finalResponse: string }>;
-  };
-};
 
 export type OpenApiSemanticRouter = (
   prompt: string,
   options?: { signal?: AbortSignal },
 ) => Promise<string>;
+
+type SemanticRouterFetch = typeof fetch;
 
 type SemanticRoute = {
   catalogs: OpenApiCatalog[];
@@ -59,7 +51,16 @@ type RouteInput = {
 export type OpenApiRouteResult = {
   catalogs: OpenApiCatalog[];
   candidates: OpenApiOperationIndexEntry[];
+  diagnostics: OpenApiRouteDiagnostics;
 };
+
+export type OpenApiRouteDiagnostics =
+  | {
+      strategy: "semantic";
+      usedFallbackModel?: boolean;
+      primaryFailureReason?: string;
+    }
+  | { strategy: "fallback"; failureReason: string };
 
 const SEMANTIC_ROUTE_SCHEMA = {
   type: "object",
@@ -102,24 +103,100 @@ const SEMANTIC_ROUTE_SCHEMA = {
 
 export function createOpenApiSemanticRouter(
   config: AppConfig,
-  codex: SemanticRouterCodex = createCodexClient(config),
+  fetchImpl: SemanticRouterFetch = fetch,
 ): OpenApiSemanticRouter {
-  const threadOptions: ThreadOptions = {
-    ...createThreadOptions(config, config.model, "low"),
-    sandboxMode: "read-only",
-    networkAccessEnabled: false,
-    webSearchMode: "disabled",
-    approvalPolicy: "never",
-  };
+  const provider = config.modelProviders[config.modelProvider];
+  if (!provider) {
+    throw new Error(`semantic router provider is unavailable: ${config.modelProvider}`);
+  }
+  const endpoint = `${provider.baseUrl.replace(/\/+$/, "")}/chat/completions`;
 
   return async (prompt, options) => {
-    const thread = codex.startThread(threadOptions);
-    const turn = await thread.run(prompt, {
-      outputSchema: SEMANTIC_ROUTE_SCHEMA,
+    const response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${provider.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: ROUTER_MAX_OUTPUT_TOKENS,
+        ...(shouldDisableRouterReasoning(config)
+          ? { reasoning: { effort: "none" } }
+          : {}),
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "semantic_route",
+            strict: true,
+            schema: SEMANTIC_ROUTE_SCHEMA,
+          },
+        },
+      }),
       signal: options?.signal,
     });
-    return turn.finalResponse;
+
+    if (!response.ok) {
+      throw new Error(`semantic router request failed with status ${response.status}`);
+    }
+
+    return extractSemanticRouterContent(await response.json());
   };
+}
+
+function shouldDisableRouterReasoning(config: AppConfig): boolean {
+  return (
+    config.modelProvider === "openrouter" &&
+    config.model === ROUTER_NO_REASONING_MODEL
+  );
+}
+
+function extractSemanticRouterContent(payload: unknown): string {
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+    throw new Error("semantic router response missing choices");
+  }
+  const choice = payload.choices[0];
+  if (!isRecord(choice) || !isRecord(choice.message)) {
+    throw new Error("semantic router response missing message");
+  }
+  const message = choice.message;
+  const content = extractMessageText(message.content);
+  if (content) {
+    return content;
+  }
+  const reasoning = extractMessageText(message.reasoning);
+  if (reasoning) {
+    return reasoning;
+  }
+  if (Array.isArray(message.reasoning_details)) {
+    const reasoningDetails = message.reasoning_details
+      .filter(isRecord)
+      .filter((part) => part.type === "reasoning.text")
+      .map((part) => extractMessageText(part.text))
+      .filter((text): text is string => Boolean(text))
+      .join("");
+    if (reasoningDetails) {
+      return reasoningDetails;
+    }
+  }
+  throw new Error("semantic router response missing content");
+}
+
+function extractMessageText(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const text = value
+    .filter(isRecord)
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text as string)
+    .join("");
+  return text || null;
 }
 
 export async function routeOpenApiCandidates(
@@ -140,40 +217,129 @@ export async function routeOpenApiRequest(
   semanticRouter: OpenApiSemanticRouter = createOpenApiSemanticRouter(config),
 ): Promise<OpenApiRouteResult> {
   const safeIndex = filterSafeOperations(index);
-  const fallbackCatalogs = inferFallbackCatalogs(input.task);
-  if (
-    fallbackCatalogs[0] === "knowledge_base_write" &&
-    !safeIndex.operations.some(
-      (operation) => operation.catalog === "knowledge_base_write",
-    )
-  ) {
-    return { catalogs: fallbackCatalogs, candidates: [] };
-  }
-  const fallback = (): OpenApiRouteResult => ({
+  const fallbackCatalogs = getFallbackCatalogs(safeIndex);
+  const fallback = (error: unknown): OpenApiRouteResult => ({
     catalogs: fallbackCatalogs,
     candidates: selectFallbackCandidates(
       safeIndex,
       input.task,
       fallbackCatalogs,
     ),
+    diagnostics: {
+      strategy: "fallback",
+      failureReason: describeSemanticRouteFailure(error),
+    },
   });
 
   try {
     const route = await requestSemanticRoute(safeIndex, input, semanticRouter);
     const routed = rankRoutedCandidates(safeIndex, input.task, route);
     if (routed.length > 0) {
-      return { catalogs: route.catalogs, candidates: routed };
+      return {
+        catalogs: route.catalogs,
+        candidates: routed,
+        diagnostics: { strategy: "semantic" },
+      };
     }
     if (route.catalogs.includes("knowledge_base_write")) {
-      return { catalogs: route.catalogs, candidates: [] };
+      return {
+        catalogs: route.catalogs,
+        candidates: [],
+        diagnostics: { strategy: "semantic" },
+      };
     }
     return {
       catalogs: route.catalogs,
       candidates: selectFallbackCandidates(safeIndex, input.task, route.catalogs),
+      diagnostics: { strategy: "semantic" },
+    };
+  } catch (error) {
+    return fallback(error);
+  }
+}
+
+export async function routeOpenApiRequestWithFallback(
+  config: AppConfig,
+  index: OpenApiOperationIndex,
+  input: RouteInput,
+  semanticRouter: OpenApiSemanticRouter,
+  fallbackSemanticRouter?: OpenApiSemanticRouter,
+): Promise<OpenApiRouteResult> {
+  if (!fallbackSemanticRouter) {
+    return routeOpenApiRequest(config, index, input, semanticRouter);
+  }
+
+  const primaryController = new AbortController();
+  const fallbackController = new AbortController();
+  const primaryInput = withRaceSignal(input, primaryController.signal);
+  const fallbackInput = withRaceSignal(input, fallbackController.signal);
+  let primaryFailure: OpenApiRouteResult | undefined;
+  let fallbackFailure: OpenApiRouteResult | undefined;
+
+  const primary = routeOpenApiRequest(
+    config,
+    index,
+    primaryInput,
+    semanticRouter,
+  ).then((result) => {
+    if (result.diagnostics.strategy === "semantic") {
+      return { result, source: "primary" as const };
+    }
+    primaryFailure = result;
+    throw new Error(result.diagnostics.failureReason);
+  });
+  const fallback = routeOpenApiRequest(
+    config,
+    index,
+    fallbackInput,
+    fallbackSemanticRouter,
+  ).then((result) => {
+    if (result.diagnostics.strategy === "semantic") {
+      return { result, source: "fallback" as const };
+    }
+    fallbackFailure = result;
+    throw new Error(result.diagnostics.failureReason);
+  });
+
+  try {
+    const winner = await Promise.any([primary, fallback]);
+    if (winner.source === "primary") {
+      fallbackController.abort();
+      return winner.result;
+    }
+    primaryController.abort();
+    if (winner.result.diagnostics.strategy !== "semantic") {
+      return winner.result;
+    }
+    return {
+      ...winner.result,
+      diagnostics: {
+        strategy: "semantic",
+        usedFallbackModel: true,
+        ...(primaryFailure?.diagnostics.strategy === "fallback"
+          ? { primaryFailureReason: primaryFailure.diagnostics.failureReason }
+          : {}),
+      },
     };
   } catch {
-    return fallback();
+    primaryController.abort();
+    fallbackController.abort();
+    return primaryFailure ?? fallbackFailure ?? routeOpenApiRequest(
+      config,
+      index,
+      input,
+      semanticRouter,
+    );
   }
+}
+
+function withRaceSignal(input: RouteInput, raceSignal: AbortSignal): RouteInput {
+  return {
+    ...input,
+    signal: input.signal
+      ? AbortSignal.any([input.signal, raceSignal])
+      : raceSignal,
+  };
 }
 
 function filterSafeOperations(index: OpenApiOperationIndex): OpenApiOperationIndex {
@@ -193,20 +359,40 @@ async function requestSemanticRoute(
   input: RouteInput,
   semanticRouter: OpenApiSemanticRouter,
 ): Promise<SemanticRoute> {
-  const signal = input.signal
-    ? AbortSignal.any([input.signal, AbortSignal.timeout(ROUTER_TIMEOUT_MS)])
-    : AbortSignal.timeout(ROUTER_TIMEOUT_MS);
+  const deadline = Date.now() + ROUTER_TIMEOUT_MS;
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      break;
+    }
+    const timeoutSignal = AbortSignal.timeout(remainingMs);
+    const signal = input.signal
+      ? AbortSignal.any([input.signal, timeoutSignal])
+      : timeoutSignal;
     try {
-      const response = await semanticRouter(
-        buildRoutePrompt(index, input, attempt > 0),
-        { signal },
+      const candidateIndex = selectRoutingCandidateIndex(
+        index,
+        input,
+        attempt === 0
+          ? MAX_INITIAL_ROUTE_CANDIDATES
+          : MAX_EXPANDED_ROUTE_CANDIDATES,
       );
-      return decodeSemanticRoute(response, index);
+      const response = await raceWithTimeout(
+        semanticRouter(
+          buildRoutePrompt(candidateIndex, input, attempt > 0),
+          { signal },
+        ),
+        remainingMs,
+      );
+      return decodeSemanticRoute(response, candidateIndex);
     } catch (error) {
       lastError = error;
-      if (signal.aborted) {
+      if (
+        input.signal?.aborted ||
+        timeoutSignal.aborted ||
+        Date.now() >= deadline
+      ) {
         break;
       }
     }
@@ -214,6 +400,98 @@ async function requestSemanticRoute(
   throw lastError instanceof Error
     ? lastError
     : new Error("semantic router failed");
+}
+
+async function raceWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error("semantic router request timed out");
+      error.name = "TimeoutError";
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function selectRoutingCandidateIndex(
+  index: OpenApiOperationIndex,
+  input: RouteInput,
+  limit: number,
+): OpenApiOperationIndex {
+  if (index.operations.length <= limit) {
+    return index;
+  }
+
+  const selected = new Map<string, OpenApiOperationIndexEntry>();
+  const append = (operations: OpenApiOperationIndexEntry[]) => {
+    for (const operation of operations) {
+      if (selected.size >= limit) {
+        return;
+      }
+      const key = `${operation.catalog}:${operation.operationId}`;
+      if (!selected.has(key)) {
+        selected.set(key, operation);
+      }
+    }
+  };
+
+  const queries = buildRoutingQueries(input);
+  const availableCatalogs = new Set(
+    index.operations.map((operation) => operation.catalog),
+  );
+  for (const catalog of availableCatalogs) {
+    if ([...selected.values()].some((operation) => operation.catalog === catalog)) {
+      continue;
+    }
+    const scopedIndex = {
+      ...index,
+      operations: index.operations.filter((operation) =>
+        operation.catalog === catalog,
+      ),
+    };
+    const anchors = catalog === "knowledge_base_read"
+      ? selectKnowledgeBaseReadFallback(scopedIndex)
+      : selectOpenApiCandidates(scopedIndex, input.task);
+    append(anchors.slice(0, catalog === "knowledge_base_read" ? 2 : 1));
+  }
+
+  for (const query of queries) {
+    append(
+      selectOpenApiCandidates(
+        index,
+        query,
+        MAX_CANDIDATES_PER_ROUTING_QUERY,
+      ),
+    );
+  }
+
+  for (const query of queries) {
+    append(selectOpenApiCandidates(index, query, limit));
+  }
+
+  return { ...index, operations: [...selected.values()].slice(0, limit) };
+}
+
+function buildRoutingQueries(input: RouteInput): string[] {
+  const task = input.task.trim();
+  const queries = new Set<string>([task]);
+  const recentMemory = (input.conversationMemory ?? "").slice(-MAX_MEMORY_LENGTH);
+
+  if (recentMemory) {
+    queries.add(`${task} ${recentMemory.slice(-MAX_CONTEXT_QUERY_LENGTH)}`);
+  }
+
+  return [...queries].slice(0, MAX_ROUTING_QUERIES);
 }
 
 function buildRoutePrompt(
@@ -253,16 +531,16 @@ function buildRoutePrompt(
     .join("\n");
 }
 
-function buildOperationGroups(index: OpenApiOperationIndex): Array<Record<string, unknown>> {
+function buildOperationGroups(
+  index: OpenApiOperationIndex,
+): Array<Record<string, unknown>> {
   const groups = new Map<string, OpenApiOperationIndexEntry[]>();
   for (const operation of index.operations) {
-    const tags = operation.tags.length > 0 ? operation.tags : ["untagged"];
-    for (const tag of tags) {
-      const key = `${operation.catalog}:${tag}`;
-      const operations = groups.get(key) ?? [];
-      operations.push(operation);
-      groups.set(key, operations);
-    }
+    const tag = operation.tags[0] ?? "untagged";
+    const key = `${operation.catalog}:${tag}`;
+    const operations = groups.get(key) ?? [];
+    operations.push(operation);
+    groups.set(key, operations);
   }
 
   return [...groups.entries()]
@@ -275,6 +553,21 @@ function buildOperationGroups(index: OpenApiOperationIndex): Array<Record<string
         method: operation.method,
         path: operation.path,
         summary: operation.summary,
+        ...(operation.parameters.length > 0
+          ? {
+              parameters: operation.parameters
+                .slice(0, MAX_OPERATION_PARAMETER_NAMES)
+                .map((parameter) => parameter.name),
+            }
+          : {}),
+        ...(operation.requestBodyFields.length > 0
+          ? {
+              requestBodyFields: operation.requestBodyFields.slice(
+                0,
+                MAX_OPERATION_PARAMETER_NAMES,
+              ),
+            }
+          : {}),
       })),
     }));
 }
@@ -291,7 +584,7 @@ function buildCatalogAvailability(
 }
 
 function decodeSemanticRoute(text: string, index: OpenApiOperationIndex): SemanticRoute {
-  const parsed = JSON.parse(text) as unknown;
+  const parsed = normalizeSemanticRoutePayload(parseSemanticRouteJson(text));
   if (
     !isRecord(parsed) ||
     !Array.isArray(parsed.tags) ||
@@ -344,25 +637,111 @@ function decodeSemanticRoute(text: string, index: OpenApiOperationIndex): Semant
   return { catalogs, tags, operationIds, accessMode, searchTerms };
 }
 
+function normalizeSemanticRoutePayload(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+  const catalogs = value.catalogs ?? value.catalog;
+  const tags = value.tags ?? value.tag;
+  const operationIds = value.operationIds ?? value.operationId;
+  const searchTerms = value.searchTerms;
+  return {
+    ...value,
+    ...(Array.isArray(catalogs)
+      ? { catalogs }
+      : typeof catalogs === "string"
+        ? { catalogs: [catalogs] }
+        : {}),
+    ...(Array.isArray(tags)
+      ? { tags }
+      : typeof tags === "string"
+        ? { tags: [tags] }
+        : {}),
+    ...(Array.isArray(operationIds)
+      ? { operationIds }
+      : typeof operationIds === "string"
+        ? { operationIds: [operationIds] }
+        : {}),
+    ...(Array.isArray(searchTerms)
+      ? { searchTerms }
+      : typeof searchTerms === "string"
+        ? {
+            searchTerms: searchTerms
+              .split(/[,，;\n]/u)
+              .map((term) => term.trim())
+              .filter(Boolean),
+          }
+        : {}),
+  };
+}
+
+function parseSemanticRouteJson(text: string): unknown {
+  const trimmed = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/u, "");
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    const objectStart = trimmed.indexOf("{");
+    const objectEnd = trimmed.lastIndexOf("}");
+    if (objectStart < 0 || objectEnd <= objectStart) {
+      throw new Error("semantic router returned invalid JSON");
+    }
+    try {
+      return JSON.parse(trimmed.slice(objectStart, objectEnd + 1)) as unknown;
+    } catch {
+      throw new Error("semantic router returned invalid JSON");
+    }
+  }
+}
+
 function selectFallbackCandidates(
   index: OpenApiOperationIndex,
   task: string,
   catalogs: OpenApiCatalog[],
 ): OpenApiOperationIndexEntry[] {
   const catalogSet = new Set(catalogs);
+  if (catalogSet.size === 0) {
+    return [];
+  }
   const scopedIndex = {
     ...index,
     operations: index.operations.filter((operation) =>
       catalogSet.has(operation.catalog),
     ),
   };
-  if (catalogSet.has("knowledge_base_read")) {
+  if (catalogSet.size === 1 && catalogSet.has("knowledge_base_read")) {
     return selectKnowledgeBaseReadFallback(scopedIndex);
   }
-  const selected = selectOpenApiCandidates(scopedIndex, task);
+  const perCatalogLimit = Math.max(
+    1,
+    Math.floor(MAX_ROUTED_CANDIDATES / catalogSet.size),
+  );
+  const selected: OpenApiOperationIndexEntry[] = [];
+  for (const catalog of catalogs) {
+    const catalogIndex = {
+      ...scopedIndex,
+      operations: scopedIndex.operations.filter(
+        (operation) => operation.catalog === catalog,
+      ),
+    };
+    const catalogCandidates = catalog === "knowledge_base_read"
+      ? selectKnowledgeBaseReadFallback(catalogIndex)
+      : selectGeneralFallbackCandidates(catalogIndex, task);
+    selected.push(...catalogCandidates.slice(0, perCatalogLimit));
+  }
+  return selected.slice(0, MAX_ROUTED_CANDIDATES);
+}
+
+function selectGeneralFallbackCandidates(
+  index: OpenApiOperationIndex,
+  task: string,
+): OpenApiOperationIndexEntry[] {
+  const selected = selectOpenApiCandidates(index, task);
   const selectedIds = new Set(selected.map((operation) => operation.operationId));
   const selectedTags = new Set(selected.flatMap((operation) => operation.tags));
-  const activityCandidates = scopedIndex.operations
+  const activityCandidates = index.operations
     .filter(
       (operation) =>
         operation.method === "GET" &&
@@ -411,13 +790,6 @@ function rankRoutedCandidates(
   const operationPriorities = new Map(
     route.operationIds.map((operationId, index) => [operationId, index]),
   );
-  const hasExplicitProjectOperation = index.operations.some(
-    (operation) =>
-      operationIds.has(operation.operationId) &&
-      operation.tags.includes("projects") &&
-      operation.operationId !==
-        "projects_list_projects_list_by_person_get",
-  );
   const terms = [task.toLowerCase(), ...route.searchTerms];
   return index.operations
     .filter((operation) =>
@@ -431,11 +803,6 @@ function rankRoutedCandidates(
       operation,
       score:
         scoreSemanticTerms(operation, terms, route.accessMode) +
-        scoreTaskSpecificPreference(
-          operation,
-          task,
-          hasExplicitProjectOperation,
-        ) +
         (operationIds.has(operation.operationId)
           ? 100_000 - (operationPriorities.get(operation.operationId) ?? 0)
           : 0),
@@ -449,68 +816,33 @@ function rankRoutedCandidates(
     .map(({ operation }) => operation);
 }
 
-function scoreTaskSpecificPreference(
-  operation: OpenApiOperationIndexEntry,
-  task: string,
-  hasExplicitProjectOperation: boolean,
-): number {
-  if (hasExplicitProjectOperation || !isNamedProjectLookup(task)) {
-    return 0;
-  }
-  if (
-    operation.operationId ===
-    "projects_list_projects_list_by_project_get"
-  ) {
-    return 200_000;
-  }
-  if (
-    operation.operationId ===
-    "projects_list_projects_list_by_person_get"
-  ) {
-    return -50_000;
-  }
-  return 0;
-}
-
-function isNamedProjectLookup(task: string): boolean {
-  if (!/项目/i.test(task)) {
-    return false;
-  }
-  return !/(?:我|本人|谁|人员|员工|成员|负责人).{0,8}(?:参与|负责|名下|项目)|按人员/i.test(
-    task,
+function getFallbackCatalogs(index: OpenApiOperationIndex): OpenApiCatalog[] {
+  const readCatalogs: OpenApiCatalog[] = ["oa", "knowledge_base_read"];
+  return readCatalogs.filter((catalog) =>
+    index.operations.some((operation) => operation.catalog === catalog),
   );
 }
 
-function inferFallbackCatalogs(task: string): OpenApiCatalog[] {
-  if (isKnowledgeBaseWriteIntent(task)) {
-    return ["knowledge_base_write"];
+function describeSemanticRouteFailure(error: unknown): string {
+  const name = error instanceof Error ? error.name.toLowerCase() : "";
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  const details = `${name} ${message}`;
+  if (/timeout|timed out|time out/.test(details)) {
+    return `路由模型超时（${ROUTER_TIMEOUT_MS / 1_000} 秒）`;
   }
-  if (isKnowledgeBaseReadIntent(task)) {
-    return ["knowledge_base_read"];
+  if (/429|rate.?limit|too many requests/.test(details)) {
+    return "路由模型请求被限流";
   }
-  return ["oa"];
-}
-
-function isKnowledgeBaseWriteIntent(task: string): boolean {
-  return (
-    /知识库|知识页面|知识文档|文档|手册|制度|规范|指南|SOP/i.test(task) &&
-    /新增|创建|添加|修改|更新|编辑|维护|补充|替换|删除|移除|保存|上传|发布|归档|移动|重命名/i.test(
-      task,
-    )
-  );
-}
-
-function isKnowledgeBaseReadIntent(task: string): boolean {
-  if (
-    /员工资料|员工信息|个人资料|个人信息|用户资料|用户信息|人员资料|人员信息|同事资料|同事信息/i.test(
-      task,
-    )
-  ) {
-    return false;
+  if (/401|403|unauthori[sz]ed|forbidden|authentication/.test(details)) {
+    return "路由模型鉴权失败";
   }
-  return /知识库|知识文档|文档(?:内容)?|资料内容|公司资料|内部资料|手册|制度|规范|指南|SOP|教程|操作说明|政策|章程|流程(?:是什么|怎么|如何)|如何.{0,12}(?:操作|办理|申请|部署|报销)/i.test(
-    task,
-  );
+  if (/unusable route|syntaxerror|json|schema|invalid.*(?:route|response)/.test(details)) {
+    return "路由模型返回结果无效";
+  }
+  if (/unavailable|econn|enotfound|502|503|504|network/.test(details)) {
+    return "路由模型服务暂时不可用";
+  }
+  return "路由模型调用异常";
 }
 
 function scoreSemanticTerms(

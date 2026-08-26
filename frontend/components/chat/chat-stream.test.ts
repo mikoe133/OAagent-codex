@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  createRequestRoutingTraceGate,
   drainChatSseBuffer,
   finalizeToolSteps,
   mergeMessageTraceDelta,
@@ -150,6 +151,203 @@ test("mergeToolTimelineEvent keeps one tool row and accumulates streamed output"
     input: "npm run build",
     output: "Compiling...\nBuild complete",
   })
+})
+
+test("mergeToolTimelineEvent updates request routing progress in one trace row", () => {
+  let steps: ToolStep[] = []
+
+  steps = mergeToolTimelineEvent(steps, {
+    type: "progress",
+    itemId: "request-routing",
+    status: "in_progress",
+    message: "正在理解请求并选择合适的数据源…",
+  })
+  steps = mergeToolTimelineEvent(steps, {
+    type: "progress",
+    itemId: "request-routing",
+    status: "completed",
+    message: "已准备好相关数据能力，正在生成回答…",
+  })
+
+  assert.deepEqual(steps, [
+    {
+      id: "request-routing",
+      type: "request_routing",
+      status: "completed",
+      title: "任务编排",
+      description: "已准备好相关数据能力，正在生成回答…",
+    },
+  ])
+})
+
+test("mergeToolTimelineEvent preserves completed step durations", () => {
+  const steps = mergeToolTimelineEvent([], {
+    type: "progress",
+    itemId: "request-routing",
+    status: "completed",
+    message: "已准备好相关数据能力，正在生成回答…",
+    durationMs: 2_345,
+  })
+
+  assert.equal(steps[0]?.durationMs, 2_345)
+})
+
+test("mergeToolTimelineEvent labels individual developer latency stages", () => {
+  const stages = [
+    ["session_prepare", "会话准备"],
+    ["contracts", "接口契约"],
+    ["semantic_route", "语义路由"],
+    ["codex_startup", "模型启动"],
+    ["model_inference", "模型首字"],
+  ] as const
+
+  for (const [toolType, title] of stages) {
+    const steps = mergeToolTimelineEvent([], {
+      type: "progress",
+      itemId: `latency-${toolType}`,
+      toolType,
+      status: "completed",
+      message: "阶段执行完成",
+      durationMs: 820,
+    })
+
+    assert.equal(steps[0]?.title, title)
+    assert.equal(steps[0]?.durationMs, 820)
+  }
+})
+
+test("mergeToolTimelineEvent preserves route degradation diagnostics and actual duration", () => {
+  const description =
+    "路由模型失败，已启用安全降级；原因：路由模型超时（8 秒）；最终接口域：OA、知识库读取"
+  const steps = mergeToolTimelineEvent([], {
+    type: "progress",
+    itemId: "latency-semantic-route",
+    toolType: "semantic_route",
+    status: "completed",
+    message: description,
+    durationMs: 45_012,
+  })
+
+  assert.equal(steps[0]?.title, "语义路由")
+  assert.equal(steps[0]?.description, description)
+  assert.equal(steps[0]?.durationMs, 45_012)
+})
+
+test("mergeToolTimelineEvent ignores invalid durations and preserves valid prior timing", () => {
+  const completed = mergeToolTimelineEvent([], {
+    type: "tool.completed",
+    itemId: "timed-tool",
+    toolType: "command_execution",
+    name: "callOaApi",
+    status: "completed",
+    durationMs: 249.8,
+  })
+  const repeated = mergeToolTimelineEvent(completed, {
+    type: "tool.completed",
+    itemId: "timed-tool",
+    toolType: "command_execution",
+    name: "callOaApi",
+    status: "completed",
+    durationMs: -1,
+  })
+
+  assert.equal(completed[0]?.durationMs, 250)
+  assert.equal(repeated[0]?.durationMs, 250)
+  assert.equal(
+    mergeToolTimelineEvent([], {
+      type: "progress",
+      itemId: "invalid-duration",
+      message: "invalid",
+      durationMs: Number.POSITIVE_INFINITY,
+    })[0]?.durationMs,
+    undefined,
+  )
+})
+
+test("request routing trace waits five seconds and reveals only its latest state", () => {
+  const visibleEvents: ChatStreamEvent[] = []
+  let scheduledCallback: () => void = () => {
+    assert.fail("routing trace callback was not scheduled")
+  }
+  let scheduledDelayMs: number | null = null
+  const gate = createRequestRoutingTraceGate(
+    (event) => visibleEvents.push(event),
+    (callback, delayMs) => {
+      scheduledCallback = callback
+      scheduledDelayMs = delayMs
+      return () => undefined
+    },
+  )
+
+  assert.equal(
+    gate.push({
+      type: "progress",
+      itemId: "request-routing",
+      status: "in_progress",
+      message: "正在理解请求并选择合适的数据源…",
+    }),
+    true,
+  )
+  assert.equal(
+    gate.push({
+      type: "progress",
+      itemId: "request-routing",
+      status: "completed",
+      message: "已准备好相关数据能力，正在生成回答…",
+    }),
+    true,
+  )
+  assert.equal(scheduledDelayMs, 5_000)
+  assert.deepEqual(visibleEvents, [])
+
+  scheduledCallback()
+  assert.deepEqual(visibleEvents, [
+    {
+      type: "progress",
+      itemId: "request-routing",
+      status: "completed",
+      message: "已准备好相关数据能力，正在生成回答…",
+    },
+  ])
+})
+
+test("request routing trace stays hidden when another response arrives first", () => {
+  const visibleEvents: ChatStreamEvent[] = []
+  let scheduledCallback: () => void = () => {
+    assert.fail("routing trace callback was not scheduled")
+  }
+  let cancelled = false
+  const gate = createRequestRoutingTraceGate(
+    (event) => visibleEvents.push(event),
+    (callback) => {
+      scheduledCallback = callback
+      return () => {
+        cancelled = true
+      }
+    },
+  )
+
+  gate.push({
+    type: "progress",
+    itemId: "request-routing",
+    status: "in_progress",
+    message: "正在理解请求并选择合适的数据源…",
+  })
+  gate.dismiss()
+
+  assert.equal(cancelled, true)
+  scheduledCallback()
+  assert.deepEqual(visibleEvents, [])
+  assert.equal(
+    gate.push({
+      type: "progress",
+      itemId: "request-routing",
+      status: "completed",
+      message: "已准备好相关数据能力，正在生成回答…",
+    }),
+    true,
+  )
+  assert.deepEqual(visibleEvents, [])
 })
 
 test("mergeToolTimelineEvent keeps structured MCP input and result", () => {

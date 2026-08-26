@@ -160,6 +160,16 @@ test("PATCH persists the immutable creation time from generated session ids", as
       content: "Done",
       createdAt,
       durationMs: 12_340,
+      toolSteps: [
+        {
+          id: "tool-1",
+          type: "semantic_route",
+          status: "completed",
+          title: "语义路由",
+          description: "使用轻量模型分析请求。",
+          durationMs: 2_345,
+        },
+      ],
       traceMessages: [
         {
           id: "trace-message-1",

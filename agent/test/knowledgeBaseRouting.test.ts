@@ -138,7 +138,7 @@ describe("multi-catalog OpenAPI routing", () => {
     assert.ok(route.candidates.every((candidate) => candidate.catalog === "oa"));
   });
 
-  it("prefers the flat project list when looking up a named project's updates", async () => {
+  it("preserves the semantic router's project operation choice", async () => {
     const projectIndex = buildOpenApiIndex(
       {
         openapi: "3.1.0",
@@ -179,11 +179,11 @@ describe("multi-catalog OpenAPI routing", () => {
 
     assert.equal(
       route.candidates[0]?.operationId,
-      "projects_list_projects_list_by_project_get",
+      "projects_list_projects_list_by_person_get",
     );
   });
 
-  it("falls back to knowledge base search when semantic routing is unavailable", async () => {
+  it("keeps both safe read catalogs when semantic routing is unavailable", async () => {
     const route = await routeOpenApiRequest(
       createConfig(),
       createCombinedIndex(),
@@ -193,16 +193,20 @@ describe("multi-catalog OpenAPI routing", () => {
       },
     );
 
-    assert.deepEqual(route.catalogs, ["knowledge_base_read"]);
-    assert.equal(route.candidates[0]?.operationId, "searchKnowledgeBase");
+    assert.deepEqual(route.catalogs, ["oa", "knowledge_base_read"]);
     assert.ok(
-      route.candidates.every(
-        (candidate) => candidate.catalog === "knowledge_base_read",
+      route.candidates.some(
+        (candidate) => candidate.operationId === "searchKnowledgeBase",
+      ),
+    );
+    assert.ok(
+      route.candidates.some(
+        (candidate) => candidate.catalog === "oa",
       ),
     );
   });
 
-  it("routes knowledge mutations to unified-contract write operations", async () => {
+  it("does not infer a write route when semantic routing is unavailable", async () => {
     const route = await routeOpenApiRequest(
       createConfig(),
       createCombinedIndex(),
@@ -212,13 +216,36 @@ describe("multi-catalog OpenAPI routing", () => {
       },
     );
 
-    assert.deepEqual(route.catalogs, ["knowledge_base_write"]);
-    assert.equal(route.candidates[0]?.operationId, "createKnowledgeBaseNode");
+    assert.deepEqual(route.catalogs, ["oa", "knowledge_base_read"]);
     assert.ok(
       route.candidates.every(
-        (candidate) => candidate.catalog === "knowledge_base_write",
+        (candidate) => candidate.catalog !== "knowledge_base_write",
       ),
     );
+  });
+
+  it("consults semantic routing for write-shaped questions when the write catalog exists", async () => {
+    let calls = 0;
+    const route = await routeOpenApiRequest(
+      createConfig(),
+      createCombinedIndex(),
+      { task: "把知识库里的生产部署手册更新一下" },
+      async (prompt) => {
+        calls += 1;
+        assert.match(prompt, /knowledge_base_write/);
+        return JSON.stringify({
+          catalogs: ["knowledge_base_write"],
+          tags: ["untagged"],
+          operationIds: ["createKnowledgeBaseNode"],
+          accessMode: "write",
+          searchTerms: ["update knowledge page"],
+        });
+      },
+    );
+
+    assert.equal(calls, 1);
+    assert.deepEqual(route.catalogs, ["knowledge_base_write"]);
+    assert.equal(route.candidates[0]?.operationId, "createKnowledgeBaseNode");
   });
 
   it("describes the selected knowledge catalog and controlled helper", () => {
