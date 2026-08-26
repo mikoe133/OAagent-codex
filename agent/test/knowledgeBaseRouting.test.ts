@@ -4,7 +4,10 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildRuntimeContext } from "../src/application/runCodexAgent.js";
 import type { AppConfig } from "../src/config/config.js";
-import { resolveKnowledgeBaseContracts } from "../src/infrastructure/knowledgebase/knowledgeBaseContract.js";
+import {
+  KNOWLEDGE_BASE_CONTRACT_CACHE_TTL_MS,
+  resolveKnowledgeBaseContracts,
+} from "../src/infrastructure/knowledgebase/knowledgeBaseContract.js";
 import {
   buildOpenApiIndex,
   mergeOpenApiIndexes,
@@ -53,6 +56,29 @@ describe("knowledge base contracts", () => {
       ),
     );
     assert.equal(contracts.read.path, contracts.write.path);
+  });
+
+  it("reuses the resolved contract and indexes within the cache window", async () => {
+    const config = {
+      projectRoot: agentRoot,
+      knowledgeBaseOpenapiPath: path.join(
+        agentRoot,
+        "knowledgebaseapi",
+        "knowledgebaseapi.yaml",
+      ),
+    } as AppConfig;
+
+    const first = await resolveKnowledgeBaseContracts(config);
+    const second = await resolveKnowledgeBaseContracts(config);
+    const refreshed = await resolveKnowledgeBaseContracts(
+      config,
+      Date.now() + KNOWLEDGE_BASE_CONTRACT_CACHE_TTL_MS,
+    );
+
+    assert.strictEqual(second, first);
+    assert.strictEqual(second.read.document, first.read.document);
+    assert.strictEqual(second.read.index, first.read.index);
+    assert.notStrictEqual(refreshed, first);
   });
 });
 
@@ -274,6 +300,21 @@ describe("multi-catalog OpenAPI routing", () => {
     assert.doesNotMatch(runtime, /知识库写接口文档.*尚未提供/);
     assert.match(runtime, /写操作.*用户确认/);
     assert.doesNotMatch(runtime, /知识库.*callOaApi\.mjs/);
+  });
+
+  it("provides the RWKV knowledge module resources before other routes", () => {
+    const runtime = buildRuntimeContext(createConfig(), {
+      selectedApiCatalogs: ["rwkv_knowledge", "oa"],
+      openApiCandidates: createCombinedIndex().operations.filter(
+        (operation) => operation.catalog === "oa",
+      ),
+    });
+
+    assert.match(runtime, /当前路由接口域: rwkv_knowledge, oa/);
+    assert.match(runtime, /RWKV 知识路由模块优先/);
+    assert.match(runtime, /rwkv_v7_numpy\.py/);
+    assert.match(runtime, /run_rwkv7_qwen35\.py/);
+    assert.match(runtime, /必须先使用.*固定资料源/);
   });
 });
 

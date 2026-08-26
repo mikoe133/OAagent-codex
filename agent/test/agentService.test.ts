@@ -538,6 +538,31 @@ describe("resolveStreamFailure", () => {
     assert.equal(failure.message, "Codex Exec exited with code 1");
   });
 
+  it("turns exhausted 429 retries into an actionable model error", () => {
+    const failure = resolveStreamFailure(
+      new Error("Codex Exec exited with code 1"),
+      "exceeded retry limit, last status: 429 Too Many Requests, request id: trace-123",
+      [],
+    );
+
+    assert.match(failure.message, /回答模型服务.*429/);
+    assert.match(failure.message, /不是 OA 或知识库接口失败/);
+    assert.match(failure.message, /trace-123/);
+    assert.doesNotMatch(failure.message, /exceeded retry limit/);
+  });
+
+  it("turns model usage-limit errors into a switch-or-upgrade action", () => {
+    const failure = resolveStreamFailure(
+      new Error("Codex Exec exited with code 1"),
+      "You've hit your usage limit for gpt-5.6-terra. Switch to another model now.",
+      [],
+    );
+
+    assert.match(failure.message, /使用额度或消费上限/);
+    assert.match(failure.message, /切换模型\/提供商/);
+    assert.doesNotMatch(failure.message, /暂时限流/);
+  });
+
   it("does not expose the malformed JSONL event payload in parse errors", () => {
     const failure = resolveStreamFailure(
       new Error(
