@@ -14,7 +14,9 @@ export type AutomationDatabaseSchema = {
     enabled: number;
     timezone: string;
     schedule_type: string;
-    cron_expression: string;
+    trigger_type: string;
+    trigger_config: JsonValue | null;
+    cron_expression: string | null;
     catch_up_policy: string;
     overlap_policy: string;
     model_provider: string;
@@ -91,10 +93,12 @@ export type AutomationDatabaseSchema = {
     model_id_snapshot: string;
     model_parameters_snapshot: JsonValue;
     execution_parameters_snapshot: JsonValue;
+    source_snapshot: JsonValue | null;
+    trigger_event_id: string | null;
     model_catalog_version_snapshot: string | null;
     prompt_version_snapshot: string | null;
     system_prompt_snapshot: string | null;
-    cron_expression_snapshot: string;
+    cron_expression_snapshot: string | null;
     timezone_snapshot: string;
     retry_max_attempts_snapshot: number;
     retry_interval_seconds_snapshot: number;
@@ -193,6 +197,20 @@ export type AutomationDatabaseSchema = {
     started_at: Timestamp | null;
     finished_at: Timestamp | null;
     occurred_at: Timestamp;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+  };
+  automation_trigger_events: {
+    event_id: string;
+    event_type: string;
+    aggregate_type: string;
+    aggregate_id: string;
+    aggregate_version: number;
+    event_hash: string;
+    payload: JsonValue;
+    job_id: number | null;
+    run_id: string | null;
+    status: string;
     created_at: Timestamp;
     updated_at: Timestamp;
   };

@@ -21,6 +21,8 @@ import {
 const OA_AUTOMATION_REQUEST_TIMEOUT_MS = 15_000;
 const OA_AUTOMATION_TRACE_REQUEST_TIMEOUT_MS = 3_000;
 const SUPPORTED_JOB_TYPE = "github_project_progress_sync";
+const WEEKLY_REPORT_JOB_TYPE = "weekly_report_project_summary_sync";
+const SUPPORTED_JOB_TYPES = [SUPPORTED_JOB_TYPE, WEEKLY_REPORT_JOB_TYPE] as const;
 
 type OaFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -58,6 +60,7 @@ export type AutomationJobClaim = {
     projectId?: number;
     summaryScope?: ProjectProgressSummaryScope;
   };
+  sourceSnapshot: Record<string, unknown> | null;
   modelCatalogVersion: string | null;
   promptProfile: AutomationPromptProfileSnapshot | null;
   retryPolicy: {
@@ -156,6 +159,7 @@ export type AutomationClaimInput = {
   workerInstance: string;
   leaseSeconds: number;
   claimRequestId: string;
+  supportedJobTypes?: string[];
   signal?: AbortSignal;
 };
 
@@ -213,7 +217,10 @@ export class AutomationOaClient {
       "POST",
       {
         worker_instance: workerInstance,
-        supported_job_types: [SUPPORTED_JOB_TYPE],
+        supported_job_types:
+          typeof input === "string"
+            ? [SUPPORTED_JOB_TYPE]
+            : input.supportedJobTypes ?? [SUPPORTED_JOB_TYPE],
         lease_seconds: leaseSeconds as number,
         ...(typeof input === "string"
           ? {}
@@ -540,6 +547,7 @@ function decodeClaim(value: unknown): AutomationJobClaim {
     modelId: value.model_id,
     modelParameters: value.model_parameters,
     executionParameters,
+    sourceSnapshot: decodeSourceSnapshot(value.source_snapshot),
     modelCatalogVersion: value.model_catalog_version,
     promptProfile,
     retryPolicy: {
@@ -582,6 +590,14 @@ function decodeExecutionParameters(
       ? {}
       : { summaryScope: value.summary_scope as ProjectProgressSummaryScope }),
   };
+}
+
+function decodeSourceSnapshot(value: unknown): Record<string, unknown> | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    throw new AutomationOaContractError("OA claim source_snapshot 字段无效。");
+  }
+  return value;
 }
 
 function decodeClaimMutationContext(
@@ -724,4 +740,4 @@ function isIsoDate(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
-export { SUPPORTED_JOB_TYPE };
+export { SUPPORTED_JOB_TYPE, WEEKLY_REPORT_JOB_TYPE, SUPPORTED_JOB_TYPES };

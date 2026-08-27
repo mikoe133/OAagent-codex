@@ -33,10 +33,15 @@ Node 自动任务库只执行下列 SQL。`DATABASE_URL` 由部署平台 Secret 
 
 ```text
 scripts/sql/001_automation_schema_baseline.up.sql
+scripts/sql/003_automation_run_execution_parameters.up.sql
+scripts/sql/004_automation_event_triggers.up.sql
 scripts/sql/002_automation_defaults_seed.up.sql
+scripts/sql/005_automation_weekly_report_monitor_seed.up.sql
 ```
 
-`001` 合并旧 OA SQL `001、003、004、006、007` 的最终结构，只创建这 9 张表：
+迁移器按上述依赖顺序执行：事件字段和表先于周报监控任务种子创建。
+
+`001` 合并旧 OA SQL `001、003、004、006、007` 的最终结构，只创建基础 9 张表；`004` 再增加事件触发表 `automation_trigger_events`：
 
 ```text
 automation_jobs
@@ -48,9 +53,10 @@ automation_job_run_projects
 automation_ai_interactions
 automation_job_change_logs
 automation_run_trace_events
+automation_trigger_events
 ```
 
-`002` 只 seed 默认任务、标签和提示词，不写 `auth_permission*`、`projects`、`user` 或 `async_task*`。
+`002` 只 seed 默认 GitHub 任务、标签和提示词；`005` 预置周报监控任务。它们不写 `auth_permission*`、`projects`、`user` 或 `async_task*`。
 
 完整 `DATABASE_URL` 只放部署平台 Secret，不写入 Git、`.env.example` 或迁移文档。
 
@@ -60,7 +66,7 @@ automation_run_trace_events
 npm run migrate:automation --workspace agent
 ```
 
-迁移器使用 MySQL advisory lock。为保持“仅 9 张业务表”的约束，不另建 migration history 表；它只允许 9 张表全无或全有，发现半迁移状态会停止。`002` 可重复执行。
+迁移器使用 MySQL advisory lock。为保持基础 schema 的约束，不另建 migration history 表；它只允许基础 9 张表全无或全有，发现半迁移状态会停止。`002` 和 `005` 可重复执行，且只在任务不存在时创建预置任务。
 
 ## Runtime
 

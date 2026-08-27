@@ -165,6 +165,38 @@ test("routes worker claim requests only with OA_AGENT_AUTOMATION_TOKEN", async (
   }
 });
 
+test("accepts a signed weekly report event through the internal intake", async () => {
+  const calls: unknown[] = [];
+  const operations = {
+    async receiveAutomationEvent(input: unknown) {
+      calls.push(input);
+      return { event_id: "event-1", accepted: true, status: "queued", run_id: "run-1" };
+    },
+  } as unknown as AutomationOperations;
+  const application = new AutomationHttpApplication(
+    {
+      sessionSecret: "dummy",
+      sessionVerifyMaxAgeSeconds: 0,
+      internalToken: "internal-secret",
+    },
+    operations,
+  );
+  const fixture = await startFixture(application);
+  try {
+    const response = await requestJson(
+      fixture.port,
+      "POST",
+      "/internal/automation-events",
+      { Authorization: "Bearer internal-secret", "Content-Type": "application/json" },
+      { event_id: "event-1" },
+    );
+    assert.equal(response.status, 202);
+    assert.deepEqual(calls, [{ event_id: "event-1" }]);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("returns the OA-compatible 201 envelope when a job is created", async () => {
   const operations = {
     async createJob(input: unknown, userId: number) {
