@@ -4,10 +4,10 @@ import * as React from "react"
 import {
   AlarmClock,
   Bolt,
+  Cctv,
   History,
   ListFilter,
   Loader2,
-  Plus,
   Search,
   Settings2,
   ShieldAlert,
@@ -61,7 +61,7 @@ import {
   shouldRefreshAutomationRunDetail,
 } from "@/lib/automation-run-presentation"
 
-type TaskDialogMode = "create" | "edit" | null
+type TaskDialogMode = "edit" | null
 
 type LoadTaskConversationOptions = {
   background?: boolean
@@ -417,17 +417,21 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
   })
 
   const createCards = React.useCallback((items: AutomationJob[]): BentoItem[] => (
-    items.map((job) => ({
-      title: job.display_name ?? job.name,
-      meta: describeNextRun(job),
-      metaIcon: <Timer className="h-3.5 w-3.5 shrink-0" />,
-      description: job.description || "未填写任务说明",
-      icon: <AlarmClock className={job.deleted ? "h-4 w-4 text-rose-400" : job.enabled ? "h-4 w-4 text-sky-500" : "h-4 w-4 text-stone-400"} />,
-      status: job.deleted ? "已删除" : job.enabled ? configurationStatusLabel(job.configuration_status) : "已暂停",
-      tags: job.tags.map((tag) => tag.name),
-      onSelect: () => openTaskConversation(job),
-      onClick: () => void openEditDialog(job.id, job.deleted),
-    }))
+    items.map((job) => {
+      const Icon = job.job_type === "weekly_report_project_summary_sync" ? Cctv : AlarmClock
+      const iconClassName = job.deleted ? "h-4 w-4 text-rose-400" : job.enabled ? "h-4 w-4 text-sky-500" : "h-4 w-4 text-stone-400"
+      return {
+        title: job.display_name ?? job.name,
+        meta: describeNextRun(job),
+        metaIcon: <Timer className="h-3.5 w-3.5 shrink-0" />,
+        description: job.description || "未填写任务说明",
+        icon: <Icon className={iconClassName} />,
+        status: job.deleted ? "已删除" : job.enabled ? configurationStatusLabel(job.configuration_status) : "已暂停",
+        tags: job.tags.map((tag) => tag.name),
+        onSelect: () => openTaskConversation(job),
+        onClick: () => void openEditDialog(job.id, job.deleted),
+      }
+    })
   ), [openEditDialog, openTaskConversation])
 
   const activeJobs = filteredJobs.filter((job) => !job.deleted)
@@ -514,21 +518,6 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
                         </SelectContent>
                       </Select>
                     </div>
-                    <span
-                      className="shrink-0 cursor-not-allowed"
-                      title="功能开发中"
-                    >
-                      <Button
-                        data-slot="create-automated-task-button"
-                        type="button"
-                        disabled
-                        aria-label="新建自动任务，功能开发中"
-                        className="h-11 rounded-full px-5"
-                      >
-                        <Plus className="h-5 w-5" />
-                        新建自动任务
-                      </Button>
-                    </span>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button

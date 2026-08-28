@@ -15,12 +15,14 @@ const AUTOMATION_TABLES = [
   "automation_job_change_logs",
   "automation_run_trace_events",
 ] as const;
+const AUTOMATION_EVENT_TABLES = ["automation_trigger_events"] as const;
 
 const MIGRATION_LOCK = "oaagent_automation_schema_baseline";
 
 export type AutomationMigrationResult = {
   baselineApplied: boolean;
   executionParametersApplied: boolean;
+  eventTriggersApplied: boolean;
   seedApplied: boolean;
   tables: readonly string[];
 };
@@ -92,16 +94,73 @@ export async function runAutomationMigrations(
       executionParametersApplied = true;
     }
 
+    const [eventColumnRows] = await connection.query<RowDataPacket[]>(
+      `SELECT table_name, column_name, is_nullable
+         FROM information_schema.columns
+        WHERE table_schema = ?
+          AND (
+            (table_name = 'automation_jobs' AND column_name IN ('trigger_type', 'trigger_config', 'cron_expression'))
+            OR
+            (table_name = 'automation_job_runs' AND column_name IN ('source_snapshot', 'trigger_event_id', 'cron_expression_snapshot'))
+          )`,
+      [databaseName],
+    );
+    const [eventTableRows] = await connection.query<RowDataPacket[]>(
+      `SELECT table_name
+         FROM information_schema.tables
+        WHERE table_schema = ? AND table_name = 'automation_trigger_events'`,
+      [databaseName],
+    );
+    let eventTriggersApplied = false;
+    const eventColumns = new Map(
+      eventColumnRows.map((row) => [
+        `${String(row.table_name)}.${String(row.column_name)}`,
+        String(row.is_nullable),
+      ]),
+    );
+    const requiredEventColumns = [
+      "automation_jobs.trigger_type",
+      "automation_jobs.trigger_config",
+      "automation_jobs.cron_expression",
+      "automation_job_runs.source_snapshot",
+      "automation_job_runs.trigger_event_id",
+      "automation_job_runs.cron_expression_snapshot",
+    ];
+    const eventSpecificColumns = requiredEventColumns.filter(
+      (column) => !column.endsWith(".cron_expression") &&
+        !column.endsWith(".cron_expression_snapshot"),
+    );
+    const eventSchemaComplete = requiredEventColumns.every((column) => eventColumns.has(column)) &&
+      eventColumns.get("automation_jobs.cron_expression") === "YES" &&
+      eventColumns.get("automation_job_runs.cron_expression_snapshot") === "YES";
+    if (!eventSchemaComplete || eventTableRows.length === 0) {
+      if (eventSpecificColumns.some((column) => eventColumns.has(column)) || eventTableRows.length !== 0) {
+        throw new Error("检测到不完整的 automation event schema，拒绝继续迁移。");
+      }
+      const eventTriggersMigration = await readFile(
+        path.join(sqlDirectory, "004_automation_event_triggers.up.sql"),
+        "utf8",
+      );
+      await connection.query(eventTriggersMigration);
+      eventTriggersApplied = true;
+    }
+
     const seed = await readFile(
       path.join(sqlDirectory, "002_automation_defaults_seed.up.sql"),
       "utf8",
     );
     await connection.query(seed);
+    const monitorSeed = await readFile(
+      path.join(sqlDirectory, "005_automation_weekly_report_monitor_seed.up.sql"),
+      "utf8",
+    );
+    await connection.query(monitorSeed);
     return {
       baselineApplied,
       executionParametersApplied,
+      eventTriggersApplied,
       seedApplied: true,
-      tables: AUTOMATION_TABLES,
+      tables: [...AUTOMATION_TABLES, ...AUTOMATION_EVENT_TABLES],
     };
   } finally {
     if (lockAcquired) {

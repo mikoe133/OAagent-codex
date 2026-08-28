@@ -14,6 +14,7 @@ export const PROJECT_PROGRESS_ENDPOINTS = {
   oaSummaryGet: "oa.summary.get",
   oaSummaryCreate: "oa.summary.create",
   oaSummaryUpdate: "oa.summary.update",
+  oaWeeklyReportGet: "oa.weekly-report.get",
   githubRepositoryGet: "github.repository.get",
   githubBranchesList: "github.branches.list",
   githubCommitsList: "github.commits.list",

@@ -61,3 +61,9 @@ Knowledge-document questions route separately through
 controlled reads and confirmed writes. The unified OpenAPI is the only
 knowledge-base contract exposed to the agent; `agent/knowledgebaseapi/AGENT_API.md`
 is developer documentation and is not included in the runtime prompt.
+
+Requests whose current user task contains `RWKV` (case-insensitive) always
+prepend the `rwkv_knowledge` route without replacing any OA or knowledge-base
+routes selected by the semantic model. Its fixed source allowlist lives in
+`src/infrastructure/routing/rwkvKnowledgeModule.ts`; the answer model must read
+relevant allowlisted sources before handling the remaining selected routes.

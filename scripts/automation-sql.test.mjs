@@ -63,3 +63,51 @@ test("automation seed does not write OA permissions or secrets", async () => {
   assert.match(seed, /automation_tags/)
   assert.match(seed, /automation_jobs/)
 })
+
+test("event trigger migration enables monitor jobs and durable deduplication", async () => {
+  const up = await readFile(path.join(sqlDir, "004_automation_event_triggers.up.sql"), "utf8")
+  const down = await readFile(path.join(sqlDir, "004_automation_event_triggers.down.sql"), "utf8")
+  assert.match(up, /schedule_type IN \('cron', 'event'\)/)
+  assert.match(up, /MODIFY COLUMN cron_expression VARCHAR\(100\) NULL/)
+  assert.match(up, /MODIFY COLUMN cron_expression_snapshot VARCHAR\(100\) NULL/)
+  assert.match(up, /trigger_source IN \('schedule', 'manual', 'retry', 'catch_up', 'event'\)/)
+  assert.match(up, /CREATE TABLE automation_trigger_events/)
+  assert.match(up, /KEY idx_automation_trigger_event_aggregate/)
+  assert.match(down, /DROP TABLE IF EXISTS automation_trigger_events/)
+  assert.match(down, /DROP COLUMN trigger_type/)
+})
+
+test("weekly report monitor seed creates an event-driven all-project job", async () => {
+  const up = await readFile(
+    path.join(sqlDir, "005_automation_weekly_report_monitor_seed.up.sql"),
+    "utf8",
+  )
+  const down = await readFile(
+    path.join(sqlDir, "005_automation_weekly_report_monitor_seed.down.sql"),
+    "utf8",
+  )
+
+  assert.match(up, /'weekly-report-project-summary-sync'/)
+  assert.match(up, /'weekly_report_project_summary_sync'/)
+  assert.match(up, /schedule_type,\s*\n\s*trigger_type,\s*\n\s*trigger_config/)
+  assert.match(up, /'event',\s*\n\s*'event'/)
+  assert.match(up, /'resource', 'weekly_report'/)
+  assert.match(up, /'events', JSON_ARRAY\('created', 'updated'\)/)
+  assert.match(up, /'scope', 'job_owner'/)
+  assert.match(up, /'project_scope', 'all_projects'/)
+  assert.match(up, /'include_archived_projects', TRUE/)
+  assert.match(up, /'write_archived_projects', TRUE/)
+  assert.match(up, /ON DUPLICATE KEY UPDATE job_key = VALUES\(job_key\)/)
+  assert.match(down, /weekly-report-project-summary-sync/)
+})
+
+test("automation migration runs the monitor seed after event schema", async () => {
+  const migration = await readFile(
+    path.join(repoRoot, "agent", "src", "automation", "persistence", "migrations.ts"),
+    "utf8",
+  )
+  const eventMigration = migration.indexOf('"004_automation_event_triggers.up.sql"')
+  const monitorSeed = migration.indexOf('"005_automation_weekly_report_monitor_seed.up.sql"')
+  assert.ok(eventMigration >= 0)
+  assert.ok(monitorSeed > eventMigration)
+})

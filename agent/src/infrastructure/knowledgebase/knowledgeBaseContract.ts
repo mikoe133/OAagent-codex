@@ -22,7 +22,48 @@ export type ResolvedKnowledgeBaseContracts = {
   write: ResolvedKnowledgeBaseContract | null;
 };
 
+export const KNOWLEDGE_BASE_CONTRACT_CACHE_TTL_MS = 30 * 60 * 1000;
+
+type KnowledgeBaseContractCacheEntry = {
+  expiresAt: number;
+  promise: Promise<ResolvedKnowledgeBaseContracts>;
+};
+
+const resolvedKnowledgeBaseContractCache = new Map<
+  string,
+  KnowledgeBaseContractCacheEntry
+>();
+
 export async function resolveKnowledgeBaseContracts(
+  config: AppConfig,
+  now = Date.now(),
+): Promise<ResolvedKnowledgeBaseContracts> {
+  const cacheKey = [config.projectRoot, config.knowledgeBaseOpenapiPath].join(
+    "\u0000",
+  );
+  const cached = resolvedKnowledgeBaseContractCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+  if (cached) {
+    resolvedKnowledgeBaseContractCache.delete(cacheKey);
+  }
+
+  const promise = resolveKnowledgeBaseContractsUncached(config);
+  const entry: KnowledgeBaseContractCacheEntry = {
+    expiresAt: now + KNOWLEDGE_BASE_CONTRACT_CACHE_TTL_MS,
+    promise,
+  };
+  resolvedKnowledgeBaseContractCache.set(cacheKey, entry);
+  promise.catch(() => {
+    if (resolvedKnowledgeBaseContractCache.get(cacheKey) === entry) {
+      resolvedKnowledgeBaseContractCache.delete(cacheKey);
+    }
+  });
+  return promise;
+}
+
+async function resolveKnowledgeBaseContractsUncached(
   config: AppConfig,
 ): Promise<ResolvedKnowledgeBaseContracts> {
   const document = await loadDocument(config.knowledgeBaseOpenapiPath);

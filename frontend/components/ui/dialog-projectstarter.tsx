@@ -3,6 +3,7 @@
 import * as React from "react"
 import {
   AlarmClock,
+  Cctv,
   CheckCircle2,
   CirclePlay,
   Loader2,
@@ -53,6 +54,7 @@ import {
   AutomationApiError,
   type AutomationJob,
   type AutomationJobCreateInput,
+  type AutomationJobType,
   type AutomationJobParameters,
   type AutomationModelCatalog,
   type AutomationRun,
@@ -95,6 +97,7 @@ interface Dialog11Props {
 }
 
 type TaskFormState = {
+  jobType: AutomationJobType
   jobKey: string
   name: string
   description: string
@@ -118,6 +121,7 @@ type TaskFormState = {
 type PendingAction = "save" | "validate" | "trigger" | "create-tag" | "delete" | null
 
 const DEFAULT_FORM: TaskFormState = {
+  jobType: "github_project_progress_sync",
   jobKey: "github-project-progress-sync",
   name: "GitHub 项目进度每日总结",
   description: "读取 OA 项目关联的 GitHub 仓库并生成当天进度总结",
@@ -162,6 +166,7 @@ export default function Dialog11({
   const dialogOpen = open ?? internalOpen
   const setDialogOpen = onOpenChange ?? setInternalOpen
   const isCreateMode = mode === "create"
+  const isManagedMonitorTask = !isCreateMode && task?.job_type === "weekly_report_project_summary_sync"
 
   React.useEffect(() => {
     if (!dialogOpen) {
@@ -180,7 +185,7 @@ export default function Dialog11({
       return
     }
     if (task) {
-      const schedule = parseAutomationSchedule(task.cron_expression)
+      const schedule = parseAutomationSchedule(task.cron_expression ?? "0 20 * * 1-5")
       const taskModel = resolveAutomationModelSelection(
         modelCatalog,
         task.model_provider,
@@ -188,9 +193,10 @@ export default function Dialog11({
       )
       setForm({
         jobKey: task.job_key,
+        jobType: task.job_type,
         name: task.name,
         description: task.description,
-        cronExpression: task.cron_expression,
+        cronExpression: task.cron_expression ?? "",
         scheduleFrequency: schedule.frequency,
         executionTime: schedule.executionTime,
         timezone: task.timezone,
@@ -236,23 +242,33 @@ export default function Dialog11({
       const payload = buildCreateInput(form)
       const savedTask = isCreateMode
         ? await createAutomationJob(payload)
-        : await updateAutomationJob(requireTask(task).id, {
-            version: requireTask(task).version,
-            name: payload.name,
-            description: payload.description,
-            enabled: payload.enabled,
-            timezone: payload.timezone,
-            cron_expression: payload.cron_expression,
-            catch_up_policy: payload.catch_up_policy,
-            model_provider: payload.model_provider,
-            model_id: payload.model_id,
-            model_parameters: payload.model_parameters,
-            retry_max_attempts: payload.retry_max_attempts,
-            retry_interval_seconds: payload.retry_interval_seconds,
-            timeout_seconds: payload.timeout_seconds,
-            retention_days: payload.retention_days,
-            tag_ids: payload.tag_ids,
-          })
+        : isManagedMonitorTask
+          ? await updateAutomationJob(requireTask(task).id, {
+              version: requireTask(task).version,
+              name: payload.name,
+              description: payload.description,
+              enabled: payload.enabled,
+              model_provider: payload.model_provider,
+              model_id: payload.model_id,
+              tag_ids: payload.tag_ids,
+            })
+          : await updateAutomationJob(requireTask(task).id, {
+              version: requireTask(task).version,
+              name: payload.name,
+              description: payload.description,
+              enabled: payload.enabled,
+              timezone: payload.timezone,
+              cron_expression: payload.cron_expression,
+              catch_up_policy: payload.catch_up_policy,
+              model_provider: payload.model_provider,
+              model_id: payload.model_id,
+              model_parameters: payload.model_parameters,
+              retry_max_attempts: payload.retry_max_attempts,
+              retry_interval_seconds: payload.retry_interval_seconds,
+              timeout_seconds: payload.timeout_seconds,
+              retention_days: payload.retention_days,
+              tag_ids: payload.tag_ids,
+            })
       await onTaskChanged?.(savedTask)
       setDialogOpen(false)
     } catch (error) {
@@ -350,7 +366,9 @@ export default function Dialog11({
             {isCreateMode
               ? "创建由 OA 调度、OAagent Worker 执行的 GitHub 项目进度任务。"
               : task
-                ? `配置“${task.display_name ?? task.name}”${task.deleted ? "，该任务已删除" : ""}`
+                ? isManagedMonitorTask
+                  ? `查看 OA 预置监控任务“${task.display_name ?? task.name}”${task.deleted ? "，该任务已删除" : "，业务规则只读"}`
+                  : `配置“${task.display_name ?? task.name}”${task.deleted ? "，该任务已删除" : ""}`
                 : "正在读取 OA 中的任务详情。"}
           </DialogDescription>
         </DialogHeader>
@@ -390,6 +408,44 @@ export default function Dialog11({
                   </Alert>
                 ) : null}
 
+                <Field label="任务类型" htmlFor="automated-task-job-type">
+                  <Select
+                    value={form.jobType}
+                    onValueChange={(jobType) => {
+                      const nextType = jobType as AutomationJobType
+                      setForm((current) => ({
+                        ...current,
+                        jobType: nextType,
+                        jobKey: isCreateMode && nextType === "weekly_report_project_summary_sync"
+                          ? createWeeklyReportJobKey()
+                          : current.jobKey,
+                        name: isCreateMode && nextType === "weekly_report_project_summary_sync"
+                          ? "周报项目总结同步"
+                          : current.name,
+                        description: isCreateMode && nextType === "weekly_report_project_summary_sync"
+                          ? "监听周报新增或更新，拆分后同步到所有项目总结（含归档项目）"
+                          : current.description,
+                      }))
+                    }}
+                    disabled={formDisabled || !isCreateMode}
+                  >
+                    <SelectTrigger id="automated-task-job-type" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="github_project_progress_sync">GitHub 项目进度定时总结</SelectItem>
+                      {!isCreateMode && form.jobType === "weekly_report_project_summary_sync" ? (
+                        <SelectItem value="weekly_report_project_summary_sync">周报更新监控 → 项目总结同步</SelectItem>
+                      ) : null}
+                    </SelectContent>
+                  </Select>
+                  {form.jobType === "weekly_report_project_summary_sync" ? (
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      周报新增或更新后自动触发，按项目拆分内容并写入项目总结；包含归档项目。
+                    </p>
+                  ) : null}
+                </Field>
+
                 <Field label="运行状态" htmlFor="automated-task-enabled">
                   <div className="flex h-9 items-center justify-between rounded-md border px-3">
                     <span className="text-sm">{form.enabled ? "已开启" : "已暂停"}</span>
@@ -424,7 +480,9 @@ export default function Dialog11({
                   />
                 </Field>
 
-                <Field label="总结范围" htmlFor="automated-task-summary-scope">
+                {isManagedMonitorTask && task ? <WeeklyReportMonitorDetails task={task} /> : null}
+
+                {form.jobType === "github_project_progress_sync" ? <Field label="总结范围" htmlFor="automated-task-summary-scope">
                   <Select
                     value={form.summaryScope}
                     onValueChange={(scope) => updateForm(
@@ -441,9 +499,9 @@ export default function Dialog11({
                       <SelectItem value="latest_commit_of_updating_projects">更新中项目的最新提交</SelectItem>
                     </SelectContent>
                   </Select>
-                </Field>
+                </Field> : null}
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                {form.jobType === "github_project_progress_sync" ? <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="执行频率" htmlFor="automated-task-frequency">
                     <Select
                       value={form.scheduleFrequency}
@@ -479,15 +537,15 @@ export default function Dialog11({
                       required={form.scheduleFrequency !== "preserve-existing"}
                     />
                   </Field>
-                </div>
-                <p className="-mt-3 text-xs text-muted-foreground">
+                </div> : null}
+                {form.jobType === "github_project_progress_sync" ? <p className="-mt-3 text-xs text-muted-foreground">
                   {form.timezone === "Asia/Shanghai" ? "按北京时间执行。" : "按任务当前所在时区执行。"}
-                </p>
+                </p> : <p className="-mt-3 text-xs text-muted-foreground">监听事件：周报新增或内容更新（不使用 Cron）。</p>}
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="模型服务商" htmlFor="automated-task-provider">
-                    <Select
-                      value={form.modelProvider}
+                    <Field label="模型服务商" htmlFor="automated-task-provider">
+                      <Select
+                        value={form.modelProvider}
                       onValueChange={(provider) => {
                         const nextProvider = modelCatalog?.providers.find((item) => item.provider === provider)
                         const nextModel = nextProvider?.models.find((model) => model.enabled && model.is_default)
@@ -553,62 +611,62 @@ export default function Dialog11({
                 ) : null}
 
                 <div className="space-y-3">
-                  <Label>任务标签</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {tags.map((tag) => {
-                      const checked = form.tagIds.includes(tag.id)
-                      return (
-                        <label
-                          key={tag.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-sm"
-                        >
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={(nextChecked) => updateForm(
-                              "tagIds",
-                              nextChecked === true
-                                ? [...form.tagIds, tag.id]
-                                : form.tagIds.filter((tagId) => tagId !== tag.id),
-                            )}
-                            disabled={formDisabled || (!tag.enabled && !checked)}
-                          />
-                          <span>{tag.name}{tag.enabled ? "" : "（已停用）"}</span>
-                        </label>
-                      )
-                    })}
-                    {tags.length === 0 ? (
-                      <span className="text-sm text-muted-foreground">暂无标签，可在下方新建。</span>
-                    ) : null}
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      value={newTagName}
-                      onChange={(event) => setNewTagName(event.target.value)}
-                      placeholder="新标签名称"
-                      maxLength={100}
-                      disabled={formDisabled}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleCreateTag}
-                      disabled={!newTagName.trim() || formDisabled}
-                    >
-                      {pendingAction === "create-tag" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                      新建标签
-                    </Button>
-                  </div>
+                    <Label>任务标签</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {tags.map((tag) => {
+                        const checked = form.tagIds.includes(tag.id)
+                        return (
+                          <label
+                            key={tag.id}
+                            className="flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-sm"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(nextChecked) => updateForm(
+                                "tagIds",
+                                nextChecked === true
+                                  ? [...form.tagIds, tag.id]
+                                  : form.tagIds.filter((tagId) => tagId !== tag.id),
+                              )}
+                              disabled={formDisabled || (!tag.enabled && !checked)}
+                            />
+                            <span>{tag.name}{tag.enabled ? "" : "（已停用）"}</span>
+                          </label>
+                        )
+                      })}
+                      {tags.length === 0 ? (
+                        <span className="text-sm text-muted-foreground">暂无标签，可在下方新建。</span>
+                      ) : null}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={newTagName}
+                        onChange={(event) => setNewTagName(event.target.value)}
+                        placeholder="新标签名称"
+                        maxLength={100}
+                        disabled={formDisabled}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleCreateTag}
+                        disabled={!newTagName.trim() || formDisabled}
+                      >
+                        {pendingAction === "create-tag" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                        新建标签
+                      </Button>
+                    </div>
                 </div>
               </div>
 
               <aside className="border-t bg-muted/20 p-5 md:border-l md:border-t-0">
                 <div className="flex items-center gap-3">
                   <span className="flex size-10 items-center justify-center rounded-lg bg-background">
-                    <AlarmClock className="h-5 w-5" />
+                    {form.jobType === "weekly_report_project_summary_sync" ? <Cctv className="h-5 w-5" /> : <AlarmClock className="h-5 w-5" />}
                   </span>
                   <div>
-                    <p className="text-sm font-medium">GitHub 项目进度同步</p>
-                    <p className="text-xs text-muted-foreground">由 OA 调度，OAagent 执行</p>
+                    <p className="text-sm font-medium">{form.jobType === "weekly_report_project_summary_sync" ? "周报项目总结同步" : "GitHub 项目进度同步"}</p>
+                    <p className="text-xs text-muted-foreground">由 OA {form.jobType === "weekly_report_project_summary_sync" ? "事件触发" : "调度"}，OAagent 执行</p>
                   </div>
                 </div>
 
@@ -629,12 +687,15 @@ export default function Dialog11({
                           {pendingAction === "validate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                           校验已保存配置
                         </Button>
-                        <Button type="button" variant="outline" onClick={handleTrigger} disabled={isBusy || !canTrigger}>
+                        {!isManagedMonitorTask ? <Button type="button" variant="outline" onClick={handleTrigger} disabled={isBusy || !canTrigger}>
                           {pendingAction === "trigger" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CirclePlay className="h-4 w-4" />}
                           立即运行
-                        </Button>
-                        {!canTrigger ? (
+                        </Button> : null}
+                        {!isManagedMonitorTask && !canTrigger ? (
                           <p className="text-xs leading-5 text-muted-foreground">任务需开启且配置校验有效后才能手动运行。</p>
+                        ) : null}
+                        {isManagedMonitorTask ? (
+                          <p className="text-xs leading-5 text-muted-foreground">监控任务只接受周报新增或更新事件，不能手动运行。</p>
                         ) : null}
                       </div>
                     ) : null}
@@ -672,7 +733,7 @@ export default function Dialog11({
 
             <DialogFooter className="flex-row items-center border-t px-6 py-4 sm:justify-between">
               <div>
-                {!isCreateMode && task && !task.deleted ? (
+                {!isCreateMode && task && !task.deleted && !isManagedMonitorTask ? (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button type="button" variant="destructive" disabled={isBusy}>
@@ -703,7 +764,7 @@ export default function Dialog11({
                 {!isDeleted ? (
                   <Button
                     type="submit"
-                    disabled={isBusy || !form.modelProvider || !form.modelId || hasUnavailableModelSelection}
+                    disabled={isBusy || (!isManagedMonitorTask && (!form.modelProvider || !form.modelId || hasUnavailableModelSelection))}
                   >
                     {pendingAction === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                     {isCreateMode ? "创建任务" : "保存更改"}
@@ -744,28 +805,88 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   )
 }
 
+function WeeklyReportMonitorDetails({ task }: { task: AutomationJob }) {
+  const triggerConfig = task.trigger_config
+  const parameters = task.model_parameters ?? {}
+  const events = new Set(triggerConfig?.events ?? [])
+  const eventLabel = events.has("created") && events.has("updated")
+    ? "新增或更新"
+    : events.has("created")
+      ? "新增"
+      : events.has("updated")
+        ? "更新"
+        : "由 OA 配置"
+  const scopeLabel = triggerConfig?.scope === "all_users" ? "所有用户" : "任务所属用户"
+  const projectScopeLabel = parameters.project_scope === "all_projects" ? "所有项目" : "由服务端配置"
+  const archivedProjectsLabel = parameters.include_archived_projects
+    ? parameters.write_archived_projects ? "包含并写入" : "包含但不写入"
+    : "不包含"
+  const confidenceLabel = typeof parameters.minimum_confidence === "number"
+    ? `${Math.round(parameters.minimum_confidence * 100)}%`
+    : "服务端默认"
+  const ambiguityLabel = parameters.on_ambiguous === "record_and_continue"
+    ? "记录后继续"
+    : "不确定时不写入"
+  const debounceLabel = typeof parameters.debounce_seconds === "number"
+    ? `${parameters.debounce_seconds} 秒`
+    : "服务端默认"
+
+  return (
+    <section
+      data-slot="automated-monitor-task-details"
+      className="space-y-3 rounded-lg border bg-muted/20 p-4"
+    >
+      <div>
+        <h3 className="text-sm font-medium">监控配置</h3>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          该任务由 OA/服务端预置，周报触发器和项目处理规则只读；通用任务信息可在此调整。
+        </p>
+      </div>
+      <div className="space-y-2 text-sm">
+        <MetaRow label="触发资源" value="周报" />
+        <MetaRow label="触发事件" value={eventLabel} />
+        <MetaRow label="触发范围" value={scopeLabel} />
+        <MetaRow label="项目范围" value={projectScopeLabel} />
+        <MetaRow label="归档项目" value={archivedProjectsLabel} />
+        <MetaRow label="最低置信度" value={confidenceLabel} />
+        <MetaRow label="歧义处理" value={ambiguityLabel} />
+        <MetaRow label="防抖窗口" value={debounceLabel} />
+      </div>
+    </section>
+  )
+}
+
 function buildCreateInput(form: TaskFormState): AutomationJobCreateInput {
+  const isWeeklyReport = form.jobType === "weekly_report_project_summary_sync"
   return {
     job_key: form.jobKey.trim(),
-    job_type: "github_project_progress_sync",
+    job_type: form.jobType,
     name: form.name.trim(),
     description: form.description.trim(),
     enabled: form.enabled,
     timezone: form.timezone.trim(),
-    schedule_type: "cron",
-    cron_expression: buildAutomationCronExpression(
-      form.scheduleFrequency,
-      form.executionTime,
-      form.cronExpression,
-    ),
+    schedule_type: isWeeklyReport ? "event" : "cron",
+    trigger_type: isWeeklyReport ? "event" : "schedule",
+    trigger_config: isWeeklyReport
+      ? { resource: "weekly_report", events: ["created", "updated"], scope: "job_owner" }
+      : null,
+    cron_expression: isWeeklyReport
+      ? null
+      : buildAutomationCronExpression(form.scheduleFrequency, form.executionTime, form.cronExpression),
     catch_up_policy: form.catchUpPolicy,
     overlap_policy: "forbid",
     model_provider: form.modelProvider,
     model_id: form.modelId,
-    model_parameters: {
-      ...form.modelParameters,
-      summary_scope: form.summaryScope,
-    },
+    model_parameters: isWeeklyReport
+      ? {
+          project_scope: "all_projects",
+          include_archived_projects: true,
+          write_archived_projects: true,
+          minimum_confidence: 0.8,
+          on_ambiguous: "no_write",
+          debounce_seconds: 60,
+        }
+      : { ...form.modelParameters, summary_scope: form.summaryScope },
     retry_max_attempts: Number(form.retryMaxAttempts),
     retry_interval_seconds: Number(form.retryIntervalSeconds),
     timeout_seconds: Number(form.timeoutSeconds),
@@ -779,6 +900,13 @@ function createAutomationJobKey(): string {
     ? globalThis.crypto.randomUUID().replaceAll("-", "").slice(0, 10)
     : Math.random().toString(36).slice(2, 12)
   return `github-project-progress-${Date.now().toString(36)}-${randomSuffix}`
+}
+
+function createWeeklyReportJobKey(): string {
+  const randomSuffix = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID().replaceAll("-", "").slice(0, 10)
+    : Math.random().toString(36).slice(2, 12)
+  return `weekly-report-project-summary-${Date.now().toString(36)}-${randomSuffix}`
 }
 
 function requireTask(task: AutomationJob | undefined): AutomationJob {

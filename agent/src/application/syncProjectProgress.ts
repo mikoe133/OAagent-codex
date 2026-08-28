@@ -86,7 +86,7 @@ export type ProjectProgressProjectReport = {
   projectName: string;
   currentStatus: ProjectStatus;
   targetStatus: ProjectStatus;
-  outcome: "archived" | "no_github_urls" | "invalid_github_urls" | "incomplete" | "no_commits" | "evaluated";
+  outcome: "archived" | "no_github_urls" | "invalid_github_urls" | "incomplete" | "no_commits" | "evaluated" | "failed";
   warnings: string[];
   summaries: ProjectProgressSummaryProposal[];
   repositoryCount?: number;

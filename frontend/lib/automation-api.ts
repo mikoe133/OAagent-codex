@@ -42,7 +42,8 @@ export type AutomationModelCatalog = {
   stale?: boolean
 }
 
-export type AutomationPromptProfileJobType = "github_project_progress_sync"
+export type AutomationJobType = "github_project_progress_sync" | "weekly_report_project_summary_sync"
+export type AutomationPromptProfileJobType = AutomationJobType
 
 export type AutomationPromptProfile = {
   id: number
@@ -80,6 +81,12 @@ export type AutomationJobParameters = {
   summary_scope?: AutomationSummaryScope
   reasoning_effort?: "low" | "medium" | "high" | "xhigh"
   max_output_tokens?: number
+  project_scope?: "all_projects"
+  include_archived_projects?: boolean
+  write_archived_projects?: boolean
+  minimum_confidence?: number
+  on_ambiguous?: "no_write" | "record_and_continue"
+  debounce_seconds?: number
 }
 
 export type AutomationManualRunInput = {
@@ -90,7 +97,7 @@ export type AutomationManualRunInput = {
 export type AutomationJob = {
   id: number
   job_key: string
-  job_type: "github_project_progress_sync"
+  job_type: AutomationJobType
   name: string
   display_name: string
   deleted: boolean
@@ -100,8 +107,10 @@ export type AutomationJob = {
   tags: AutomationTag[]
   enabled: boolean
   timezone: string
-  schedule_type: "cron"
-  cron_expression: string
+  schedule_type: "cron" | "event"
+  trigger_type?: "schedule" | "event"
+  trigger_config?: { resource: "weekly_report"; events: Array<"created" | "updated">; scope?: "job_owner" | "all_users" } | null
+  cron_expression: string | null
   schedule_description: string
   catch_up_policy: "skip" | "latest"
   overlap_policy: "forbid"
@@ -126,13 +135,15 @@ export type AutomationJob = {
 
 export type AutomationJobCreateInput = {
   job_key: string
-  job_type: "github_project_progress_sync"
+  job_type: AutomationJobType
   name: string
   description: string
   enabled: boolean
   timezone: string
-  schedule_type: "cron"
-  cron_expression: string
+  schedule_type: "cron" | "event"
+  trigger_type?: "schedule" | "event"
+  trigger_config?: { resource: "weekly_report"; events: Array<"created" | "updated">; scope?: "job_owner" | "all_users" } | null
+  cron_expression: string | null
   catch_up_policy: "skip" | "latest"
   overlap_policy: "forbid"
   model_provider: string
@@ -145,10 +156,10 @@ export type AutomationJobCreateInput = {
   tag_ids: number[]
 }
 
-export type AutomationJobPatchInput = Omit<
+export type AutomationJobPatchInput = Partial<Omit<
   AutomationJobCreateInput,
   "job_key" | "job_type" | "schedule_type" | "overlap_policy"
-> & { version: number }
+>> & { version: number }
 
 export type AutomationRun = {
   id: string
@@ -161,7 +172,7 @@ export type AutomationRun = {
   job_deleted?: boolean
   job_type: string
   tags: Array<{ id: number; name: string; color: string | null }>
-  trigger_source: "schedule" | "catch_up" | "manual" | "retry"
+  trigger_source: "schedule" | "catch_up" | "manual" | "retry" | "event"
   scheduled_at: string
   available_at: string
   triggered_at: string
@@ -170,8 +181,18 @@ export type AutomationRun = {
   model_provider: string
   model_id: string
   execution_parameters?: AutomationManualRunInput
+  trigger_event_id?: string | null
+  source_snapshot?: {
+    event_id?: string
+    source_report_id?: string
+    source_version?: number
+    weekly_num?: number
+    content_hash?: string
+    updated_at?: string
+    scope?: Record<string, unknown>
+  } | null
   model_catalog_version?: string | null
-  cron_expression?: string
+  cron_expression?: string | null
   timezone?: string
   retry_max_attempts?: number
   retry_interval_seconds?: number

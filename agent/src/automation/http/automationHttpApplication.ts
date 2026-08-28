@@ -21,6 +21,7 @@ export type AutomationOperations = {
   deleteJob(jobId: number, version: number, userId: number): Promise<unknown>;
   validateJob(jobId: number, userId: number): Promise<unknown>;
   triggerJob(jobId: number, body: unknown, userId: number): Promise<unknown>;
+  receiveAutomationEvent(body: unknown): Promise<unknown>;
   listRuns(query: URLSearchParams, userId: number): Promise<unknown>;
   getRun(runId: string, query: URLSearchParams, userId: number): Promise<unknown>;
   cancelRun(runId: string, userId: number): Promise<unknown>;
@@ -82,7 +83,9 @@ export class AutomationHttpApplication {
         return true;
       }
       const accepted =
-        method === "POST" && /^\/automation-jobs\/\d+\/runs$/.test(url.pathname);
+        method === "POST" &&
+        (/^\/automation-jobs\/\d+\/runs$/.test(url.pathname) ||
+          url.pathname === "/internal/automation-events");
       const created =
         method === "POST" &&
         (url.pathname === "/automation-tags" ||
@@ -204,6 +207,9 @@ export class AutomationHttpApplication {
   ): Promise<unknown> {
     this.authenticateInternal(request);
     const path = url.pathname;
+    if (method === "POST" && path === "/internal/automation-events") {
+      return this.operations.receiveAutomationEvent(await readJsonBody(request));
+    }
     if (method === "POST" && path === "/internal/automation-job-runs/claim") {
       return this.operations.claimRun(await readJsonBody(request));
     }
