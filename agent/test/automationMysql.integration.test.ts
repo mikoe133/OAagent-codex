@@ -16,6 +16,13 @@ test(
     const url = new URL(databaseUrl!);
     assert.match(url.pathname, /_automation_test$/);
     await runAutomationMigrations(url, new URL("../..", import.meta.url).pathname);
+    const repeatedMigration = await runAutomationMigrations(
+      url,
+      new URL("../..", import.meta.url).pathname,
+    );
+    assert.equal(repeatedMigration.baselineApplied, false);
+    assert.equal(repeatedMigration.executionParametersApplied, false);
+    assert.equal(repeatedMigration.eventTriggersApplied, false);
     const database = createAutomationDatabase(url);
     await database.db
       .updateTable("automation_job_runs")
