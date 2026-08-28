@@ -29,7 +29,7 @@ OA/管理员可以预置一种“监控任务”，监听指定范围内的 OA �
 ### 当前实现边界
 
 - OAagent 已支持 `schedule_type=event`、`trigger_source=event` 和 `weekly_report_project_summary_sync` Worker claim。
-- 项目拆分当前使用项目 ID、精确名称和别名的确定性匹配；未匹配或歧义内容只记录、不写入，模型辅助拆分可作为后续增强。
+- 项目拆分当前由 Agent 读取周报内容并按项目 allowlist 归纳；Agent 输出经过 ID 白名单、置信度阈值和内容清洗后分别写入项目总结。Agent 失败时使用项目 ID、精确名称和别名的确定性匹配兜底，未匹配内容不写入。
 - 目标仍是现有 GitHub Commit 日总结接口：`summary` 写项目更新点，`ai_note` 写带周报时间和项目片段的来源说明。
 - OA 周报服务仍需提供详情读取接口及事务 Outbox；事件 payload 可携带完整内容作为当前兼容快照。
 
@@ -131,7 +131,8 @@ Content-Type: application/json
   -> Worker claim/heartbeat
   -> 回读周报当前版本
   -> 读取项目目录快照
-  -> 确定性拆分 + 受控模型兜底
+  -> Agent 读取 content 并按项目归纳
+  -> 白名单/置信度校验（失败时确定性兜底）
   -> 按项目幂等写入
   -> 复核源版本并结束或追排最新版本
 ```
@@ -160,26 +161,25 @@ Worker 收到事件后按资源 ID回读；回读不到时，已提交事件可�
 
 ### 拆分与匹配
 
-1. 固定读取项目目录快照，包含 `project_id`、名称、别名、状态和目录版本；不要在模型中自由猜项目 ID。
-2. 先解析约定格式（项目 ID、项目名称标题、项目标签/表格）；能确定的内容直接确定性拆分。
-3. 剩余内容才调用结构化模型，模型只能从项目 allowlist 中选择，并返回 `project_id`、`content`、`evidence_spans`、`confidence` 和 `reason`。
-4. 对重复项目名、跨项目的一段内容、空段、超长段和无法识别段分别记录结果；低于阈值或歧义项目不写入。
+1. 固定读取项目目录快照，包含 `project_id`、名称、别名、状态和目录版本；模型只能从项目 allowlist 中选择，不能自由猜项目 ID。
+2. Agent 读取传入的完整周报 `content`，按项目输出归纳后的 `summary`、`confidence` 和 `reason`。
+3. 对重复项目名、跨项目的一段内容、空段、超长段和无法识别段分别记录结果；低于阈值或歧义项目不写入。
+4. Agent 不可用时，使用项目 ID、项目名称和别名进行确定性匹配兜底，并标记运行需要重试。
 5. 记录源文本的段落范围或稳定片段哈希，便于审计和重跑；不要在日志中输出完整周报。
 
-建议模型输出：
+当前 Agent 输出：
 
 ```json
 {
   "projects": [
     {
       "project_id": 51,
-      "content": "本周完成……",
-      "evidence_spans": [{"start": 120, "end": 188}],
+      "summary": "本周完成……",
       "confidence": 0.96,
-      "reason": "标题精确匹配"
+      "reason": "项目名称匹配"
     }
   ],
-  "unmatched": [{"content_hash": "sha256:...", "reason": "未匹配项目"}]
+  "unmatched": ["无法确定归属的段落"]
 }
 ```
 
@@ -245,7 +245,7 @@ PATCH /internal/project-sync/github-commit-summaries/{summary_id}
 
 运行详情需要能看到：来源周报 ID/周次/版本、事件延迟、内容哈希、项目总数、匹配/歧义/未匹配数量、每个项目的写入幂等键和结果、最新版本追排情况。
 
-Trace 阶段建议：`receive_event`、`load_weekly_report`、`load_project_catalog`、`split_content`、`write_project_summary:{project_id}`、`reconcile_source_version`。
+当前 Worker 上报并由前端 `RunTraceSection` 展示的阶段包括：`worker_claimed`、`validate_configuration`、`load_weekly_report`、`load_projects`、`weekly_report_agent`、`split_weekly_report`、`write_project_summaries`、`write_project_summary:{project_id}`、`upload_run_audit` 和 `finalize_run`。其中项目级写入节点按项目 ID 独立更新，便于同时看到多个项目的进行中/完成/失败状态；读取、项目目录和 Agent 异常也会写入对应失败态。
 
 监控任务详情与运维表单：
 

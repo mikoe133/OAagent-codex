@@ -44,7 +44,7 @@ readonly project_progress_github_max_commit_pages_per_branch="${PROJECT_PROGRESS
 readonly project_progress_github_max_requests_per_repository="${PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY:-2000}"
 readonly project_progress_github_max_requests_per_run="${PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN:-20000}"
 readonly project_progress_agent_concurrency="${PROJECT_PROGRESS_AGENT_CONCURRENCY:-2}"
-readonly project_progress_oa_write_concurrency="${PROJECT_PROGRESS_OA_WRITE_CONCURRENCY:-1}"
+readonly project_progress_oa_write_concurrency="${PROJECT_PROGRESS_OA_WRITE_CONCURRENCY:-4}"
 readonly project_progress_agent_max_detail_calls="${PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS:-12}"
 readonly project_progress_agent_max_files_per_commit="${PROJECT_PROGRESS_AGENT_MAX_FILES_PER_COMMIT:-20}"
 readonly project_progress_agent_max_patch_chars_per_file="${PROJECT_PROGRESS_AGENT_MAX_PATCH_CHARS_PER_FILE:-1200}"
@@ -178,8 +178,10 @@ fi
   || fail "PROJECT_PROGRESS_AGENT_CONCURRENCY must be a number"
 (( project_progress_agent_concurrency >= 1 && project_progress_agent_concurrency <= 4 )) \
   || fail "PROJECT_PROGRESS_AGENT_CONCURRENCY must be between 1 and 4"
-[[ "$project_progress_oa_write_concurrency" == "1" ]] \
-  || fail "PROJECT_PROGRESS_OA_WRITE_CONCURRENCY must be 1"
+[[ "$project_progress_oa_write_concurrency" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_OA_WRITE_CONCURRENCY must be a number"
+(( project_progress_oa_write_concurrency >= 1 && project_progress_oa_write_concurrency <= 20 )) \
+  || fail "PROJECT_PROGRESS_OA_WRITE_CONCURRENCY must be between 1 and 20"
 [[ "$project_progress_agent_max_detail_calls" =~ ^[0-9]+$ ]] \
   || fail "PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS must be a number"
 (( project_progress_agent_max_detail_calls >= 1 && project_progress_agent_max_detail_calls <= 50 )) \

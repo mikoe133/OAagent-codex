@@ -138,6 +138,20 @@ describe("OaRequestScheduler", () => {
     await Promise.all([active, agedRead, newerWrite]);
     assert.deepEqual(order, ["read", "write"]);
   });
+
+  it("allows configured business writes to run concurrently", async () => {
+    const scheduler = new OaRequestScheduler({
+      totalConcurrency: 2,
+      laneConcurrency: { p1: 2 },
+    });
+    const gate = deferred<void>();
+    const writes = [0, 1].map(() => scheduler.run("p1", () => gate.promise));
+
+    await waitUntil(() => scheduler.metrics.activeByLane.p1 === 2);
+    assert.equal(scheduler.metrics.peakActiveTotal, 2);
+    gate.resolve();
+    await Promise.all(writes);
+  });
 });
 
 function deferred<T>() {

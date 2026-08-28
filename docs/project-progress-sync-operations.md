@@ -12,7 +12,7 @@ OA 是调度事实来源：OA 按任务配置在工作日 20:00 创建运行，O
 6. 同一项目的仓库结果全部完成后再聚合，同一项目每天最多写入一条总结。
 7. 最近一次提交距计划执行时间达到 240 小时，状态改为 `maintenance`；维护中项目再次出现提交时改为 `updating`。
 8. Codex Agent 先阅读单仓库当天候选 Commit。代码会为 `_`、`update`、`fix` 等低信息标题强制预读取受限 Commit 详情，并把文件名、增删统计和 Patch 片段作为必用证据注入总结；其他标题仍由 Agent 按需调用 `read_commit_details`。泛化总结会使用同一证据自动重试一次。
-9. 项目结果和每个仓库 Thread 的 AI interaction 使用稳定幂等键写入 OA；OA mutation 全局并发固定为 1。
+9. 项目结果和每个仓库 Thread 的 AI interaction 使用稳定幂等键写入 OA；周报项目总结按配置并发写入（默认 4，允许 1-20），自动化控制面保持独立调度。
 10. 收到取消请求或失去租约时，立即取消排队和在途 Thread，并停止后续业务写入。
 
 已有人工总结不会被覆盖。Worker 只更新本地持久化状态确认由它管理、且未被人工修改的记录；并发创建冲突会按项目和日期重新查询后处理。
@@ -38,7 +38,7 @@ PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH=100
 PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY=2000
 PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN=20000
 PROJECT_PROGRESS_AGENT_CONCURRENCY=2
-PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=1
+PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=4
 PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces
 PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS=12
 PROJECT_PROGRESS_AGENT_MAX_FILES_PER_COMMIT=20
@@ -54,7 +54,7 @@ GitHub PAT 只保留在 Worker 内存。每个活跃仓库会在 `127.0.0.1` 随
 
 AI interaction 的 `response_payload_sanitized` 会记录 `prefetched_detail_calls`、`detail_calls`、`github_detail_requests`、`files_returned`、`patch_chars_returned` 和 `quality_retries`。判断模型是否真的看过代码证据，应以这些审计字段为准，不能依据模型生成的备注推断。详情失败或发生文件/Patch 裁剪时，Worker 会由代码追加对应 limitation。
 
-一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 token 级执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。OA 总结、状态和审计写入按顺序执行。容器建议至少分配 `2 CPU / 3GB`。
+一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 token 级执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。周报项目总结写入使用独立的项目 OA 调度器，最多同时写入配置数量个不同项目；同一项目同一周次仍只有一个写入任务。运行 claim、heartbeat、Trace、项目审计和终态更新使用独立控制面调度器，不会被项目写入并发放大。容器建议至少分配 `2 CPU / 3GB`。
 
 项目总结 Agent 使用隔离的 Codex `exec`：忽略用户级配置和规则、不持久化 thread、禁用 shell、网页、插件能力及多 Agent，并固定 65536 token 上下文窗口和 6000 token 工具输出上限。若运行记录出现任何未授权工具调用，OAagent 会拒绝该输出并使用确定性兜底，同时把越权计数写入 AI interaction 审计。
 

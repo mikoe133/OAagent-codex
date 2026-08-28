@@ -7,6 +7,15 @@ import {
   type ProjectProgressSummaryScope,
 } from "../domain/projectProgress.js";
 
+const WEEKLY_REPORT_BUSINESS_PARAMETER_FIELDS = new Set([
+  "project_scope",
+  "include_archived_projects",
+  "write_archived_projects",
+  "minimum_confidence",
+  "on_ambiguous",
+  "debounce_seconds",
+]);
+
 export function splitProjectProgressAutomationParameters(
   parameters: Record<string, unknown>,
 ): {
@@ -46,4 +55,16 @@ export function resolveProjectProgressAutomationParameters(
     summaryScope: executionParameters.summaryScope ?? split.summaryScope,
     modelParameters: split.modelParameters,
   };
+}
+
+export function splitWeeklyReportAutomationModelParameters(
+  parameters: Record<string, unknown>,
+): AutomationModelParameters {
+  return decodeAutomationModelParameters(
+    Object.fromEntries(
+      Object.entries(parameters).filter(
+        ([field]) => !WEEKLY_REPORT_BUSINESS_PARAMETER_FIELDS.has(field),
+      ),
+    ),
+  );
 }

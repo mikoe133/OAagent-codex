@@ -3,8 +3,12 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { runProjectProgressAutomation } from "../application/runProjectProgressAutomation.js";
 import { syncWeeklyReportProjectSummaries } from "../application/weeklyReportProjectSummarySync.js";
+import { CodexWeeklyReportProjectSummaryAgent } from "../application/weeklyReportAgentSummarizer.js";
 import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
-import { resolveProjectProgressAutomationParameters } from "../application/projectProgressAutomationParameters.js";
+import {
+  resolveProjectProgressAutomationParameters,
+  splitWeeklyReportAutomationModelParameters,
+} from "../application/projectProgressAutomationParameters.js";
 import {
   projectProgressExecutionPolicy,
   syncProjectProgress,
@@ -51,14 +55,18 @@ async function main(): Promise<void> {
   try {
     const runOnce = async () => {
       const operationMetrics = new OperationMetricsRecorder();
-      const oaRequestScheduler = new OaRequestScheduler();
+      const automationRequestScheduler = new OaRequestScheduler();
+      const projectOaRequestScheduler = new OaRequestScheduler({
+        totalConcurrency: Math.max(4, baseConfig.concurrency.oaWrite),
+        laneConcurrency: { p1: baseConfig.concurrency.oaWrite },
+      });
       const heartbeatLimiter = new AsyncSemaphore(1);
       const result = await runProjectProgressAutomation({
         automationClient: new AutomationOaClient({
           baseUrl: baseConfig.automation.baseUrl,
           token: automationToken,
         }, fetch, operationMetrics, {
-          scheduler: oaRequestScheduler,
+          scheduler: automationRequestScheduler,
           heartbeatLimiter,
         }),
         workerInstance: baseConfig.automation.workerInstance,
@@ -69,14 +77,18 @@ async function main(): Promise<void> {
         traceSpool: store,
         resolveExecution: async (claim) => {
           const executionPolicy = projectProgressExecutionPolicy(claim.triggerSource);
-          const automationParameters = resolveProjectProgressAutomationParameters(
-            claim.modelParameters,
-            claim.executionParameters,
-          );
+          const automationParameters = claim.jobType === "weekly_report_project_summary_sync"
+            ? null
+            : resolveProjectProgressAutomationParameters(
+                claim.modelParameters,
+                claim.executionParameters,
+              );
+          const automationModelParameters = automationParameters?.modelParameters ??
+            splitWeeklyReportAutomationModelParameters(claim.modelParameters);
           const config = loadProjectProgressConfig(process.env, repoRoot, {
             modelProvider: claim.modelProvider,
             modelId: claim.modelId,
-            modelParameters: automationParameters.modelParameters,
+            modelParameters: automationModelParameters,
           });
           if (config.stateDatabasePath !== baseConfig.stateDatabasePath) {
             throw new Error("运行期间 PROJECT_PROGRESS_STATE_DB 不允许变化。");
@@ -103,39 +115,98 @@ async function main(): Promise<void> {
             },
             fetch,
             operationMetrics,
-            { scheduler: oaRequestScheduler },
+            { scheduler: projectOaRequestScheduler },
           );
           if (claim.jobType === "weekly_report_project_summary_sync") {
             const weeklyParameters = claim.modelParameters as Record<string, unknown>;
-            return async (shouldCancel) => {
-              const snapshot = claim.sourceSnapshot;
-              const source = snapshot && typeof snapshot.source_report_id === "string" &&
-                typeof snapshot.source_version === "number" &&
-                typeof snapshot.weekly_num === "number" &&
-                typeof snapshot.updated_at === "string" &&
-                typeof snapshot.content === "string"
+            const weeklyReportAgent = new CodexWeeklyReportProjectSummaryAgent({
+              model: config.model,
+              workingDirectory: repoRoot,
+              runId: claim.runId,
+              ...(claim.modelCatalogVersion
+                ? { modelCatalogVersion: claim.modelCatalogVersion }
+                : {}),
+              promptProfile: claim.promptProfile
                 ? {
-                    id: snapshot.source_report_id,
-                    weeklyNum: snapshot.weekly_num,
-                    content: snapshot.content,
-                    version: snapshot.source_version,
-                    updatedAt: snapshot.updated_at,
-                    ownerId: null,
+                    promptVersion: claim.promptProfile.promptVersion,
+                    systemPrompt: claim.promptProfile.systemPrompt,
                   }
-                : snapshot && typeof snapshot.source_report_id === "string"
-                  ? await projectOaClient.getWeeklyReport(snapshot.source_report_id).then((current) => {
-                      if (current.version !== snapshot.source_version) {
-                        throw new Error(
-                          `周报源版本已推进:${snapshot.source_version}->${current.version}`,
-                        );
+                : null,
+            });
+            return async (shouldCancel, trace) => {
+              await trace?.({
+                eventKey: "weekly_report_source",
+                sequence: 300,
+                phase: "load_weekly_report",
+                status: "running",
+                title: "读取周报快照",
+                message: "正在读取周报当前版本",
+              });
+              const source = await (async () => {
+                try {
+                  const snapshot = claim.sourceSnapshot;
+                  const source = snapshot && typeof snapshot.source_report_id === "string" &&
+                    typeof snapshot.source_version === "number" &&
+                    typeof snapshot.weekly_num === "number" &&
+                    typeof snapshot.updated_at === "string" &&
+                    typeof snapshot.content === "string"
+                    ? {
+                        id: snapshot.source_report_id,
+                        weeklyNum: snapshot.weekly_num,
+                        content: snapshot.content,
+                        version: snapshot.source_version,
+                        updatedAt: snapshot.updated_at,
+                        ownerId: null,
                       }
-                      return current;
-                    })
-                  : null;
-              if (!source) {
-                throw new Error("事件缺少可读取的周报源快照。");
-              }
-              const projects = await projectOaClient.listProjects();
+                    : snapshot && typeof snapshot.source_report_id === "string"
+                      ? await projectOaClient.getWeeklyReport(snapshot.source_report_id).then((current) => {
+                          if (current.version !== snapshot.source_version) {
+                            throw new Error(
+                              `周报源版本已推进:${snapshot.source_version}->${current.version}`,
+                            );
+                          }
+                          return current;
+                        })
+                      : null;
+                  if (!source) {
+                    throw new Error("事件缺少可读取的周报源快照。");
+                  }
+                  return source;
+                } catch (error) {
+                  await trace?.({
+                    eventKey: "weekly_report_source",
+                    sequence: 300,
+                    phase: "load_weekly_report",
+                    status: "failed",
+                    title: "读取周报快照",
+                    message: safeTraceError(error, "读取周报失败"),
+                  });
+                  throw error;
+                }
+              })();
+              await trace?.({
+                eventKey: "weekly_report_projects",
+                sequence: 400,
+                phase: "load_projects",
+                status: "running",
+                title: "读取项目目录",
+                message: "正在读取项目目录",
+              });
+              const projects = await (async () => {
+                try {
+                  return await projectOaClient.listProjects();
+                } catch (error) {
+                  await trace?.({
+                    eventKey: "weekly_report_projects",
+                    sequence: 400,
+                    phase: "load_projects",
+                    status: "failed",
+                    title: "读取项目目录",
+                    message: safeTraceError(error, "读取项目目录失败"),
+                  });
+                  throw error;
+                }
+              })();
               return syncWeeklyReportProjectSummaries({
                 report: source,
                 projects,
@@ -146,8 +217,14 @@ async function main(): Promise<void> {
                   ? weeklyParameters.minimum_confidence
                   : 0.8,
                 shouldCancel,
+                summarizer: weeklyReportAgent,
+                trace,
+                oaWriteConcurrency: config.concurrency.oaWrite,
               });
             };
+          }
+          if (!automationParameters) {
+            throw new Error("GitHub 项目进度任务缺少自动化参数。");
           }
           return async (shouldCancel, trace) => {
             return await syncProjectProgress({
@@ -271,6 +348,17 @@ function logResult(
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function safeTraceError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : fallback;
+  return message
+    .replace(/Authorization:\s*Bearer\s+\S+/gi, "Authorization: Bearer [REDACTED]")
+    .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/sessionid=[^\s;]+/gi, "sessionid=[REDACTED]")
+    .replace(/[\r\n]+/g, " ")
+    .trim()
+    .slice(0, 500) || fallback;
 }
 
 main().catch((error: unknown) => {
