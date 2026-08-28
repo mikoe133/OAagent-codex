@@ -8,7 +8,7 @@
 - 每个当天有 Commit 的仓库启动一个独立 Codex Thread；
 - 同时最多运行 2 个 Codex Thread，其余仓库任务排队；
 - GitHub HTTP 请求全局最多并发 6 个；
-- OA 业务写入全局最多并发 1 个；
+- OA 项目业务写入默认并发 4 个，可按环境降至 1 或调高至 20；
 - 项目状态继续由确定性代码判断，提示词和 Agent 无权决定或修改状态；
 - 读取项目、读取 GitHub、生成每日总结、判断状态、写入总结/状态/审计的完整流程只绑定到 `github_project_progress_sync`。
 
@@ -22,7 +22,7 @@
 | Codex Thread | 每仓库 1 个 | 一个 Thread 汇总该仓库当天全部 Commit |
 | Codex Thread 并发 | 2 | 任意时刻最多两个仓库正在使用模型和 Agent 工具 |
 | GitHub 读取并发 | 6 | Worker 内所有 GitHub API 请求共享同一个全局信号量 |
-| OA 写入并发 | 1 | Commit 总结、项目状态、运行结果和 AI 审计逐个写入 |
+| OA 项目写入并发 | 4（可配 1-20） | 不同项目可并发写入；同一项目内部保持确定性顺序 |
 
 这里的“同时运行数量 2”不是启动两个 OAagent 服务，也不是启动两个 Worker 容器，而是一个 Worker 进程内部最多存在两个活跃的仓库总结 Thread。
 
@@ -31,7 +31,7 @@
 ├── GitHub 请求池：最多 6 个请求
 ├── 仓库任务队列：N 个当天活跃仓库
 ├── Codex Thread 池：最多 2 个活跃 Thread
-└── OA 写入队列：最多 1 个写请求
+└── OA 项目写入队列：最多 4 个写请求（可配置）
 ```
 
 ## 业务语义
@@ -85,7 +85,7 @@ flowchart TD
     J --> K
     K --> L["代码判断维护中或更新中"]
     L --> M["生成项目总结、状态与审计写入意图"]
-    M --> N["OA 写入队列\n并发 1"]
+    M --> N["OA 项目写入队列\n默认并发 4"]
     N --> O["完成父运行并上报统计"]
 ```
 
@@ -98,7 +98,7 @@ flowchart TD
 ```env
 PROJECT_PROGRESS_GITHUB_CONCURRENCY=6
 PROJECT_PROGRESS_AGENT_CONCURRENCY=2
-PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=1
+PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=4
 PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces
 ```
 
@@ -107,7 +107,7 @@ PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces
 - 三个并发值必须是正整数；
 - GitHub 并发建议限制为 `1-20`；
 - Agent 并发建议限制为 `1-4`，默认 2；
-- OA 写入并发当前必须等于 1，配置其他值直接启动失败，而不是静默降级；
+- OA 写入并发允许 `1-20`，默认 4；配置非法值直接启动失败，而不是静默降级；
 - 工作区根目录必须位于应用可写目录内，不能使用仓库根目录或用户主目录作为清理目标。
 
 需要同步更新 `.env.example`、运行手册、Docker Compose 和 CI/CD 环境变量说明。四项都属于非敏感配置，不应存入 GitHub Secrets；使用 Variables 或部署配置即可。
@@ -118,7 +118,7 @@ PROJECT_PROGRESS_WORKSPACE_ROOT=/app/.context/project-progress-workspaces
 
 - `githubLimiter(6)`：包裹 GitHub Reader 的所有 HTTP 请求以及每个 MCP `read_commit_details` 请求；
 - `agentLimiter(2)`：包裹 MCP Server 创建、Codex Thread 执行和结果解析的完整生命周期；
-- `oaWriteLimiter(1)`：包裹所有 OA mutation，不限制 OA 的 list/get/heartbeat 请求。
+- `oaWriteLimiter(4)`：包裹项目业务 mutation，不限制 OA 的 list/get 请求；自动化 claim、heartbeat、Trace 和终态使用独立控制面调度器。
 
 并发器必须支持 `AbortSignal`，等待队列在取消、租约丢失或父任务终止时立即拒绝，不再启动新任务。
 
@@ -199,7 +199,7 @@ ${PROJECT_PROGRESS_WORKSPACE_ROOT}/{run_id}/{repository_hash}/
 - 其他情况保持原状态；
 - 快照不完整时不写状态。
 
-项目的所有仓库总结完成后，父任务才生成写入意图。写入仍使用现有幂等键和 outbox；`oaWriteLimiter(1)` 保证任何时刻只执行一个 mutation。
+项目的所有仓库总结完成后，父任务才生成写入意图。写入仍使用现有幂等键和 outbox；不同项目可由 `oaWriteLimiter` 并发执行，同一项目内部仍按状态、总结、审计顺序处理。
 
 建议保持当前单项目写入顺序：
 
@@ -209,7 +209,7 @@ ${PROJECT_PROGRESS_WORKSPACE_ROOT}/{run_id}/{repository_hash}/
 4. 上报项目运行结果；
 5. 所有项目完成后结束父运行。
 
-若现有 OA 接口对顺序有更严格要求，以接口幂等与事务契约为准，但仍必须保持全局单写。
+若现有 OA 接口对顺序有更严格要求，以接口幂等与事务契约为准；遇到容量或冲突时将并发配置降回 1。
 
 ### 7. 失败、取消与重试
 
@@ -235,7 +235,7 @@ ${PROJECT_PROGRESS_WORKSPACE_ROOT}/{run_id}/{repository_hash}/
   "repository_tasks_failed": 0,
   "agent_peak_concurrency": 2,
   "github_peak_concurrency": 6,
-  "oa_write_peak_concurrency": 1
+  "oa_write_peak_concurrency": 4
 }
 ```
 
@@ -252,7 +252,7 @@ ${PROJECT_PROGRESS_WORKSPACE_ROOT}/{run_id}/{repository_hash}/
 3. 为 GitHub Reader、Commit 详情 MCP 和 OA Writer 注入对应 limiter；
 4. 增加并发峰值指标。
 
-退出标准：单元测试可证明三个并发池分别不超过 6、2、1，等待任务取消后不会继续启动。
+退出标准：单元测试可证明三个并发池分别不超过 6、2、配置值，等待任务取消后不会继续启动。
 
 ### 阶段二：仓库任务模型
 
@@ -264,22 +264,22 @@ ${PROJECT_PROGRESS_WORKSPACE_ROOT}/{run_id}/{repository_hash}/
 
 退出标准：8 个活跃仓库产生 8 个 Thread ID，但运行时活跃 Thread 峰值为 2；无 Commit 仓库 Thread 数为 0。
 
-### 阶段三：项目聚合和串行写入
+### 阶段三：项目聚合和受控并发写入
 
 1. 将仓库结果 fan-in 到所有关联 OA 项目；
 2. 确定性生成单条项目日总结；
 3. 保留基于全部仓库快照的状态判断；
-4. 通过 OA 单写队列执行总结、状态和审计写入；
+4. 通过 OA 项目写入队列并发执行不同项目的总结、状态和审计写入；
 5. 保持现有幂等键和 outbox 恢复能力。
 
-退出标准：多仓库项目每天仍只有一条总结；状态判断不依赖 Agent 文本；OA mutation 峰值始终为 1。
+退出标准：多仓库项目每天仍只有一条总结；状态判断不依赖 Agent 文本；OA 项目 mutation 峰值不超过配置值。
 
 ### 阶段四：运行审计、部署和灰度
 
 1. 增加仓库数量、队列等待、各池峰值、Thread 耗时和 fallback 指标；
 2. 更新 `.env.example`、Compose、CI/CD 和运维文档；
 3. 将 Worker 资源从当前 `1 CPU / 1GB` 起步调整为至少 `2 CPU / 3GB`；
-4. 先用 `Agent=1、GitHub=2、OA=1` 灰度，再切换到目标 `2/6/1`；
+4. 先用 `Agent=1、GitHub=2、OA=1` 灰度，再切换到目标 `2/6/4`；
 5. 观察 GitHub rate limit、模型限流、内存峰值和 OA 422/5xx 后再固化默认值。
 
 退出标准：连续 5 个工作日无重复总结、无错误状态切换、无租约丢失，且资源峰值在容器限制内。
@@ -291,7 +291,7 @@ ${PROJECT_PROGRESS_WORKSPACE_ROOT}/{run_id}/{repository_hash}/
 | 20 个仓库，仅 8 个当天有 Commit | 创建 8 个仓库任务和 8 个 Thread |
 | 8 个仓库任务同时排队 | 活跃 Codex Thread 峰值等于 2 |
 | Thread 同时请求 Commit 详情 | 全局 GitHub HTTP 并发不超过 6 |
-| 多项目同时产生写入 | OA mutation 并发始终等于 1 |
+| 多项目同时产生写入 | OA 项目 mutation 并发不超过配置值，默认峰值为 4 |
 | 一个项目关联 3 个活跃仓库 | 3 个仓库 Thread，最终 1 条项目日总结 |
 | 同一仓库关联 2 个项目 | 仓库只读取、总结一次，结果供两个项目聚合 |
 | 仓库当天无 Commit | 不创建 Thread，但参与 10 天状态判断 |

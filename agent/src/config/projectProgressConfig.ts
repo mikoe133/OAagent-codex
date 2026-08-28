@@ -59,7 +59,7 @@ export type ProjectProgressConfig = {
   concurrency: {
     github: number;
     agent: number;
-    oaWrite: 1;
+    oaWrite: number;
   };
   workspaceRoot: string;
   stateDatabasePath: string;
@@ -144,14 +144,11 @@ export function loadProjectProgressConfig(
   }
   const oaWriteConcurrency = parseIntegerInRange(
     environment.PROJECT_PROGRESS_OA_WRITE_CONCURRENCY,
-    1,
+    4,
     1,
     20,
     "PROJECT_PROGRESS_OA_WRITE_CONCURRENCY",
   );
-  if (oaWriteConcurrency !== 1) {
-    throw new Error("PROJECT_PROGRESS_OA_WRITE_CONCURRENCY 当前必须为 1。");
-  }
   const maxRequestsPerRepository = parseIntegerInRange(
     environment.PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY,
     2_000,

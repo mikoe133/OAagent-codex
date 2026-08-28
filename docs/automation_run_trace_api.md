@@ -160,6 +160,20 @@ Authorization: Bearer <普通用户 session token>
 
 同一仓库节点会按 `running -> succeeded/fallback/failed/cancelled` 更新，前端每 3 秒查询活动运行；运行进入终态后自动停止轮询。
 
+周报项目总结任务使用同一 Trace 接口，并在通用控制面阶段之外上报以下专用节点：
+
+| sequence | event_key/phase | 内容 |
+| ---: | --- | --- |
+| 300 | `weekly_report_source` / `load_weekly_report` | 读取传入周报 `content` 快照 |
+| 400 | `weekly_report_projects` / `load_projects` | 读取项目 allowlist |
+| 500 | `weekly_report_agent` | Agent 归纳周报并匹配项目 |
+| 550 | `weekly_report_split` / `split_weekly_report` | 校验项目 ID、置信度和未匹配结果 |
+| 600 | `weekly_report_writes` / `write_project_summaries` | 项目总结并发写入总体进度 |
+| 610 | `weekly_report_write:{project_id}` / `write_project_summary` | 单项目 OA 总结增量写入状态 |
+
+其中 `sequence=610` 的不同项目节点可同时处于 `running`；并发上限由 Worker 的
+`PROJECT_PROGRESS_OA_WRITE_CONCURRENCY` 控制（默认 4，允许 1-20）。同一项目同一周次只生成一个节点和一个写入任务。
+
 ## 发布顺序
 
 1. OA 后端执行数据库迁移并发布两个 Trace 接口。

@@ -44,7 +44,7 @@ import {
 export type ProjectProgressConcurrency = {
   github: number;
   agent: number;
-  oaWrite: 1;
+  oaWrite: number;
 };
 
 export type ProjectProgressTraceEvent = {
@@ -1196,9 +1196,11 @@ function resolveConcurrency(
     resolved.github < 1 ||
     !Number.isInteger(resolved.agent) ||
     resolved.agent < 1 ||
-    resolved.oaWrite !== 1
+    !Number.isInteger(resolved.oaWrite) ||
+    resolved.oaWrite < 1 ||
+    resolved.oaWrite > 20
   ) {
-    throw new Error("项目进度并发配置无效，必须满足 GitHub>=1、Agent>=1、OA 写入=1。");
+    throw new Error("项目进度并发配置无效，必须满足 GitHub>=1、Agent>=1、OA 写入=1-20。");
   }
   return resolved;
 }

@@ -5,6 +5,7 @@
 - 适用任务：`github_project_progress_sync`
 - 目标时区：`Asia/Shanghai`
 - 当前实现基线：单 Worker 进程、单活跃 OA run、GitHub/Agent/OA 业务写入并发 `6/2/1`
+- 周报项目总结同步为独立业务链路：Agent 归纳周报 `content` 后，不同项目的 OA 总结写入默认并发 4（可配置 1-20）；自动化 claim、heartbeat、Trace、审计和终态仍使用独立控制面调度器。
 
 ## 1. 决策摘要
 
@@ -132,7 +133,7 @@ evidenceDigest
 | OA Heartbeat | 1 | 1 | 保留控制面通道，不被数据请求阻塞 |
 | OA 非 Heartbeat 总请求 | 4 | 数据面 200 + P0 保留 1 | 所有 OA 读取、业务写入、审计和 Trace 的父级上限；P0 不与数据面争等待槽 |
 | OA 项目读取 | 4 | 100 | 列表分页串行；优先直接使用列表字段，兼容模式详情最多并发 4 |
-| OA 业务写入 | 1 | 100 | 状态、总结、run project、AI interaction、run 终态串行 |
+| OA 项目业务写入 | 4（周报默认） | 100 | 不同项目可并发；同一项目内保持幂等和版本顺序 |
 | OA Trace | 1 | 100，按 `event_key` 合并 | 共享 OA 非 Heartbeat 总池，低优先级 |
 | GitHub HTTP | 6 | 200 | 仓库扫描和 Agent Commit 详情共享同一池 |
 | 单仓库 GitHub HTTP | 6 | 6 | 分支可并发读取，同一分支的分页保持串行 |
@@ -143,25 +144,29 @@ evidenceDigest
 OA 使用一个原子准入的优先级调度器，而不是让调用方嵌套获取多个普通 Semaphore：
 
 ```text
-heartbeatLimiter(1)                 # 独立保留，不与数据面竞争
+heartbeatLimiter(1)                       # 独立保留，不与数据面竞争
 
-OaRequestScheduler(total=4)         # 单次原子准入
-├── P0 finalization/control         # lane cap 1
-├── P1 fenced business/audit write  # lane cap 1
-├── P2 read                         # lane cap 4
-└── P3 trace                        # lane cap 1
+automationRequestScheduler(total=4)       # 控制面原子准入
+├── P0 finalization/control               # lane cap 1
+├── P1 audit/run mutation                 # lane cap 1
+├── P2 read                               # lane cap 4
+└── P3 trace                              # lane cap 1
 
-mutationGroup(P0, P1)=1             # 所有控制/业务写入合计最多一个 in-flight
-reservedP0Mailbox=1                 # 不计入数据面 200 个等待项
+projectOaRequestScheduler(total=max(4,W)) # 周报项目写入数据面
+├── P1 project summary/status mutation    # lane cap W
+└── P2 project read                       # lane cap 4
+
+automation mutationGroup(P0, P1)=1       # 控制/审计写入最多一个 in-flight
+reservedP0Mailbox=1                       # 不计入数据面 200 个等待项
 ```
 
-调度器一次性判断总容量、lane cap、跨 lane mutation group 和优先级，不允许持有父 permit 再等待子 permit，也不允许调用路径采用不同获取顺序。retry backoff 必须先释放 permit。P0 使用独立的单槽 control mailbox：即使数据面 200 个等待项已满仍可准入；同一 run 的重复终态请求按 idempotency key 合并。P0/P1 可越过尚未开始的 P2/P3 等待项；为避免普通读取永久饥饿，除 P0 finalization 外使用带最大等待时间的 weighted fairness。这样常规 OA 请求最多 4 个，P0/P1 合计最多 1 个，Heartbeat 最多额外 1 个，单 Worker 对 OA 的理论峰值为 5。
+调度器一次性判断总容量、lane cap、跨 lane mutation group 和优先级，不允许持有父 permit 再等待子 permit，也不允许调用路径采用不同获取顺序。retry backoff 必须先释放 permit。自动化控制面 P0 使用独立的单槽 mailbox：即使数据面 200 个等待项已满仍可准入；同一 run 的重复终态请求按 idempotency key 合并。P0/P1 可越过尚未开始的 P2/P3 等待项；为避免普通读取永久饥饿，除 P0 finalization 外使用带最大等待时间的 weighted fairness。项目 OA 调度器允许不同项目的 P1 写入并发至 W，同一项目由上层单任务约束顺序。
 
 ### 4.1 为什么保留 `6/2/1`
 
 - GitHub `6`：读取阶段主要是网络等待，6 个并发请求能覆盖延迟，同时远低于常见连接和 secondary rate limit 风险区间；
 - Agent `2`：模型通常是总耗时和内存瓶颈，当前容器 `2 CPU / 3GB` 下以 2 个隔离 Codex 进程起步更稳妥；
-- OA 业务写入 `1`：状态和总结存在顺序、人工修改保护和冲突协调，串行写入便于保持幂等语义。
+- 周报项目写入默认 `4`：不同项目互不竞争，依靠项目/日期幂等键和版本 CAS 保持安全；容量不足时可降回 `1`。
 
 这些值是单 Worker 进程上限，不是集群上限。部署 `W` 个副本时，最坏峰值为：
 
@@ -522,7 +527,7 @@ npm run typecheck -w agent
 - 本步骤新增的 OA queue wait、retry backoff、Trace drain 和在途 HTTP 全部立即接收对应 AbortSignal，不推迟到后续步骤；
 - 增加按 `event_key` 合并的 Trace 有界队列、非阻塞 `tryEnqueue`、后台 SQLite spool 单写者、聚合丢弃计数和有界 drain；
 - 拆分 `workAbortSignal`、`leaseFatalSignal`、`finalizationSignal`；
-- 确保 run project、AI interaction 和 run 终态也纳入业务写入并发 1。
+- 确保 run project、AI interaction 和 run 终态继续使用自动化控制面并发 1；周报项目总结使用独立项目写入并发。
 
 验证：
 
@@ -534,7 +539,7 @@ npm exec -w agent -- tsx --test test/runProjectProgressAutomation.test.ts
 npm exec -w agent -- tsx --test test/syncProjectProgress.test.ts
 ```
 
-退出标准：OA 非 Heartbeat 峰值不超过 4，Heartbeat 峰值不超过 1，P0/P1 业务写入合计峰值为 1；数据等待队列和所有 lane 填满时 P0 仍能进入保留槽；取消可中止 OA 排队、backoff 和在途请求；finalization 遵守 60 秒终态保留预算；Trace 洪峰下队列/spool 有界且事件循环延迟 p95 低于 50ms。
+退出标准：OA 非 Heartbeat 峰值不超过配置上限 4，Heartbeat 峰值不超过 1，自动化控制面 P0/P1 合计峰值为 1；周报项目写入峰值不超过其配置值；数据等待队列和所有 lane 填满时 P0 仍能进入保留槽；取消可中止 OA 排队、backoff 和在途请求；finalization 遵守 60 秒终态保留预算；Trace 洪峰下队列/spool 有界且事件循环延迟 p95 低于 50ms。
 
 回滚：关闭兼容模式详情池、OA GET 分类重试和 Trace 异步投递，恢复默认列表发现与同步 Trace；保留 Heartbeat 独立通道及三类 AbortSignal，业务写入继续串行。
 
