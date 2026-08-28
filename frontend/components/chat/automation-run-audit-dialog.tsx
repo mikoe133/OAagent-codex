@@ -302,7 +302,7 @@ function runStatusLabel(status: AutomationRunStatus): string {
 }
 
 function triggerLabel(source: AutomationRun["trigger_source"]): string {
-  return source === "schedule" ? "定时调度" : source === "manual" ? "手动触发" : "自动重试"
+  return source === "schedule" ? "定时调度" : source === "event" ? "事件触发" : source === "manual" ? "手动触发" : "自动重试"
 }
 
 function formatDateTime(value: string): string {

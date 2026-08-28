@@ -13,6 +13,70 @@ import {
 } from "../src/infrastructure/oa/openApiRouter.js";
 
 describe("OpenAPI semantic router", () => {
+  it("always prepends the RWKV knowledge module when the task mentions RWKV", async () => {
+    const prompts: string[] = [];
+    const result = await routeOpenApiRequest(
+      createConfig(),
+      buildOpenApiIndex(createContract()),
+      { task: "rwkv v7 的架构说明，并查询项目最近进展" },
+      async (prompt) => {
+        prompts.push(prompt);
+        return JSON.stringify({
+          catalogs: ["oa"],
+          tags: ["projects"],
+          operationIds: [
+            "github_commit_summaries_projects_github_commit_summaries_get",
+          ],
+          accessMode: "read",
+          searchTerms: ["project progress"],
+        });
+      },
+    );
+
+    assert.deepEqual(result.catalogs, ["rwkv_knowledge", "oa"]);
+    assert.equal(
+      result.candidates[0]?.operationId,
+      "github_commit_summaries_projects_github_commit_summaries_get",
+    );
+    assert.match(prompts[0] ?? "", /rwkv_knowledge/);
+    assert.match(prompts[0] ?? "", /rwkv_v7_numpy\.py/);
+  });
+
+  it("keeps the RWKV knowledge module first during semantic-route fallback", async () => {
+    const result = await routeOpenApiRequest(
+      createConfig(),
+      buildOpenApiIndex(createContract()),
+      { task: "请介绍 RWKV 的训练方法" },
+      async () => {
+        throw new Error("router unavailable");
+      },
+    );
+
+    assert.equal(result.catalogs[0], "rwkv_knowledge");
+    assert.ok(result.catalogs.includes("oa"));
+    assert.equal(result.diagnostics.strategy, "fallback");
+  });
+
+  it("does not add the RWKV module for unrelated tasks", async () => {
+    const result = await routeOpenApiRequest(
+      createConfig(),
+      buildOpenApiIndex(createContract()),
+      { task: "请查询项目最近进展" },
+      async () =>
+        JSON.stringify({
+          catalogs: ["oa"],
+          tags: ["projects"],
+          operationIds: [
+            "github_commit_summaries_projects_github_commit_summaries_get",
+          ],
+          accessMode: "read",
+          searchTerms: ["project progress"],
+        }),
+    );
+
+    assert.deepEqual(result.catalogs, ["oa"]);
+  });
+
   it("uses model-selected business domains and concepts instead of fixed user phrasing", async () => {
     const prompts: string[] = [];
     const candidates = await routeOpenApiCandidates(

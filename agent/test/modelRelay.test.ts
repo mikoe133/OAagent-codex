@@ -213,6 +213,103 @@ test("returns a diagnostic 502 when the HTTP/1.1 upstream is unavailable", async
   );
 });
 
+test("adds shared backoff when an upstream 429 omits Retry-After", async (t) => {
+  let upstreamRequests = 0;
+  const upstream = createServer(async (request, response) => {
+    upstreamRequests += 1;
+    for await (const _chunk of request) {
+      void _chunk;
+    }
+    if (upstreamRequests === 1) {
+      response.writeHead(429, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: {
+          type: "rate_limit_error",
+          code: "rate_limit_exceeded",
+          message: "Too many requests",
+        },
+      }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end("{}\n");
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => close(upstream));
+
+  const relay = await startModelRelay(
+    {
+      nexttoken: {
+        ...nexttoken,
+        baseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+      },
+    },
+    {
+      minRequestIntervalMs: 0,
+      rateLimitBaseDelayMs: 40,
+      rateLimitMaxDelayMs: 40,
+      random: () => 0,
+    },
+  );
+  t.after(() => relay.close());
+
+  const limited = await requestRelay(
+    `${relay.baseUrl}/nexttoken/v1/responses`,
+    "Bearer nexttoken-secret",
+    "{}",
+  );
+  const retryStartedAt = performance.now();
+  const recovered = await requestRelay(
+    `${relay.baseUrl}/nexttoken/v1/responses`,
+    "Bearer nexttoken-secret",
+    "{}",
+  );
+  const retryDelayMs = performance.now() - retryStartedAt;
+
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers["retry-after"], "1");
+  assert.equal(recovered.status, 200);
+  assert.ok(retryDelayMs >= 25, `expected shared cooldown, got ${retryDelayMs}ms`);
+  assert.equal(upstreamRequests, 2);
+});
+
+test("does not synthesize retries for quota 429 responses", async (t) => {
+  const body = JSON.stringify({
+    error: {
+      type: "insufficient_quota",
+      code: "credit_balance_exhausted",
+      message: "Credit balance exhausted",
+    },
+  });
+  const upstream = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      void _chunk;
+    }
+    response.writeHead(429, { "content-type": "application/json" });
+    response.end(body);
+  });
+  const upstreamPort = await listen(upstream);
+  t.after(() => close(upstream));
+
+  const relay = await startModelRelay({
+    nexttoken: {
+      ...nexttoken,
+      baseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+    },
+  });
+  t.after(() => relay.close());
+
+  const result = await requestRelay(
+    `${relay.baseUrl}/nexttoken/v1/responses`,
+    "Bearer nexttoken-secret",
+    "{}",
+  );
+
+  assert.equal(result.status, 402);
+  assert.equal(result.headers["retry-after"], undefined);
+  assert.equal(result.body, body);
+});
+
 test("does not expose paths outside provider-specific v1 routes", async (t) => {
   const relay = await startModelRelay({ nexttoken, openrouter });
   t.after(() => relay.close());

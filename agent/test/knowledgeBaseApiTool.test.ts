@@ -144,6 +144,8 @@ describe("controlled knowledge base API tool", () => {
   it("uses two queries for a two-term semantic phrase", async () => {
     const config = await createFixture();
     const queries: string[] = [];
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
     await callKnowledgeBaseApiTool(
       config,
       {
@@ -153,11 +155,16 @@ describe("controlled knowledge base API tool", () => {
       "19",
       async (input) => {
         queries.push(new URL(String(input)).searchParams.get("q") ?? "");
+        activeRequests += 1;
+        maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        activeRequests -= 1;
         return Response.json({ data: [], nextCursor: null, requestId: "req-2-term" });
       },
     );
 
     assert.deepEqual(queries, ["发票 抬头", "发票"]);
+    assert.equal(maxActiveRequests, 2);
   });
 
   it("uses a phrase fallback before the head term for longer semantics", async () => {
@@ -179,7 +186,7 @@ describe("controlled knowledge base API tool", () => {
     assert.deepEqual(queries, ["部署 生产 环境", "部署 生产", "部署"]);
   });
 
-  it("does not fan out when the first search has a relevant result", async () => {
+  it("uses one query for a normalized single-core search", async () => {
     const config = await createFixture();
     let requests = 0;
     const result = await callKnowledgeBaseApiTool(

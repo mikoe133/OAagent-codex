@@ -1,10 +1,11 @@
 import type { ThreadItem } from "@openai/codex-sdk";
 import path from "node:path";
 import type { AppConfig } from "../config/config.js";
-import type {
-  OpenApiCatalog,
-  OpenApiOperationIndexEntry,
-} from "../infrastructure/oa/openApiIndex.js";
+import type { OpenApiOperationIndexEntry } from "../infrastructure/oa/openApiIndex.js";
+import {
+  buildRwkvRuntimeGuidance,
+  type AgentRouteCatalog,
+} from "../infrastructure/routing/rwkvKnowledgeModule.js";
 import {
   createCodexClient,
   startOrResumeThread,
@@ -29,7 +30,7 @@ export type AgentRuntimeContext = {
   hasSessionOaApiToken?: boolean;
   hasSessionOaUserId?: boolean;
   openApiCandidates?: OpenApiOperationIndexEntry[];
-  selectedApiCatalogs?: OpenApiCatalog[];
+  selectedApiCatalogs?: AgentRouteCatalog[];
   knowledgeBaseWriteContractAvailable?: boolean;
   oaQueryPolicy?: OaQueryPolicy;
 };
@@ -73,6 +74,7 @@ export function buildRuntimeContext(
   const usesKnowledgeBase = selectedCatalogs.some((catalog) =>
     catalog.startsWith("knowledge_base_"),
   );
+  const rwkvKnowledgeGuidance = buildRwkvRuntimeGuidance(selectedCatalogs);
   const knowledgeBaseContractPath = displayConfiguredPath(
     config,
     config.knowledgeBaseOpenapiPath ??
@@ -142,7 +144,7 @@ export function buildRuntimeContext(
               `  node scripts/callKnowledgeBaseApi.mjs${commandSessionArg} --operationId <operationId> --query '<JSON对象>'`,
               "- 多个知识库子问题必须分别提取核心业务实体并分别搜索;每个 q 只表达一个主题,不要把发票、宽带等无关实体合并查询。",
               "- 知识库搜索 q 应保留用户原话中区分主题所需的完整核心短语,不要追加“配置”“信息”“资料”“内容”等通用扩展词;例如“发票抬头”保留为“发票 抬头”,“宽带配置”清洗为“宽带”。",
-              "- 服务端按语义长度动态补查:一个核心词只查一次,两个核心词查完整短语和主实体,三个及以上核心词再增加一个去掉末尾限定词的短语,总上限 3 次;结果相关时立即停止,不要重复发送、无限重试或自行发明同义词。",
+              "- 服务端按语义长度动态补查:一个核心词只查一次,两个核心词查完整短语和主实体,三个及以上核心词再增加一个去掉末尾限定词的短语;候选查询总上限 3 次,并发执行并自动合并结果,不要重复发送、无限重试或自行发明同义词。",
               "- 读取详情时使用 --pathParams '<JSON对象>';知识库搜索、浏览和读取不需要用户确认",
               "- 任何知识库写操作都必须先取得用户确认,再加 --confirmed true;不得改用 OA 接口",
               "- 不要读取或输出 CALL_KNOWLEDGE_BASE_API_URL、CALL_KNOWLEDGE_BASE_API_TOKEN、OA_KNOWLEDGE_BASE_API_KEY、Authorization、Idempotency-Key 或 X-OA-User-Id header",
@@ -156,6 +158,7 @@ export function buildRuntimeContext(
     `- 模型: ${config.model}`,
     runtime.sessionId ? `- 当前 sessionId: ${runtime.sessionId}` : null,
     `- 当前路由接口域: ${selectedCatalogs.join(", ")}`,
+    rwkvKnowledgeGuidance,
     usesOa ? `- OA 完整接口文档: ${openapiPath}` : null,
     candidateContext,
     oaApiBudgetContext,
@@ -175,12 +178,10 @@ export function buildRuntimeContext(
     .join("\n");
 }
 
-function resolveSelectedCatalogs(runtime: AgentRuntimeContext): OpenApiCatalog[] {
+function resolveSelectedCatalogs(runtime: AgentRuntimeContext): AgentRouteCatalog[] {
   const candidates = runtime.openApiCandidates ?? [];
   const catalogs = runtime.selectedApiCatalogs ??
-    candidates
-      .map((candidate) => candidate.catalog)
-      .filter((catalog): catalog is OpenApiCatalog => Boolean(catalog));
+    candidates.map((candidate) => candidate.catalog).filter(Boolean);
   return catalogs.length > 0 ? [...new Set(catalogs)] : ["oa"];
 }
 
@@ -213,8 +214,8 @@ export function redactSecrets(text: string, secrets: string[]): string {
 /**
  * 创建 Codex SDK 会话并执行一次任务:
  * - 通过 --config 覆盖将 provider 指向 nexttoken,API key 只经 env_key 机制传递。
- * - 沙箱为 read-only:agent 只需要读取运行时选中的 OpenAPI 契约。
- * - 禁用 web search:运行时选中的 OpenAPI 契约是唯一事实来源(规划 §9.1)。
+ * - 沙箱按受控 API 工具配置选择 read-only 或 workspace-write。
+ * - 禁用 web search:接口能力只由选中的 OpenAPI 契约定义;RWKV 内容只读取运行时白名单来源。
  * - 不注册额外 function tools,不加载额外 skills。
  */
 export async function runCodexAgent(

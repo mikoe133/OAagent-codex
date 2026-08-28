@@ -1,9 +1,13 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { MODEL_REASONING_EFFORTS } from "../config/modelCatalog.js";
 import { PROJECT_PROGRESS_SUMMARY_SCOPES } from "../domain/projectProgress.js";
 import { calculateNextRunAt, validateTimezone } from "./domain.js";
 
-const supportedJobType = z.literal("github_project_progress_sync");
+const supportedJobType = z.enum([
+  "github_project_progress_sync",
+  "weekly_report_project_summary_sync",
+]);
 const leaseToken = z.string().min(32).max(512);
 const workerInstance = z.string().trim().min(1).max(255);
 const nullableDateTime = z.string().datetime({ offset: true }).nullable().optional();
@@ -47,6 +51,25 @@ const projectProgressJobParameters = z
     summary_scope: z.enum(PROJECT_PROGRESS_SUMMARY_SCOPES).default("today"),
     reasoning_effort: z.enum(MODEL_REASONING_EFFORTS).optional(),
     max_output_tokens: z.number().int().min(256).max(4_096).optional(),
+  })
+  .strict();
+const weeklyReportJobParameters = z
+  .object({
+    project_scope: z.literal("all_projects").default("all_projects"),
+    include_archived_projects: z.boolean().default(true),
+    write_archived_projects: z.boolean().default(true),
+    minimum_confidence: z.number().min(0).max(1).default(0.8),
+    on_ambiguous: z.enum(["no_write", "record_and_continue"]).default("no_write"),
+    debounce_seconds: z.number().int().min(0).max(3600).default(60),
+    reasoning_effort: z.enum(MODEL_REASONING_EFFORTS).optional(),
+    max_output_tokens: z.number().int().min(256).max(4_096).optional(),
+  })
+  .strict();
+const weeklyReportTriggerConfig = z
+  .object({
+    resource: z.literal("weekly_report"),
+    events: z.array(z.enum(["created", "updated"])).min(1).max(2),
+    scope: z.enum(["job_owner", "all_users"]).default("job_owner"),
   })
   .strict();
 
@@ -98,20 +121,62 @@ export const automationJobCreateSchema = z
     description: z.string().trim().max(4000).default(""),
     enabled: z.boolean().default(false),
     timezone: timezoneSchema.default("Asia/Shanghai"),
-    schedule_type: z.literal("cron").default("cron"),
-    cron_expression: cronSchema,
+    schedule_type: z.enum(["cron", "event"]).default("cron"),
+    trigger_type: z.enum(["schedule", "event"]).default("schedule"),
+    trigger_config: weeklyReportTriggerConfig.nullable().optional().default(null),
+    cron_expression: z.union([cronSchema, z.null()]).optional(),
     catch_up_policy: z.enum(["skip", "latest"]).default("latest"),
     overlap_policy: z.literal("forbid").default("forbid"),
     model_provider: z.string().trim().min(1).max(100),
     model_id: z.string().trim().min(1).max(150),
-    model_parameters: projectProgressJobParameters.default({}),
+    model_parameters: z.record(z.unknown()).default({}),
     retry_max_attempts: z.number().int().min(1).max(10).default(3),
     retry_interval_seconds: z.number().int().min(0).max(86_400).default(300),
     timeout_seconds: z.number().int().min(60).max(86_400).default(2700),
     retention_days: z.number().int().min(1).max(3650).default(90),
     tag_ids: uniquePositiveIds.default([]),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const eventJob = value.job_type === "weekly_report_project_summary_sync";
+    if (eventJob) {
+      if (value.schedule_type !== "event" || value.trigger_type !== "event") {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "weekly_report_job_must_be_event" });
+      }
+      if (!value.trigger_config) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "weekly_report_trigger_config_required" });
+      }
+      if (value.cron_expression !== undefined && value.cron_expression !== null) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "event_job_cannot_have_cron" });
+      }
+      const parsed = weeklyReportJobParameters.safeParse(value.model_parameters);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) context.addIssue(issue);
+      }
+    } else {
+      if (value.schedule_type !== "cron" || value.trigger_type !== "schedule") {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "project_progress_job_must_be_cron" });
+      }
+      if (!value.cron_expression) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "cron_expression_required" });
+      }
+      if (value.trigger_config !== null) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "schedule_job_cannot_have_trigger_config" });
+      }
+      const parsed = projectProgressJobParameters.safeParse(value.model_parameters);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) context.addIssue(issue);
+      }
+    }
+  })
+  .transform((value) => ({
+    ...value,
+    cron_expression: value.schedule_type === "event" ? null : value.cron_expression as string,
+    trigger_config: value.schedule_type === "event" ? value.trigger_config : null,
+    model_parameters: value.job_type === "weekly_report_project_summary_sync"
+      ? weeklyReportJobParameters.parse(value.model_parameters)
+      : projectProgressJobParameters.parse(value.model_parameters),
+  }));
 
 export const automationJobPatchSchema = z
   .object({
@@ -121,18 +186,27 @@ export const automationJobPatchSchema = z
     enabled: z.boolean().optional(),
     tag_ids: uniquePositiveIds.optional(),
     timezone: timezoneSchema.optional(),
-    cron_expression: cronSchema.optional(),
+    cron_expression: z.union([cronSchema, z.null()]).optional(),
     catch_up_policy: z.enum(["skip", "latest"]).optional(),
     model_provider: z.string().trim().min(1).max(100).optional(),
     model_id: z.string().trim().min(1).max(150).optional(),
-    model_parameters: projectProgressJobParameters.optional(),
+    model_parameters: z.record(z.unknown()).optional(),
     retry_max_attempts: z.number().int().min(1).max(10).optional(),
     retry_interval_seconds: z.number().int().min(0).max(86_400).optional(),
     timeout_seconds: z.number().int().min(60).max(86_400).optional(),
     retention_days: z.number().int().min(1).max(3650).optional(),
   })
   .strict()
-  .refine((value) => Object.keys(value).some((key) => key !== "version"), "no_changes");
+  .refine((value) => Object.keys(value).some((key) => key !== "version"), "no_changes")
+  .superRefine((value, context) => {
+    if (value.model_parameters) {
+      const project = projectProgressJobParameters.safeParse(value.model_parameters);
+      const weekly = weeklyReportJobParameters.safeParse(value.model_parameters);
+      if (!project.success && !weekly.success) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "invalid_model_parameters" });
+      }
+    }
+  });
 
 export const automationManualRunCreateSchema = z
   .object({
@@ -158,6 +232,35 @@ export const automationClaimSchema = z
     ...value,
     supported_job_types: [...new Set(value.supported_job_types)],
   }));
+
+export const automationEventCreateSchema = z
+  .object({
+    event_id: z.string().uuid(),
+    event_type: z.enum(["weekly_report.created", "weekly_report.updated"]),
+    aggregate_type: z.literal("weekly_report"),
+    aggregate_id: z.string().trim().min(1).max(255),
+    aggregate_version: z.number().int().positive(),
+    occurred_at: z.string().datetime({ offset: true }),
+    actor_id: z.number().int().positive().nullable().optional(),
+    scope: z.object({ user_id: z.number().int().positive().optional() }).strict().default({}),
+    data: z
+      .object({
+        weekly_num: z.number().int().positive(),
+        content: z.string().min(1).max(900_000).optional(),
+        content_hash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+        updated_at: z.string().datetime({ offset: true }).optional(),
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.data.content && value.data.content_hash) {
+      const digest = `sha256:${createHash("sha256").update(value.data.content, "utf8").digest("hex")}`;
+      if (digest !== value.data.content_hash) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "content_hash_mismatch", path: ["data", "content_hash"] });
+      }
+    }
+  });
 
 export const automationHeartbeatSchema = z
   .object({
@@ -292,6 +395,7 @@ export const automationAiInteractionCreateSchema = z
   .strict();
 
 export type AutomationClaimInput = z.infer<typeof automationClaimSchema>;
+export type AutomationEventCreateInput = z.infer<typeof automationEventCreateSchema>;
 export type AutomationHeartbeatInput = z.infer<typeof automationHeartbeatSchema>;
 export type AutomationRunPatchInput = z.infer<typeof automationRunPatchSchema>;
 export type AutomationRunProjectUpsertInput = z.infer<

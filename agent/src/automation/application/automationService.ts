@@ -22,6 +22,7 @@ import {
 import {
   automationAiInteractionCreateSchema,
   automationClaimSchema,
+  automationEventCreateSchema,
   automationHeartbeatSchema,
   automationJobCreateSchema,
   automationJobPatchSchema,
@@ -52,6 +53,7 @@ import type {
   AutomationDatabase,
   AutomationDatabaseSchema,
 } from "../persistence/database.js";
+import type { AutomationEventCreateInput } from "../contracts.js";
 
 type DbExecutor =
   | Kysely<AutomationDatabaseSchema>
@@ -397,7 +399,11 @@ export class AutomationService implements AutomationOperations {
             enabled: input.enabled ? 1 : 0,
             timezone: input.timezone,
             schedule_type: input.schedule_type,
-            cron_expression: input.cron_expression,
+            trigger_type: input.trigger_type,
+            trigger_config: input.trigger_config
+              ? JSON.stringify(input.trigger_config)
+              : null,
+            cron_expression: input.cron_expression ?? null,
             catch_up_policy: input.catch_up_policy,
             overlap_policy: input.overlap_policy,
             model_provider: input.model_provider,
@@ -411,8 +417,8 @@ export class AutomationService implements AutomationOperations {
             last_scheduled_at: null,
             last_started_at: null,
             last_finished_at: null,
-            next_run_at: input.enabled
-              ? calculateNextRunAt(input.cron_expression, input.timezone, now)
+            next_run_at: input.enabled && input.schedule_type === "cron"
+              ? calculateNextRunAt(input.cron_expression as string, input.timezone, now)
               : null,
             last_run_status: null,
             configuration_status: "valid",
@@ -511,7 +517,9 @@ export class AutomationService implements AutomationOperations {
       const nextRunAt = !enabled
         ? null
         : scheduleChanged || !job.next_run_at
-          ? calculateNextRunAt(cronExpression, timezone, now)
+          ? job.schedule_type === "event"
+            ? null
+            : calculateNextRunAt(cronExpression ?? "", timezone, now)
           : job.next_run_at;
       const changes = Object.fromEntries(
         Object.entries(input)
@@ -528,7 +536,7 @@ export class AutomationService implements AutomationOperations {
           ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.enabled !== undefined ? { enabled: input.enabled ? 1 : 0 } : {}),
           ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
-          ...(input.cron_expression !== undefined
+          ...(input.cron_expression !== undefined && input.cron_expression !== null
             ? { cron_expression: input.cron_expression }
             : {}),
           ...(input.catch_up_policy !== undefined
@@ -767,6 +775,258 @@ export class AutomationService implements AutomationOperations {
     }
   }
 
+  async receiveAutomationEvent(body: unknown): Promise<unknown> {
+    const input = automationEventCreateSchema.parse(body);
+    const eventHash = createHash("sha256")
+      .update(stableJson({
+        event_type: input.event_type,
+        aggregate_type: input.aggregate_type,
+        aggregate_id: input.aggregate_id,
+        aggregate_version: input.aggregate_version,
+        actor_id: input.actor_id ?? null,
+        scope: input.scope,
+        data: {
+          weekly_num: input.data.weekly_num,
+          ...(input.data.content !== undefined ? { content: input.data.content } : {}),
+          ...(input.data.content_hash !== undefined
+            ? { content_hash: input.data.content_hash }
+            : {}),
+        },
+      }))
+      .digest("hex");
+    return this.database.db.transaction().execute(async (tx) => {
+      const existing = await tx
+        .selectFrom("automation_trigger_events")
+        .selectAll()
+        .where("event_id", "=", input.event_id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (existing) {
+        if (existing.event_hash !== eventHash) {
+          throw conflict("automation_event_id_conflict", "event_id 已对应不同事件内容");
+        }
+        return {
+          event_id: input.event_id,
+          accepted: true,
+          deduplicated: true,
+          status: existing.status,
+          run_id: existing.run_id,
+        };
+      }
+
+      const latest = await tx
+        .selectFrom("automation_trigger_events")
+        .select(({ fn }) => fn.max<number>("aggregate_version").as("max_version"))
+        .where("aggregate_type", "=", input.aggregate_type)
+        .where("aggregate_id", "=", input.aggregate_id)
+        .where("event_type", "in", ["weekly_report.created", "weekly_report.updated"])
+        .executeTakeFirst();
+      if (latest?.max_version !== null && latest?.max_version !== undefined &&
+        Number(latest.max_version) > input.aggregate_version) {
+        const now = new Date();
+        await tx
+          .insertInto("automation_trigger_events")
+          .values({
+            event_id: input.event_id,
+            event_type: input.event_type,
+            aggregate_type: input.aggregate_type,
+            aggregate_id: input.aggregate_id,
+            aggregate_version: input.aggregate_version,
+            event_hash: eventHash,
+            payload: JSON.stringify(input),
+            job_id: null,
+            run_id: null,
+            status: "stale",
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+        return {
+          event_id: input.event_id,
+          accepted: true,
+          deduplicated: false,
+          status: "stale",
+          run_id: null,
+        };
+      }
+
+      const sameVersion = await tx
+        .selectFrom("automation_trigger_events")
+        .selectAll()
+        .where("aggregate_type", "=", input.aggregate_type)
+        .where("aggregate_id", "=", input.aggregate_id)
+        .where("aggregate_version", "=", input.aggregate_version)
+        .where("event_type", "in", ["weekly_report.created", "weekly_report.updated"])
+        .forUpdate()
+        .executeTakeFirst();
+      if (sameVersion) {
+        if (sameVersion.event_hash !== eventHash) {
+          throw conflict("automation_event_version_conflict", "同一周报版本携带不同内容");
+        }
+        await tx
+          .insertInto("automation_trigger_events")
+          .values({
+            event_id: input.event_id,
+            event_type: input.event_type,
+            aggregate_type: input.aggregate_type,
+            aggregate_id: input.aggregate_id,
+            aggregate_version: input.aggregate_version,
+            event_hash: eventHash,
+            payload: JSON.stringify(input),
+            job_id: sameVersion.job_id,
+            run_id: sameVersion.run_id,
+            status: "deduplicated",
+            created_at: new Date(),
+            updated_at: new Date(),
+          })
+          .execute();
+        return {
+          event_id: input.event_id,
+          accepted: true,
+          deduplicated: true,
+          status: "deduplicated",
+          run_id: sameVersion.run_id,
+        };
+      }
+
+      const jobs = await tx
+        .selectFrom("automation_jobs")
+        .selectAll()
+        .where("enabled", "=", 1)
+        .where("deleted_at", "is", null)
+        .where("job_type", "=", "weekly_report_project_summary_sync")
+        .where("schedule_type", "=", "event")
+        .where("trigger_type", "=", "event")
+        .where("configuration_status", "=", "valid")
+        .execute();
+      const job = jobs.find((candidate) => eventMatchesJob(candidate, input));
+      const now = new Date();
+      if (!job) {
+        await tx
+          .insertInto("automation_trigger_events")
+          .values({
+            event_id: input.event_id,
+            event_type: input.event_type,
+            aggregate_type: input.aggregate_type,
+            aggregate_id: input.aggregate_id,
+            aggregate_version: input.aggregate_version,
+            event_hash: eventHash,
+            payload: JSON.stringify(input),
+            job_id: null,
+            run_id: null,
+            status: "received",
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+        return {
+          event_id: input.event_id,
+          accepted: true,
+          deduplicated: false,
+          status: "ignored",
+          run_id: null,
+        };
+      }
+
+      const sourceSnapshot = {
+        event_id: input.event_id,
+        source_report_id: input.aggregate_id,
+        source_version: input.aggregate_version,
+        weekly_num: input.data.weekly_num,
+        content: input.data.content ?? null,
+        content_hash: input.data.content_hash ?? null,
+        updated_at: input.data.updated_at ?? input.occurred_at,
+        scope: input.scope,
+      };
+      const debounceSeconds = weeklyReportDebounceSeconds(job.model_parameters);
+      const availableAt = new Date(now.getTime() + debounceSeconds * 1000);
+      const pendingPrevious = await tx
+        .selectFrom("automation_trigger_events as event")
+        .innerJoin("automation_job_runs as run", "run.id", "event.run_id")
+        .select(["run.id as run_id", "run.status"])
+        .where("event.aggregate_type", "=", input.aggregate_type)
+        .where("event.aggregate_id", "=", input.aggregate_id)
+        .where("event.event_type", "in", ["weekly_report.created", "weekly_report.updated"])
+        .where("event.job_id", "=", job.id)
+        .where("run.status", "=", "pending")
+        .orderBy("event.aggregate_version", "desc")
+        .executeTakeFirst();
+      if (pendingPrevious) {
+        await tx
+          .updateTable("automation_job_runs")
+          .set({
+            source_snapshot: JSON.stringify(sourceSnapshot),
+            trigger_event_id: input.event_id,
+            available_at: availableAt,
+            deadline_at: new Date(availableAt.getTime() + job.timeout_seconds * 1000),
+            updated_at: now,
+          })
+          .where("id", "=", pendingPrevious.run_id)
+          .executeTakeFirstOrThrow();
+        await tx
+          .insertInto("automation_trigger_events")
+          .values({
+            event_id: input.event_id,
+            event_type: input.event_type,
+            aggregate_type: input.aggregate_type,
+            aggregate_id: input.aggregate_id,
+            aggregate_version: input.aggregate_version,
+            event_hash: eventHash,
+            payload: JSON.stringify(input),
+            job_id: job.id,
+            run_id: pendingPrevious.run_id,
+            status: "queued",
+            created_at: now,
+            updated_at: now,
+          })
+          .execute();
+        return {
+          event_id: input.event_id,
+          accepted: true,
+          deduplicated: false,
+          coalesced: true,
+          status: "queued",
+          run_id: pendingPrevious.run_id,
+        };
+      }
+      const runId = await this.insertRootRun(
+        tx,
+        job,
+        "event",
+        now,
+        availableAt,
+        now,
+        undefined,
+        {},
+        sourceSnapshot,
+      );
+      await tx
+        .insertInto("automation_trigger_events")
+        .values({
+          event_id: input.event_id,
+          event_type: input.event_type,
+          aggregate_type: input.aggregate_type,
+          aggregate_id: input.aggregate_id,
+          aggregate_version: input.aggregate_version,
+          event_hash: eventHash,
+          payload: JSON.stringify(input),
+          job_id: job.id,
+          run_id: runId,
+          status: "queued",
+          created_at: now,
+          updated_at: now,
+        })
+        .execute();
+      return {
+        event_id: input.event_id,
+        accepted: true,
+        deduplicated: false,
+        status: "queued",
+        run_id: runId,
+      };
+    });
+  }
+
   async listRuns(query: URLSearchParams, _userId: number): Promise<unknown> {
     const page = queryInteger(query, "page", 1, 1, Number.MAX_SAFE_INTEGER);
     const size = queryInteger(query, "size", 10, 1, 100);
@@ -994,17 +1254,17 @@ export class AutomationService implements AutomationOperations {
           const delaySeconds = Math.max(0, (now.getTime() - missedAt.getTime()) / 1000);
           if (delaySeconds <= this.config.scheduleGraceSeconds) {
             nextRunAt = calculateNextRunAt(
-              job.cron_expression,
+              job.cron_expression ?? "",
               job.timezone,
               missedAt,
             );
           } else {
             scheduledAt = calculatePreviousRunAt(
-              job.cron_expression,
+              job.cron_expression ?? "",
               job.timezone,
               now,
             );
-            nextRunAt = calculateNextRunAt(job.cron_expression, job.timezone, now);
+            nextRunAt = calculateNextRunAt(job.cron_expression ?? "", job.timezone, now);
             shouldRun = job.catch_up_policy === "latest";
             triggerSource = shouldRun ? "catch_up" : "schedule";
           }
@@ -1173,8 +1433,8 @@ export class AutomationService implements AutomationOperations {
           configuration_error: error,
           model_catalog_version: catalogVersion,
           next_run_at:
-            valid && job.enabled
-              ? calculateNextRunAt(job.cron_expression, job.timezone, now)
+            valid && job.enabled && job.schedule_type !== "event"
+              ? calculateNextRunAt(job.cron_expression ?? "", job.timezone, now)
               : null,
           updated_by: userId,
           updated_at: now,
@@ -1246,7 +1506,10 @@ export class AutomationService implements AutomationOperations {
   }
 
   private ensureSupportedJobType(jobType: string, code: string): void {
-    if (jobType !== "github_project_progress_sync") {
+    if (
+      jobType !== "github_project_progress_sync" &&
+      jobType !== "weekly_report_project_summary_sync"
+    ) {
       throw notFound(code, "自动任务内容配置不存在");
     }
   }
@@ -1272,12 +1535,13 @@ export class AutomationService implements AutomationOperations {
   private async insertRootRun(
     executor: DbExecutor,
     job: JobRow,
-    triggerSource: "manual" | "schedule" | "catch_up",
+    triggerSource: "manual" | "schedule" | "catch_up" | "event",
     scheduledAt: Date,
     availableAt: Date,
     triggeredAt: Date,
     terminal?: { status: "skipped" | "configuration_error"; code: string; summary: string },
     executionParameters: Record<string, unknown> = {},
+    sourceSnapshot: Record<string, unknown> | null = null,
   ): Promise<string> {
     const tags = await this.tagsByJobIds([job.id], executor);
     const profile = await executor
@@ -1318,6 +1582,11 @@ export class AutomationService implements AutomationOperations {
         model_id_snapshot: job.model_id,
         model_parameters_snapshot: JSON.stringify(parseJson(job.model_parameters, {})),
         execution_parameters_snapshot: JSON.stringify(executionParameters),
+        source_snapshot: sourceSnapshot ? JSON.stringify(sourceSnapshot) : null,
+        trigger_event_id:
+          triggerSource === "event" && typeof sourceSnapshot?.event_id === "string"
+            ? sourceSnapshot.event_id
+            : null,
         model_catalog_version_snapshot: job.model_catalog_version,
         prompt_version_snapshot: profile?.prompt_version ?? null,
         system_prompt_snapshot: profile?.system_prompt ?? null,
@@ -1626,6 +1895,7 @@ export class AutomationService implements AutomationOperations {
                tags_snapshot, trigger_source, scheduled_at, available_at,
                triggered_at, status, attempt, model_provider_snapshot,
                model_id_snapshot, model_parameters_snapshot, execution_parameters_snapshot,
+               source_snapshot, trigger_event_id,
                model_catalog_version_snapshot, prompt_version_snapshot,
                system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
                retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
@@ -1637,6 +1907,7 @@ export class AutomationService implements AutomationOperations {
                       tags_snapshot, 'retry', scheduled_at, ?, ?, 'pending', attempt + 1,
                       model_provider_snapshot, model_id_snapshot, model_parameters_snapshot,
                       execution_parameters_snapshot,
+                      source_snapshot, trigger_event_id,
                       model_catalog_version_snapshot, prompt_version_snapshot,
                       system_prompt_snapshot, cron_expression_snapshot, timezone_snapshot,
                       retry_max_attempts_snapshot, retry_interval_seconds_snapshot,
@@ -2242,6 +2513,8 @@ function claimResponse(run: RunRow, rawLeaseToken: string): Record<string, unkno
     model_id: run.model_id_snapshot,
     model_parameters: parseJson(run.model_parameters_snapshot, {}),
     execution_parameters: parseJson(run.execution_parameters_snapshot, {}),
+    trigger_event_id: run.trigger_event_id,
+    source_snapshot: parseJson(run.source_snapshot, null),
     model_catalog_version: run.model_catalog_version_snapshot,
     prompt_profile:
       run.prompt_version_snapshot && run.system_prompt_snapshot
@@ -2271,6 +2544,39 @@ function asDate(value: Date | string): Date {
 
 function jsonOrNull(value: unknown): string | null {
   return value === undefined || value === null ? null : JSON.stringify(value);
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (!value || typeof value !== "object") return JSON.stringify(value);
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+    .join(",")}}`;
+}
+
+function eventMatchesJob(
+  job: Selectable<AutomationDatabaseSchema["automation_jobs"]>,
+  event: AutomationEventCreateInput,
+): boolean {
+  const trigger = parseJson(job.trigger_config, null) as {
+    resource?: string;
+    events?: string[];
+    scope?: string;
+  } | null;
+  if (!trigger || trigger.resource !== "weekly_report") return false;
+  if (!trigger.events?.includes(event.event_type.slice("weekly_report.".length))) return false;
+  if (trigger.scope === "all_users") return true;
+  const ownerId = event.scope.user_id ?? event.actor_id ?? null;
+  return ownerId !== null && (job.created_by === null || Number(job.created_by) === ownerId);
+}
+
+function weeklyReportDebounceSeconds(value: unknown): number {
+  const parameters = parseJson(value, {}) as Record<string, unknown>;
+  const seconds = parameters.debounce_seconds;
+  return typeof seconds === "number" && Number.isInteger(seconds) && seconds >= 0 && seconds <= 3600
+    ? seconds
+    : 60;
 }
 
 function serializeTag(
@@ -2329,8 +2635,12 @@ function serializeJob(
     enabled: Boolean(job.enabled),
     timezone: job.timezone,
     schedule_type: job.schedule_type,
-    cron_expression: job.cron_expression,
-    schedule_description: `${job.cron_expression} (${job.timezone})`,
+    trigger_type: job.trigger_type,
+    trigger_config: parseJson(job.trigger_config, null),
+    cron_expression: job.schedule_type === "event" ? null : job.cron_expression,
+    schedule_description: job.schedule_type === "event"
+      ? "周报新增或更新时触发"
+      : `${job.cron_expression} (${job.timezone})`,
     catch_up_policy: job.catch_up_policy,
     overlap_policy: job.overlap_policy,
     model_provider: job.model_provider,
@@ -2388,8 +2698,10 @@ function serializeRun(run: RunRow, jobDeleted: boolean): Record<string, unknown>
     model_id: run.model_id_snapshot,
     model_parameters: parseJson(run.model_parameters_snapshot, {}),
     execution_parameters: parseJson(run.execution_parameters_snapshot, {}),
+    trigger_event_id: run.trigger_event_id,
+    source_snapshot: serializeSourceSnapshot(run.source_snapshot),
     model_catalog_version: run.model_catalog_version_snapshot,
-    cron_expression: run.cron_expression_snapshot,
+    cron_expression: run.cron_expression_snapshot || null,
     timezone: run.timezone_snapshot,
     retry_max_attempts: run.retry_max_attempts_snapshot,
     retry_interval_seconds: run.retry_interval_seconds_snapshot,
@@ -2410,6 +2722,23 @@ function serializeRun(run: RunRow, jobDeleted: boolean): Record<string, unknown>
     cancel_requested_by: run.cancel_requested_by,
     created_at: formatUtc(run.created_at),
     updated_at: formatUtc(run.updated_at),
+  };
+}
+
+function serializeSourceSnapshot(value: unknown): Record<string, unknown> | null {
+  const snapshot = parseJson(value, null);
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const source = snapshot as Record<string, unknown>;
+  return {
+    ...(typeof source.event_id === "string" ? { event_id: source.event_id } : {}),
+    ...(typeof source.source_report_id === "string" ? { source_report_id: source.source_report_id } : {}),
+    ...(typeof source.source_version === "number" ? { source_version: source.source_version } : {}),
+    ...(typeof source.weekly_num === "number" ? { weekly_num: source.weekly_num } : {}),
+    ...(typeof source.content_hash === "string" ? { content_hash: source.content_hash } : {}),
+    ...(typeof source.updated_at === "string" ? { updated_at: source.updated_at } : {}),
+    ...(source.scope && typeof source.scope === "object" && !Array.isArray(source.scope)
+      ? { scope: source.scope }
+      : {}),
   };
 }
 

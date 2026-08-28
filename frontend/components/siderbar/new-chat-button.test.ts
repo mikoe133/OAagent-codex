@@ -92,7 +92,6 @@ test("renders the automated task page from OA data", () => {
   assert.match(automatedTasksSource, />自动任务<\/h1>/)
   assert.match(automatedTasksSource, /data-slot="automated-task-filter-toolbar"/)
   assert.match(automatedTasksSource, /data-slot="automated-task-actions"/)
-  assert.match(automatedTasksSource, /新建自动任务/)
   assert.match(automatedTasksSource, /import \{ BentoGrid, type BentoItem \}/)
   assert.doesNotMatch(automatedTasksSource, /const AUTOMATED_TASKS/)
   assert.match(automatedTasksSource, /listAutomationJobs\(\{ includeDeleted: true \}\)/)
@@ -105,11 +104,17 @@ test("renders the automated task page from OA data", () => {
   assert.match(automatedTasksSource, /automation:read/)
 })
 
+test("uses the cctv icon for weekly report monitor cards", () => {
+  assert.match(automatedTasksSource, /import \{[\s\S]*Cctv[\s\S]*\} from "lucide-react"/)
+  assert.match(automatedTasksSource, /job\.job_type === "weekly_report_project_summary_sync" \? Cctv : AlarmClock/)
+  assert.match(taskDialogSource, /import \{[\s\S]*Cctv[\s\S]*\} from "lucide-react"/)
+  assert.match(taskDialogSource, /form\.jobType === "weekly_report_project_summary_sync" \? <Cctv/)
+})
+
 test("opens the original automated task constraints configuration modal from the management menu", () => {
-  const newTaskIndex = automatedTasksSource.indexOf("新建自动任务")
   const configIndex = automatedTasksSource.indexOf("任务能力管理")
 
-  assert.ok(newTaskIndex < configIndex, "expected new task directly before the management menu")
+  assert.notEqual(configIndex, -1, "expected the management menu")
   assert.match(automatedTasksSource, /import \{ AutomatedTaskConfigDialog \}/)
   assert.match(automatedTasksSource, /data-slot="automated-task-management-menu"/)
   assert.match(automatedTasksSource, /<Bolt/)
@@ -171,10 +176,10 @@ test("places filters before task actions and hides the refresh control", () => {
   assert.match(pillMorphTabsSource, /flex flex-wrap items-center justify-start gap-3/)
   assert.match(pillMorphTabsSource, /\{actions\}/)
   assert.ok(tabsIndex < filterToolbarIndex, "expected filters inside the tab action row")
-  assert.ok(filterToolbarIndex < createTaskIndex, "expected filters left of new task")
+  assert.equal(createTaskIndex, -1, "expected creation to stay hidden")
   assert.match(automatedTasksSource, /data-slot="automated-task-actions"[\s\S]*?lg:flex-nowrap[\s\S]*?data-slot="automated-task-filter-toolbar"[\s\S]*?<Search[\s\S]*?<Select/)
   assert.doesNotMatch(automatedTasksSource, /RefreshCw|刷新自动任务/)
-  assert.ok(createTaskIndex < managementMenuIndex, "expected new task left of management menu")
+  assert.ok(filterToolbarIndex < managementMenuIndex, "expected filters left of management menu")
 })
 
 test("filters automated task cards with pill-morph tabs", () => {
@@ -228,6 +233,12 @@ test("opens the task form dialog from each bento card action", () => {
   assert.match(taskDialogSource, /version: requireTask\(task\)\.version/)
   assert.match(taskDialogSource, /validateAutomationJob\(task\.id\)/)
   assert.match(taskDialogSource, /triggerAutomationJob\(task\.id\)/)
+  assert.match(taskDialogSource, /isManagedMonitorTask/)
+  assert.match(taskDialogSource, /data-slot="automated-monitor-task-details"/)
+  assert.match(taskDialogSource, /周报触发器和项目处理规则只读/)
+  assert.match(taskDialogSource, /通用任务信息可在此调整/)
+  assert.match(taskDialogSource, /isManagedMonitorTask[\s\S]*?name: payload\.name[\s\S]*?description: payload\.description[\s\S]*?enabled: payload\.enabled[\s\S]*?model_provider: payload\.model_provider[\s\S]*?model_id: payload\.model_id[\s\S]*?tag_ids: payload\.tag_ids/)
+  assert.match(taskDialogSource, /!isCreateMode && form\.jobType === "weekly_report_project_summary_sync"/)
   assert.match(taskDialogSource, /createAutomationTag/)
   assert.doesNotMatch(taskDialogSource, /automated-task-(?:cron|timezone|catch-up|retries|retry-interval|timeout|retention)/)
   assert.match(taskDialogSource, /Field label="执行频率" htmlFor="automated-task-frequency"/)
@@ -358,21 +369,13 @@ test("keeps every task run time and detail action visible at the conversation fo
   assert.doesNotMatch(metadataSource, /\bborder(?:-|\b)|\bshadow(?:-|\b)|\bbg-(?:white|zinc)/)
 })
 
-test("disables automated task creation with a simple under-development hint", () => {
-  const createTaskButton = automatedTasksSource.match(
-    /<Button\s+data-slot="create-automated-task-button"[\s\S]*?<\/Button>/,
-  )?.[0]
-
-  assert.ok(createTaskButton, "expected a dedicated create task button")
-  assert.match(createTaskButton, /<Plus/)
-  assert.match(createTaskButton, /新建自动任务/)
-  assert.match(createTaskButton, /disabled/)
-  assert.doesNotMatch(createTaskButton, /openCreateDialog/)
-  assert.match(automatedTasksSource, /title="功能开发中"/)
-  assert.match(automatedTasksSource, /cursor-not-allowed/)
+test("hides automated task creation until vertical task forms are available", () => {
+  assert.doesNotMatch(automatedTasksSource, /data-slot="create-automated-task-button"/)
+  assert.doesNotMatch(automatedTasksSource, /openCreateDialog/)
+  assert.doesNotMatch(automatedTasksSource, /setTaskDialogMode\("create"\)/)
+  assert.doesNotMatch(automatedTasksSource, /title="功能开发中"/)
   assert.doesNotMatch(automatedTasksSource, /AnimatedTooltip/)
   assert.doesNotMatch(automatedTasksSource, /openOnClick/)
-  assert.doesNotMatch(automatedTasksSource, /const openCreateDialog = React\.useCallback/)
 })
 
 test("loads full run audit and supports permission fallback and cancellation", () => {

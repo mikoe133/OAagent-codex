@@ -1095,6 +1095,9 @@ function formatRouteCatalog(catalog: OpenApiRouteResult["catalogs"][number]): st
   if (catalog === "knowledge_base_read") {
     return "知识库读取";
   }
+  if (catalog === "rwkv_knowledge") {
+    return "RWKV 知识";
+  }
   return "知识库写入";
 }
 
@@ -1180,6 +1183,30 @@ export function resolveStreamFailure(
   if (message.startsWith("Failed to parse item:")) {
     return new Error(
       "Codex SDK 无法解析 JSONL 事件流。工具输出可能包含被 Node 24 误判为换行的 Unicode 分隔符，请重试；若持续发生，请改用 Node 22 运行服务。",
+    );
+  }
+  if (/(?:429|too many requests|exceeded retry limit)/i.test(message)) {
+    const requestId = message.match(/request id:\s*([^\s,]+)/i)?.[1];
+    return new Error(
+      [
+        "回答模型服务暂时限流（429），不是 OA 或知识库接口失败。",
+        "服务已按 Retry-After 或指数退避完成有限重试，但上游仍未恢复；请稍后重试，或切换模型提供商。",
+        requestId ? `上游 request id: ${requestId}` : null,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" "),
+    );
+  }
+  if (/(?:usage limit|credit balance|insufficient[_ ]quota|spend limit|quota exhausted)/i.test(message)) {
+    const requestId = message.match(/request id:\s*([^\s,]+)/i)?.[1];
+    return new Error(
+      [
+        "回答模型提供商的使用额度或消费上限已达到。",
+        "这不是 OA 或知识库接口失败，也不是继续重试能解决的问题；请切换模型/提供商，或为当前账户充值、提高额度。",
+        requestId ? `上游 request id: ${requestId}` : null,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(" "),
     );
   }
   return new Error(redactSecrets(message, secrets));

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   AutomationJobClaim,
   AutomationOaClient,
@@ -57,6 +57,7 @@ export async function runProjectProgressAutomation(input: {
   workerInstance: string;
   leaseSeconds: number;
   heartbeatSeconds: number;
+  supportedJobTypes?: string[];
   claimIdentityStore?: AutomationClaimIdentityStore;
   traceSpool?: AutomationTraceSpool;
   resolveExecution: (
@@ -68,7 +69,7 @@ export async function runProjectProgressAutomation(input: {
 }): Promise<ProjectProgressAutomationResult> {
   const claimIdentity = input.claimIdentityStore?.getOrCreateAutomationClaimIdentity({
     workerInstance: input.workerInstance,
-    supportedJobTypes: [SUPPORTED_JOB_TYPE],
+    supportedJobTypes: input.supportedJobTypes ?? [SUPPORTED_JOB_TYPE],
     leaseSeconds: input.leaseSeconds,
   });
   const claim = claimIdentity
@@ -76,11 +77,16 @@ export async function runProjectProgressAutomation(input: {
         workerInstance: input.workerInstance,
         leaseSeconds: input.leaseSeconds,
         claimRequestId: claimIdentity.claimRequestId,
+        ...(input.supportedJobTypes ? { supportedJobTypes: input.supportedJobTypes } : {}),
       })
-    : await input.automationClient.claim(
-        input.workerInstance,
-        input.leaseSeconds,
-      );
+    : input.supportedJobTypes
+      ? await input.automationClient.claim({
+          workerInstance: input.workerInstance,
+          leaseSeconds: input.leaseSeconds,
+          claimRequestId: randomUUID(),
+          supportedJobTypes: input.supportedJobTypes,
+        })
+      : await input.automationClient.claim(input.workerInstance, input.leaseSeconds);
   if (!claim) {
     clearClaimIdentity(input.claimIdentityStore, claimIdentity?.claimRequestId);
     return { claimed: false, runId: null, status: "idle", report: null };
@@ -463,7 +469,10 @@ class AutomationTraceReporter {
 }
 
 function validateClaim(claim: AutomationJobClaim): void {
-  if (claim.jobType !== "github_project_progress_sync") {
+  if (
+    claim.jobType !== "github_project_progress_sync" &&
+    claim.jobType !== "weekly_report_project_summary_sync"
+  ) {
     throw new ProjectProgressConfigurationError(`不支持的任务类型:${claim.jobType}`);
   }
   if (claim.timezone !== "Asia/Shanghai") {

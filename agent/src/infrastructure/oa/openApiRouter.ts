@@ -7,6 +7,11 @@ import {
   type OpenApiOperationIndex,
   type OpenApiOperationIndexEntry,
 } from "./openApiIndex.js";
+import {
+  buildRwkvRouterContext,
+  prioritizeRwkvKnowledgeCatalog,
+  type AgentRouteCatalog,
+} from "../routing/rwkvKnowledgeModule.js";
 
 const ROUTER_TIMEOUT_MS = 8_000;
 const ROUTER_MAX_OUTPUT_TOKENS = 512;
@@ -49,7 +54,7 @@ type RouteInput = {
 };
 
 export type OpenApiRouteResult = {
-  catalogs: OpenApiCatalog[];
+  catalogs: AgentRouteCatalog[];
   candidates: OpenApiOperationIndexEntry[];
   diagnostics: OpenApiRouteDiagnostics;
 };
@@ -219,7 +224,7 @@ export async function routeOpenApiRequest(
   const safeIndex = filterSafeOperations(index);
   const fallbackCatalogs = getFallbackCatalogs(safeIndex);
   const fallback = (error: unknown): OpenApiRouteResult => ({
-    catalogs: fallbackCatalogs,
+    catalogs: prioritizeRwkvKnowledgeCatalog(input.task, fallbackCatalogs),
     candidates: selectFallbackCandidates(
       safeIndex,
       input.task,
@@ -236,20 +241,20 @@ export async function routeOpenApiRequest(
     const routed = rankRoutedCandidates(safeIndex, input.task, route);
     if (routed.length > 0) {
       return {
-        catalogs: route.catalogs,
+        catalogs: prioritizeRwkvKnowledgeCatalog(input.task, route.catalogs),
         candidates: routed,
         diagnostics: { strategy: "semantic" },
       };
     }
     if (route.catalogs.includes("knowledge_base_write")) {
       return {
-        catalogs: route.catalogs,
+        catalogs: prioritizeRwkvKnowledgeCatalog(input.task, route.catalogs),
         candidates: [],
         diagnostics: { strategy: "semantic" },
       };
     }
     return {
-      catalogs: route.catalogs,
+      catalogs: prioritizeRwkvKnowledgeCatalog(input.task, route.catalogs),
       candidates: selectFallbackCandidates(safeIndex, input.task, route.catalogs),
       diagnostics: { strategy: "semantic" },
     };
@@ -523,6 +528,7 @@ function buildRoutePrompt(
         -MAX_MEMORY_LENGTH,
       ),
       catalogAvailability: buildCatalogAvailability(index),
+      mandatoryRouteModule: buildRwkvRouterContext(input.task),
       operationGroups: buildOperationGroups(index),
     }),
     "</router_input>",

@@ -260,57 +260,78 @@ async function executeKnowledgeBaseSearch(
     });
   }
 
-  const attempts: Array<{ status: number; payload: unknown; query: string }> = [];
-  for (const searchQuery of searchQueries) {
-    let response: Response;
-    let payload: unknown;
-    try {
-      ({ response, payload } = await requestKnowledgeBase(
-        config,
-        operation,
-        renderedPath,
-        { ...normalizedQuery, q: searchQuery },
-        undefined,
-        oaUserId,
-        fetchImpl,
-      ));
-    } catch (error) {
-      if (attempts.length === 0) {
-        throw error;
-      }
-      break;
-    }
-    const redactedPayload = redactValue(
-      payload,
-      config.knowledgeBaseApiToken!,
-    );
-    if (!response.ok) {
-      if (attempts.length === 0) {
+  const results = await Promise.all(
+    searchQueries.map(async (searchQuery) => {
+      try {
+        const { response, payload } = await requestKnowledgeBase(
+          config,
+          operation,
+          renderedPath,
+          { ...normalizedQuery, q: searchQuery },
+          undefined,
+          oaUserId,
+          fetchImpl,
+        );
         return {
-          ok: false,
-          status: response.status,
-          catalog: operation.catalog,
-          operationId: operation.operationId,
-          method: operation.method.toUpperCase(),
-          path: operation.pathTemplate,
-          data: limitResponse(redactedPayload),
+          query: searchQuery,
+          response,
+          payload: redactValue(payload, config.knowledgeBaseApiToken!),
+          error: null,
+        };
+      } catch (error) {
+        return {
+          query: searchQuery,
+          response: null,
+          payload: null,
+          error,
         };
       }
-      break;
-    }
+    }),
+  );
 
-    attempts.push({
-      status: response.status,
-      payload: redactedPayload,
-      query: searchQuery,
-    });
-    if (hasRelevantKnowledgeSearchResult(redactedPayload, searchQuery)) {
-      break;
+  const attempts: Array<{ status: number; payload: unknown; query: string }> = [];
+  let firstHttpFailure:
+    | { status: number; payload: unknown }
+    | null = null;
+  let firstError: unknown = null;
+  for (const result of results) {
+    if (result.error) {
+      firstError ??= result.error;
+      continue;
     }
+    if (!result.response) {
+      continue;
+    }
+    if (!result.response.ok) {
+      firstHttpFailure ??= {
+        status: result.response.status,
+        payload: result.payload,
+      };
+      continue;
+    }
+    attempts.push({
+      status: result.response.status,
+      payload: result.payload,
+      query: result.query,
+    });
   }
 
   const firstAttempt = attempts[0];
   if (!firstAttempt) {
+    if (firstHttpFailure) {
+      return {
+        ok: false,
+        status: firstHttpFailure.status,
+        catalog: operation.catalog,
+        operationId: operation.operationId,
+        method: operation.method.toUpperCase(),
+        path: operation.pathTemplate,
+        data: limitResponse(firstHttpFailure.payload),
+      };
+    }
+    if (firstError !== null) {
+      throw firstError;
+    }
     return toolError("knowledge_base_request_failed", "知识库搜索失败。");
   }
   const mergedPayload = mergeKnowledgeBaseSearchPayloads(
@@ -394,11 +415,6 @@ function buildKnowledgeBaseSearchQueries(
   }
   candidates.push(coreTerms[0]!);
   return [...new Set(candidates)].slice(0, MAX_KNOWLEDGE_SEARCH_QUERIES);
-}
-
-function hasRelevantKnowledgeSearchResult(value: unknown, query: string): boolean {
-  const items = extractKnowledgeSearchItems(value);
-  return items.some((item) => knowledgeSearchResultScore(item, query) >= 70);
 }
 
 function mergeKnowledgeBaseSearchPayloads(

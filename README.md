@@ -6,7 +6,7 @@
 - `frontend/`: Next.js 前端工作区,包含登录、会话列表、流式聊天 UI 和服务端 BFF。
 - 根目录: 只负责统一安装依赖、调度 workspace 脚本、保存共享文档和 `.env`。
 
-agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`)获取 OA 接口契约;远程请求失败、返回非 2xx 或内容不是合法 OpenAPI JSON 时,自动回退到 `agent/openapi/openapi.json`。公司制度、手册、规范、指南等文档内容问题则独立路由到 `agent/knowledgebaseapi/knowledgebaseapi.yaml`,不会与结构化 OA 接口混用。两类选中的契约是接口能力的唯一事实来源,不引入额外 Skill、MCP、function tools 或多 agent 编排。
+agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`)获取 OA 接口契约;远程请求失败、返回非 2xx 或内容不是合法 OpenAPI JSON 时,自动回退到 `agent/openapi/openapi.json`。公司制度、手册、规范、指南等文档内容问题则独立路由到 `agent/knowledgebaseapi/knowledgebaseapi.yaml`,不会与结构化 OA 接口混用。用户当前指令包含 `RWKV`（不区分大小写）时,服务会把 `rwkv_knowledge` 固定资料模块置于其他路由之前,同时保留语义路由选中的 OA 或知识库模块。选中的契约是接口能力的唯一事实来源,`rwkv_knowledge` 配置的固定链接是 RWKV 内容的补充事实来源;不引入额外 Skill、MCP、function tools 或多 agent 编排。
 
 ## 运行
 

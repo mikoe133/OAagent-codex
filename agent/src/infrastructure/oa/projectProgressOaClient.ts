@@ -12,6 +12,7 @@ import {
   OaRequestScheduler,
   type OaRequestExecutor,
 } from "./oaRequestScheduler.js";
+import type { WeeklyReportSnapshot } from "../../application/weeklyReportProjectSummarySync.js";
 
 const PROJECT_PAGE_SIZE = 100;
 const OA_REQUEST_TIMEOUT_MS = 15_000;
@@ -24,12 +25,17 @@ export type OaProject = {
   projectName: string;
   status: ProjectStatus;
   githubUrls: string[];
+  aliases?: string[];
   version?: number;
 };
 
 export interface ProjectProgressOaReader {
   listProjects(signal?: AbortSignal): Promise<OaProject[]>;
   getProject(projectId: number, signal?: AbortSignal): Promise<OaProject>;
+}
+
+export interface WeeklyReportOaReader {
+  getWeeklyReport(reportId: string, signal?: AbortSignal): Promise<WeeklyReportSnapshot>;
 }
 
 export type OaCommitSummary = {
@@ -120,7 +126,7 @@ export class ProjectProgressLeaseLostError extends OaRequestError {
   override name = "ProjectProgressLeaseLostError";
 }
 
-export class ProjectProgressOaClient implements ProjectProgressOaWriter {
+export class ProjectProgressOaClient implements ProjectProgressOaWriter, WeeklyReportOaReader {
   private readonly scheduler: OaRequestExecutor;
   private readonly retryRandom: () => number;
   private readonly retrySleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
@@ -159,6 +165,32 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter {
       { signal },
     );
     return decodeProject(decodeEnvelope(payload).data);
+  }
+
+  async getWeeklyReport(reportId: string, signal?: AbortSignal): Promise<WeeklyReportSnapshot> {
+    const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportGet,
+      `/internal/weekly-reports/${encodeURIComponent(reportId)}`,
+      {},
+      { signal },
+    );
+    const data = decodeEnvelope(payload).data;
+    if (!isRecord(data) || typeof data.id !== "string" ||
+      !Number.isInteger(data.weekly_num) || typeof data.content !== "string" ||
+      !Number.isInteger(data.version) || typeof data.updated_at !== "string") {
+      throw new OaContractError("OA 周报响应字段无效。");
+    }
+    const weeklyNum = data.weekly_num as number;
+    const version = data.version as number;
+    return {
+      id: data.id,
+      weeklyNum,
+      ownerId: typeof data.owner_id === "number" ? data.owner_id : null,
+      content: data.content,
+      version,
+      updatedAt: data.updated_at,
+      deleted: data.deleted === true,
+    };
   }
 
   async updateProjectStatus(
@@ -503,6 +535,9 @@ function decodeProject(value: unknown): OaProject {
   if (!Array.isArray(value.github_urls) || !value.github_urls.every((url) => typeof url === "string")) {
     throw new OaContractError("OA 项目 github_urls 无效。");
   }
+  if (value.aliases !== undefined && (!Array.isArray(value.aliases) || !value.aliases.every((alias) => typeof alias === "string"))) {
+    throw new OaContractError("OA 项目 aliases 无效。");
+  }
   if (value.version !== undefined && !Number.isInteger(value.version)) {
     throw new OaContractError("OA 项目 version 无效。");
   }
@@ -511,6 +546,7 @@ function decodeProject(value: unknown): OaProject {
     projectName: value.project_name,
     status,
     githubUrls: value.github_urls,
+    ...(Array.isArray(value.aliases) ? { aliases: value.aliases } : {}),
     ...(typeof value.version === "number" ? { version: value.version } : {}),
   };
 }

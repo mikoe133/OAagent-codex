@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { runProjectProgressAutomation } from "../application/runProjectProgressAutomation.js";
+import { syncWeeklyReportProjectSummaries } from "../application/weeklyReportProjectSummarySync.js";
 import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
 import { resolveProjectProgressAutomationParameters } from "../application/projectProgressAutomationParameters.js";
 import {
@@ -11,7 +12,7 @@ import {
 import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
 import { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
-import { AutomationOaClient } from "../infrastructure/oa/automationOaClient.js";
+import { AutomationOaClient, SUPPORTED_JOB_TYPES } from "../infrastructure/oa/automationOaClient.js";
 import { ProjectProgressOaClient } from "../infrastructure/oa/projectProgressOaClient.js";
 import { OaRequestScheduler } from "../infrastructure/oa/oaRequestScheduler.js";
 import { ProjectProgressStore } from "../infrastructure/persistence/projectProgressStore.js";
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
         workerInstance: baseConfig.automation.workerInstance,
         leaseSeconds: baseConfig.automation.leaseSeconds,
         heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
+        supportedJobTypes: [...SUPPORTED_JOB_TYPES],
         claimIdentityStore: store,
         traceSpool: store,
         resolveExecution: async (claim) => {
@@ -86,26 +88,71 @@ async function main(): Promise<void> {
             maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
             maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
           });
+          const projectOaClient = new ProjectProgressOaClient(
+            {
+              ...config.oa,
+              ...(claim.runMutationToken && claim.fencingToken
+                ? {
+                    mutationContext: {
+                      runId: claim.runId,
+                      runMutationToken: claim.runMutationToken,
+                      fencingToken: claim.fencingToken,
+                    },
+                  }
+                : {}),
+            },
+            fetch,
+            operationMetrics,
+            { scheduler: oaRequestScheduler },
+          );
+          if (claim.jobType === "weekly_report_project_summary_sync") {
+            const weeklyParameters = claim.modelParameters as Record<string, unknown>;
+            return async (shouldCancel) => {
+              const snapshot = claim.sourceSnapshot;
+              const source = snapshot && typeof snapshot.source_report_id === "string" &&
+                typeof snapshot.source_version === "number" &&
+                typeof snapshot.weekly_num === "number" &&
+                typeof snapshot.updated_at === "string" &&
+                typeof snapshot.content === "string"
+                ? {
+                    id: snapshot.source_report_id,
+                    weeklyNum: snapshot.weekly_num,
+                    content: snapshot.content,
+                    version: snapshot.source_version,
+                    updatedAt: snapshot.updated_at,
+                    ownerId: null,
+                  }
+                : snapshot && typeof snapshot.source_report_id === "string"
+                  ? await projectOaClient.getWeeklyReport(snapshot.source_report_id).then((current) => {
+                      if (current.version !== snapshot.source_version) {
+                        throw new Error(
+                          `周报源版本已推进:${snapshot.source_version}->${current.version}`,
+                        );
+                      }
+                      return current;
+                    })
+                  : null;
+              if (!source) {
+                throw new Error("事件缺少可读取的周报源快照。");
+              }
+              const projects = await projectOaClient.listProjects();
+              return syncWeeklyReportProjectSummaries({
+                report: source,
+                projects,
+                oaClient: projectOaClient,
+                includeArchivedProjects: weeklyParameters.include_archived_projects !== false,
+                writeArchivedProjects: weeklyParameters.write_archived_projects !== false,
+                minimumConfidence: typeof weeklyParameters.minimum_confidence === "number"
+                  ? weeklyParameters.minimum_confidence
+                  : 0.8,
+                shouldCancel,
+              });
+            };
+          }
           return async (shouldCancel, trace) => {
             return await syncProjectProgress({
               observedAt: new Date(claim.scheduledAt),
-              oaClient: new ProjectProgressOaClient(
-                {
-                  ...config.oa,
-                  ...(claim.runMutationToken && claim.fencingToken
-                    ? {
-                        mutationContext: {
-                          runId: claim.runId,
-                          runMutationToken: claim.runMutationToken,
-                          fencingToken: claim.fencingToken,
-                        },
-                      }
-                    : {}),
-                },
-                fetch,
-                operationMetrics,
-                { scheduler: oaRequestScheduler },
-              ),
+              oaClient: projectOaClient,
               githubReader: new GitHubRestProjectReader(
                 config.githubToken,
                 fetch,
