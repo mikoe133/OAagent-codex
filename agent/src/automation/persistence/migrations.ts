@@ -114,8 +114,10 @@ export async function runAutomationMigrations(
     let eventTriggersApplied = false;
     const eventColumns = new Map(
       eventColumnRows.map((row) => [
-        `${String(row.table_name)}.${String(row.column_name)}`,
-        String(row.is_nullable),
+        `${String(row.table_name ?? row.TABLE_NAME)}.${String(
+          row.column_name ?? row.COLUMN_NAME,
+        )}`,
+        String(row.is_nullable ?? row.IS_NULLABLE),
       ]),
     );
     const requiredEventColumns = [
