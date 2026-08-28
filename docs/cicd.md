@@ -83,7 +83,7 @@ Environment Variables:
 | 两者可选 | `PROJECT_PROGRESS_HEARTBEAT_SECONDS` | heartbeat 间隔秒数，默认 `10` 且必须小于租约 |
 | 两者可选 | `PROJECT_PROGRESS_GITHUB_CONCURRENCY` | GitHub HTTP 全局并发，默认 `6` |
 | 两者可选 | `PROJECT_PROGRESS_AGENT_CONCURRENCY` | 同时运行的仓库 Codex Thread 数，默认 `2` |
-| 两者可选 | `PROJECT_PROGRESS_OA_WRITE_CONCURRENCY` | OA mutation 并发，当前固定为 `1` |
+| 两者可选 | `PROJECT_PROGRESS_OA_WRITE_CONCURRENCY` | 周报项目总结 OA 写入并发，默认 `4`，允许 `1-20` |
 | 两者可选 | `AUTOMATION_MIGRATE_ON_START` | 默认 `true`；启动 Agent 前执行幂等 baseline/seed |
 | 两者可选 | `AUTOMATION_MAINTENANCE_ENABLED` | 默认 `true`；仅在需要暂停自动调度时显式设为 `false` |
 | 两者可选 | `AUTOMATION_MAINTENANCE_INTERVAL_SECONDS` | 默认 `30` |

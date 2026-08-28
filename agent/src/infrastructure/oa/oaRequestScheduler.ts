@@ -215,8 +215,13 @@ export class OaRequestScheduler implements OaRequestExecutor {
     ) {
       return false;
     }
-    return lane !== "p0" && lane !== "p1" ||
-      this.activeByLane.p0 + this.activeByLane.p1 === 0;
+    if (lane === "p0") {
+      return this.activeByLane.p1 === 0;
+    }
+    if (lane === "p1") {
+      return this.activeByLane.p0 === 0;
+    }
+    return this.activeByLane.p0 === 0;
   }
 
   private activate(lane: OaRequestLane): () => void {

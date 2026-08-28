@@ -34,7 +34,7 @@ describe("loadProjectProgressConfig", () => {
     assert.deepEqual(config.concurrency, {
       github: 6,
       agent: 2,
-      oaWrite: 1,
+      oaWrite: 4,
     });
     assert.deepEqual(config.githubLimits, {
       maxBranches: 500,
@@ -228,16 +228,14 @@ describe("loadProjectProgressConfig", () => {
       }, "/tmp"),
       /不能小于单文件 Patch 上限/,
     );
-    assert.throws(
-      () => loadProjectProgressConfig({
-        OA_API_BASE_URL: "http://127.0.0.1:3002",
-        OA_PROJECT_SYNC_TOKEN: "worker-token",
-        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
-        NEXTTOKEN_API_KEY: "model-token",
-        PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "2",
-      }, "/tmp"),
-      /OA_WRITE_CONCURRENCY.*必须为 1/,
-    );
+    const concurrentWrites = loadProjectProgressConfig({
+      OA_API_BASE_URL: "http://127.0.0.1:3002",
+      OA_PROJECT_SYNC_TOKEN: "worker-token",
+      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      NEXTTOKEN_API_KEY: "model-token",
+      PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "2",
+    }, "/tmp");
+    assert.equal(concurrentWrites.concurrency.oaWrite, 2);
   });
 
   it("loads explicit repository concurrency and workspace settings", () => {

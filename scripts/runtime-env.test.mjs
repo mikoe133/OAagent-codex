@@ -91,7 +91,7 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS=12000$/m)
   assert.match(content, /^PROJECT_PROGRESS_GITHUB_CONCURRENCY=6$/m)
   assert.match(content, /^PROJECT_PROGRESS_AGENT_CONCURRENCY=2$/m)
-  assert.match(content, /^PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=1$/m)
+  assert.match(content, /^PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=4$/m)
   assert.match(content, /^PROJECT_PROGRESS_WORKSPACE_ROOT=\/app\/\.context\/project-progress-workspaces$/m)
   assert.match(content, /^PROJECT_PROGRESS_WRITE_ENABLED=true$/m)
   assert.match(content, /^PROJECT_PROGRESS_PRODUCTION_WRITES=I_UNDERSTAND_PRODUCTION_WRITES$/m)
@@ -126,6 +126,7 @@ test("renders split automation and project sync API base urls", async (context) 
     OA_DOCKER_API_BASE_URL: "https://oa-test.example.com",
     AUTOMATION_API_BASE_URL: "https://automation-node.example.com",
     PROJECT_SYNC_API_BASE_URL: "https://old-oa.example.com",
+    PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "2",
     OA_AGENT_SSO_SHARED_SECRET: "test-sso-secret",
     OA_AGENT_SSO_TTL_SECONDS: "300",
     WEB_PORT: "3001",
@@ -135,6 +136,7 @@ test("renders split automation and project sync API base urls", async (context) 
   const content = await readFile(outputPath, "utf8")
   assert.match(content, /^AUTOMATION_API_BASE_URL=https:\/\/automation-node\.example\.com$/m)
   assert.match(content, /^PROJECT_SYNC_API_BASE_URL=https:\/\/old-oa\.example\.com$/m)
+  assert.match(content, /^PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=2$/m)
 })
 
 test("preserves an explicit Docker host bind address", async (context) => {

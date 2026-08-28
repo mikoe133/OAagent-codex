@@ -619,7 +619,8 @@ function resolveTerminal(
 function isSummaryRetryWarning(warning: string): boolean {
   return warning.startsWith("repository_summary_fallback:") ||
     warning.startsWith("repository_summary_failed:") ||
-    warning.startsWith("repository_summary_incomplete:");
+    warning.startsWith("repository_summary_incomplete:") ||
+    warning === "weekly_report_agent_fallback";
 }
 
 function safeErrorSummary(error: unknown): string {
