@@ -130,6 +130,31 @@ export type AutomationAiInteractionInput = {
   errorSummary: string | null;
 };
 
+export type AutomationWeeklyReportPendingItemInput = {
+  segmentKey: string;
+  segmentOrder: number;
+  contentDigest: string;
+  originalContent: string;
+  aiSummary: string;
+  aiReason: string | null;
+  reasonCode:
+    | "project_not_found"
+    | "no_project_match"
+    | "ambiguous_project"
+    | "below_confidence"
+    | "invalid_agent_result"
+    | "archived_write_disabled";
+  classificationSource: "deterministic" | "agent" | "validation" | "fallback";
+  referencedProjectId: number | null;
+  candidateProjectIds: number[];
+  aiConfidence: number | null;
+};
+
+export type AutomationWeeklyReportSummaryBinding = {
+  commitSummaryId: number;
+  sourceVersion: number;
+};
+
 export type AutomationTraceEventInput = {
   eventKey: string;
   sequence: number;
@@ -378,6 +403,95 @@ export class AutomationOaClient {
     return data.interaction_id;
   }
 
+  async upsertWeeklyReportPendingItems(input: {
+    claim: AutomationJobClaim;
+    workerInstance: string;
+    items: AutomationWeeklyReportPendingItemInput[];
+    signal?: AbortSignal;
+  }): Promise<number[]> {
+    const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationWeeklyReportPendingItemsUpsert,
+      `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/weekly-report-pending-items`,
+      "PUT",
+      scopedMutationBody(
+        input.claim,
+        "automation.run.weekly-report-pending-items.upsert",
+        {
+          worker_instance: input.workerInstance,
+          lease_token: input.claim.leaseToken,
+          items: input.items.map((item) => ({
+            segment_key: item.segmentKey,
+            segment_order: item.segmentOrder,
+            content_digest: item.contentDigest,
+            original_content: item.originalContent,
+            ai_summary: item.aiSummary,
+            ai_reason: item.aiReason,
+            reason_code: item.reasonCode,
+            classification_source: item.classificationSource,
+            referenced_project_id: item.referencedProjectId,
+            candidate_project_ids: item.candidateProjectIds,
+            ai_confidence: item.aiConfidence,
+          })),
+        },
+      ),
+      { lane: "p1", ...(input.signal ? { signal: input.signal } : {}) },
+    );
+    const data = decodeEnvelope(payload).data;
+    if (
+      !isRecord(data) ||
+      !Array.isArray(data.pending_item_ids) ||
+      !data.pending_item_ids.every(isPositiveInteger)
+    ) {
+      throw new AutomationOaContractError("OA 待处理周报响应缺少 pending_item_ids。");
+    }
+    return data.pending_item_ids;
+  }
+
+  async getWeeklyReportSummaryBinding(input: {
+    claim: AutomationJobClaim;
+    workerInstance: string;
+    projectId: number;
+    summaryDate: string;
+    signal?: AbortSignal;
+  }): Promise<AutomationWeeklyReportSummaryBinding | null> {
+    const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationWeeklyReportSummaryBindingGet,
+      `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/weekly-report-summary-bindings/${encodeURIComponent(String(input.projectId))}`,
+      "POST",
+      {
+        worker_instance: input.workerInstance,
+        lease_token: input.claim.leaseToken,
+        summary_date: input.summaryDate,
+      },
+      { lane: "p1", ...(input.signal ? { signal: input.signal } : {}) },
+    );
+    const data = decodeEnvelope(payload).data;
+    return data === null ? null : decodeWeeklyReportSummaryBinding(data);
+  }
+
+  async saveWeeklyReportSummaryBinding(input: {
+    claim: AutomationJobClaim;
+    workerInstance: string;
+    projectId: number;
+    summaryDate: string;
+    commitSummaryId: number;
+    signal?: AbortSignal;
+  }): Promise<AutomationWeeklyReportSummaryBinding> {
+    const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaAutomationWeeklyReportSummaryBindingSave,
+      `/internal/automation-job-runs/${encodeURIComponent(input.claim.runId)}/weekly-report-summary-bindings/${encodeURIComponent(String(input.projectId))}`,
+      "PUT",
+      {
+        worker_instance: input.workerInstance,
+        lease_token: input.claim.leaseToken,
+        summary_date: input.summaryDate,
+        commit_summary_id: input.commitSummaryId,
+      },
+      { lane: "p1", ...(input.signal ? { signal: input.signal } : {}) },
+    );
+    return decodeWeeklyReportSummaryBinding(decodeEnvelope(payload).data);
+  }
+
   async upsertTraceEvent(input: {
     claim: AutomationJobClaim;
     workerInstance: string;
@@ -559,6 +673,24 @@ function decodeClaim(value: unknown): AutomationJobClaim {
     deadlineAt: new Date(value.deadline_at).toISOString(),
     leaseExpiresAt: new Date(value.lease_expires_at).toISOString(),
     cancelRequested: value.cancel_requested,
+  };
+}
+
+function decodeWeeklyReportSummaryBinding(
+  value: unknown,
+): AutomationWeeklyReportSummaryBinding {
+  if (
+    !isRecord(value) ||
+    !isPositiveInteger(value.commit_summary_id) ||
+    !isPositiveInteger(value.source_version)
+  ) {
+    throw new AutomationOaContractError(
+      "OA 周报总结绑定响应字段无效。",
+    );
+  }
+  return {
+    commitSummaryId: value.commit_summary_id,
+    sourceVersion: value.source_version,
   };
 }
 

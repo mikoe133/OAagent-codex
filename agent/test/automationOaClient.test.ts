@@ -261,6 +261,9 @@ describe("AutomationOaClient", () => {
       if (pathname.endsWith("/ai-interactions")) {
         return Response.json({ data: { interaction_id: 456 } }, { status: 201 });
       }
+      if (pathname.endsWith("/weekly-report-pending-items")) {
+        return Response.json({ data: { pending_item_ids: [789] } });
+      }
       if (pathname.endsWith("/trace-events")) {
         return new Response(null, { status: 204 });
       }
@@ -321,6 +324,23 @@ describe("AutomationOaClient", () => {
         errorSummary: null,
       },
     });
+    const pendingItemIds = await client.upsertWeeklyReportPendingItems({
+      claim,
+      workerInstance: "worker-01",
+      items: [{
+        segmentKey: "a".repeat(64),
+        segmentOrder: 2,
+        contentDigest: "b".repeat(64),
+        originalContent: "项目 72：修复登录问题",
+        aiSummary: "修复登录问题",
+        aiReason: "项目目录中不存在 ID 72",
+        reasonCode: "project_not_found",
+        classificationSource: "agent",
+        referencedProjectId: 72,
+        candidateProjectIds: [],
+        aiConfidence: 99,
+      }],
+    });
     await client.upsertTraceEvent({
       claim,
       workerInstance: "worker-01",
@@ -349,10 +369,12 @@ describe("AutomationOaClient", () => {
     assert.equal(heartbeat.cancelRequested, false);
     assert.equal(runProjectId, 123);
     assert.equal(interactionId, 456);
+    assert.deepEqual(pendingItemIds, [789]);
     assert.deepEqual(requests.map((request) => request.method), [
       "POST",
       "PUT",
       "POST",
+      "PUT",
       "POST",
       "PATCH",
     ]);
@@ -360,6 +382,7 @@ describe("AutomationOaClient", () => {
       "/internal/automation-job-runs/run-01/heartbeat",
       "/internal/automation-job-runs/run-01/projects/51",
       "/internal/automation-job-runs/run-01/ai-interactions",
+      "/internal/automation-job-runs/run-01/weekly-report-pending-items",
       "/internal/automation-job-runs/run-01/trace-events",
       "/internal/automation-job-runs/run-01",
     ]);
@@ -371,7 +394,9 @@ describe("AutomationOaClient", () => {
     const auditBody = mutationBodies[1]!;
     assert.deepEqual(auditBody.request_payload_sanitized, { commit_count: 2 });
     assert.doesNotMatch(JSON.stringify(auditBody), /commit subject/);
-    const traceBody = mutationBodies[2]!;
+    const pendingBody = mutationBodies[2]!;
+    assert.equal((pendingBody.items as Array<Record<string, unknown>>)[0]?.reason_code, "project_not_found");
+    const traceBody = mutationBodies[3]!;
     assert.deepEqual(traceBody, {
       worker_instance: "worker-01",
       lease_token: "lease-secret",
@@ -399,6 +424,65 @@ describe("AutomationOaClient", () => {
       assert.equal(body.fencing_token, 7);
       assert.match(String(body.idempotency_key), /^sha256:[a-f0-9]{64}$/);
     }
+  });
+
+  it("looks up and saves weekly report summary bindings with the active lease", async () => {
+    const requests: Request[] = [];
+    const client = createClient(async (input, init) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      if (request.method === "POST") {
+        return Response.json({
+          data: {
+            commit_summary_id: 901,
+            source_version: 1,
+          },
+        });
+      }
+      return Response.json({
+        data: {
+          commit_summary_id: 901,
+          source_version: 2,
+        },
+      });
+    });
+    const claim = decodeClaimForTest();
+
+    const existing = await client.getWeeklyReportSummaryBinding({
+      claim,
+      workerInstance: "worker-01",
+      projectId: 51,
+      summaryDate: "2026-08-30",
+    });
+    const saved = await client.saveWeeklyReportSummaryBinding({
+      claim,
+      workerInstance: "worker-01",
+      projectId: 51,
+      summaryDate: "2026-08-30",
+      commitSummaryId: 901,
+    });
+
+    assert.deepEqual(existing, { commitSummaryId: 901, sourceVersion: 1 });
+    assert.deepEqual(saved, { commitSummaryId: 901, sourceVersion: 2 });
+    assert.deepEqual(requests.map((request) => request.method), ["POST", "PUT"]);
+    assert.deepEqual(
+      requests.map((request) => new URL(request.url).pathname),
+      [
+        "/internal/automation-job-runs/run-01/weekly-report-summary-bindings/51",
+        "/internal/automation-job-runs/run-01/weekly-report-summary-bindings/51",
+      ],
+    );
+    assert.deepEqual(await requests[0]?.json(), {
+      worker_instance: "worker-01",
+      lease_token: "lease-secret",
+      summary_date: "2026-08-30",
+    });
+    assert.deepEqual(await requests[1]?.json(), {
+      worker_instance: "worker-01",
+      lease_token: "lease-secret",
+      summary_date: "2026-08-30",
+      commit_summary_id: 901,
+    });
   });
 
   it("classifies an expired lease as a terminal lease loss", async () => {

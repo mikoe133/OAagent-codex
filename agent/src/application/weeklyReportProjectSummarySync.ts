@@ -9,11 +9,13 @@ import type {
 } from "../infrastructure/oa/projectProgressOaClient.js";
 import type {
   ProjectProgressProjectReport,
+  ProjectProgressPendingItem,
   ProjectProgressSummaryProposal,
   ProjectProgressSyncReport,
   ProjectProgressTraceSink,
 } from "./syncProjectProgress.js";
 import {
+  buildWeeklyReportSegments,
   type WeeklyReportAgentSummaryOutput,
   type WeeklyReportProjectSummaryAgent,
 } from "./weeklyReportAgentSummarizer.js";
@@ -37,6 +39,7 @@ export type WeeklyReportSplitMatch = {
   content: string;
   confidence: number;
   reason: "project_id" | "exact_name" | "alias" | "agent";
+  segmentKeys?: string[];
 };
 
 export type WeeklyReportSplitResult = {
@@ -56,6 +59,28 @@ export type WeeklyReportSyncInput = {
   summarizer?: WeeklyReportProjectSummaryAgent;
   trace?: ProjectProgressTraceSink;
   oaWriteConcurrency?: number;
+  pendingItemSink?: (items: ProjectProgressPendingItem[]) => Promise<void>;
+  summaryBindingStore: WeeklyReportSummaryBindingStore;
+};
+
+export type WeeklyReportSummaryBinding = {
+  commitSummaryId: number;
+  sourceVersion: number;
+};
+
+export type WeeklyReportSummaryBindingStore = {
+  findBinding(input: {
+    sourceReportId: string;
+    projectId: number;
+    summaryDate: string;
+  }): Promise<WeeklyReportSummaryBinding | null>;
+  saveBinding(input: {
+    sourceReportId: string;
+    sourceVersion: number;
+    projectId: number;
+    summaryDate: string;
+    commitSummaryId: number;
+  }): Promise<WeeklyReportSummaryBinding>;
 };
 
 export function splitWeeklyReportContent(
@@ -159,9 +184,8 @@ export async function syncWeeklyReportProjectSummaries(
 ): Promise<ProjectProgressSyncReport> {
   const observedAt = new Date(input.report.updatedAt);
   const summaryDate = weeklyReportSummaryDate(input.report.weeklyNum);
-  const availableProjects = input.projects.filter((project) =>
-    input.includeArchivedProjects !== false || project.status !== "archived",
-  );
+  const segments = buildWeeklyReportSegments(input.report.content);
+  const availableProjects = input.projects;
   await emitWeeklyTrace(input.trace, {
     eventKey: "weekly_report_source",
     sequence: 300,
@@ -200,6 +224,7 @@ export async function syncWeeklyReportProjectSummaries(
       agentResult = await input.summarizer.summarize({
         report: input.report,
         projects: availableProjects,
+        segments,
       });
     } catch (error) {
       await emitWeeklyTrace(input.trace, {
@@ -263,6 +288,46 @@ export async function syncWeeklyReportProjectSummaries(
         }
       : match);
   }
+  const pendingItems = buildPendingItems({
+    segments,
+    projects: availableProjects,
+    split,
+    agentResult,
+    minimumConfidence,
+  });
+  if (pendingItems.length > 0 && input.pendingItemSink) {
+    try {
+      await input.pendingItemSink(pendingItems);
+    } catch (error) {
+      await emitWeeklyTrace(input.trace, {
+        eventKey: "weekly_report_pending_items",
+        sequence: 560,
+        phase: "record_pending_items",
+        status: "failed",
+        title: "记录待处理周报内容",
+        message: safeError(error),
+        progressCurrent: 0,
+        progressTotal: pendingItems.length,
+      });
+      throw error;
+    }
+  }
+  await emitWeeklyTrace(input.trace, {
+    eventKey: "weekly_report_pending_items",
+    sequence: 560,
+    phase: "record_pending_items",
+    status: "succeeded",
+    title: "记录待处理周报内容",
+    message: pendingItems.length > 0
+      ? `已记录 ${pendingItems.length} 条待处理内容`
+      : "没有待处理内容",
+    progressCurrent: pendingItems.length,
+    progressTotal: pendingItems.length,
+    metadataSanitized: {
+      pending_item_count: pendingItems.length,
+      reason_counts: countPendingReasons(pendingItems),
+    },
+  });
   const writePlans = [...groupedMatches.values()]
     .filter((match) => match.confidence >= minimumConfidence)
     .map((match) => ({
@@ -363,6 +428,7 @@ export async function syncWeeklyReportProjectSummaries(
     },
     operationMetrics: [],
     projects: reportItems,
+    pendingItems,
   };
 }
 
@@ -380,9 +446,14 @@ function agentResultToSplit(
           ...previous,
           content: `${previous.content}\n\n${item.summary}`,
           confidence: Math.min(previous.confidence, item.confidence),
+          segmentKeys: [...new Set([
+            ...(previous.segmentKeys ?? []),
+            ...(item.segmentKeys ?? []),
+          ])],
         }
       : {
           projectId: item.projectId,
+          segmentKeys: item.segmentKeys ?? [],
           content: item.summary,
           confidence: item.confidence,
           reason: "agent",
@@ -390,9 +461,180 @@ function agentResultToSplit(
   }
   return {
     matches: [...grouped.values()],
-    unmatched: result.unmatched,
+    unmatched: result.unmatched.map((item) => item.summary),
     ambiguous: [],
   };
+}
+
+function buildPendingItems(input: {
+  segments: ReturnType<typeof buildWeeklyReportSegments>;
+  projects: WeeklyReportProject[];
+  split: WeeklyReportSplitResult;
+  agentResult: WeeklyReportAgentSummaryOutput | null;
+  minimumConfidence: number;
+}): ProjectProgressPendingItem[] {
+  const pendingBySegmentKey = new Map<string, ProjectProgressPendingItem>();
+  const segmentByKey = new Map(
+    input.segments.map((segment) => [segment.segmentKey, segment]),
+  );
+  const classificationSource: ProjectProgressPendingItem["classificationSource"] =
+    input.agentResult?.interaction?.fallbackUsed
+      ? "fallback"
+      : input.agentResult
+        ? "agent"
+        : "deterministic";
+  const addPending = (
+    segment: ReturnType<typeof buildWeeklyReportSegments>[number] | undefined,
+    pending: Omit<
+      ProjectProgressPendingItem,
+      "segmentKey" | "segmentOrder" | "contentDigest" | "originalContent"
+    >,
+  ) => {
+    if (!segment || pendingBySegmentKey.has(segment.segmentKey)) return;
+    pendingBySegmentKey.set(segment.segmentKey, {
+      segmentKey: segment.segmentKey,
+      segmentOrder: segment.segmentOrder,
+      contentDigest: segment.contentDigest,
+      originalContent: segment.originalContent,
+      ...pending,
+    });
+  };
+
+  if (input.agentResult) {
+    for (const unmatched of input.agentResult.unmatched) {
+      const segment = segmentByKey.get(unmatched.segmentKey) ??
+        input.segments.find((candidate) =>
+          candidate.originalContent === unmatched.summary,
+        );
+      addPending(segment, {
+        aiSummary: unmatched.summary,
+        aiReason: unmatched.reason,
+        reasonCode: unmatched.reasonCode,
+        classificationSource,
+        referencedProjectId: unmatched.referencedProjectId,
+        candidateProjectIds: unmatched.candidateProjectIds,
+        aiConfidence: unmatched.confidence === null
+          ? null
+          : Math.round(unmatched.confidence * 100),
+      });
+    }
+  } else {
+    for (const content of input.split.unmatched) {
+      const segment = input.segments.find((candidate) =>
+        candidate.originalContent === content,
+      );
+      const ambiguous = input.split.ambiguous.find((item) => item.content === content);
+      const referencedProjectId = explicitProjectIds(content).find((projectId) =>
+        !input.projects.some((project) => project.id === projectId),
+      ) ?? null;
+      addPending(segment, {
+        aiSummary: summarizePendingContent(content),
+        aiReason: referencedProjectId
+          ? `项目目录中不存在 ID ${referencedProjectId}`
+          : ambiguous
+            ? "片段同时匹配多个项目"
+            : "未找到明确项目归属",
+        reasonCode: referencedProjectId
+          ? "project_not_found"
+          : ambiguous
+            ? "ambiguous_project"
+            : "no_project_match",
+        classificationSource,
+        referencedProjectId,
+        candidateProjectIds: ambiguous?.projectIds ?? [],
+        aiConfidence: ambiguous ? 50 : null,
+      });
+    }
+  }
+
+  for (const match of input.split.matches) {
+    const project = input.projects.find((candidate) => candidate.id === match.projectId);
+    const matchedSegments = resolveMatchSegments(match, input.segments, project);
+    if (match.confidence < input.minimumConfidence) {
+      for (const segment of matchedSegments) {
+        addPending(segment, {
+          aiSummary: match.content,
+          aiReason: `项目匹配置信度 ${match.confidence.toFixed(2)} 低于阈值 ${input.minimumConfidence.toFixed(2)}`,
+          reasonCode: "below_confidence",
+          classificationSource: "validation",
+          referencedProjectId: match.projectId,
+          candidateProjectIds: [match.projectId],
+          aiConfidence: Math.round(match.confidence * 100),
+        });
+      }
+    }
+  }
+
+  if (input.agentResult) {
+    const accountedSegmentKeys = new Set([
+      ...input.agentResult.projects.flatMap((project) => project.segmentKeys ?? []),
+      ...input.agentResult.unmatched.map((item) => item.segmentKey),
+    ]);
+    for (const segment of input.segments) {
+      if (accountedSegmentKeys.has(segment.segmentKey)) continue;
+      addPending(segment, {
+        aiSummary: summarizePendingContent(segment.originalContent),
+        aiReason: "Agent 未返回该片段的项目归属结果",
+        reasonCode: "invalid_agent_result",
+        classificationSource: "validation",
+        referencedProjectId: null,
+        candidateProjectIds: [],
+        aiConfidence: null,
+      });
+    }
+  }
+
+  return [...pendingBySegmentKey.values()].sort(
+    (left, right) => left.segmentOrder - right.segmentOrder,
+  );
+}
+
+function resolveMatchSegments(
+  match: WeeklyReportSplitMatch,
+  segments: ReturnType<typeof buildWeeklyReportSegments>,
+  project: WeeklyReportProject | undefined,
+) {
+  const keyed = (match.segmentKeys ?? []).flatMap((segmentKey) => {
+    const segment = segments.find((candidate) => candidate.segmentKey === segmentKey);
+    return segment ? [segment] : [];
+  });
+  if (keyed.length > 0) return keyed;
+  const exact = segments.find((segment) => segment.originalContent === match.content);
+  if (exact) return [exact];
+  if (!project) return [];
+  return segments.filter((segment) =>
+    explicitProjectIds(segment.originalContent).includes(project.id) ||
+    includesName(segment.originalContent, project.projectName) ||
+    (project.aliases ?? []).some((alias) => includesName(segment.originalContent, alias)),
+  );
+}
+
+function explicitProjectIds(content: string): number[] {
+  return [...new Set(
+    [...content.matchAll(/(?:项目|project)\s*(?:id|编号)?\s*[#：:]?\s*(\d+)/giu)]
+      .map((match) => Number(match[1])),
+  )];
+}
+
+function summarizePendingContent(content: string): string {
+  return content
+    .replace(
+      /^\s*(?:项目|project)\s*(?:id|编号)?\s*[#：:]?\s*\d+\s*[：:]?\s*/iu,
+      "",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 2_000) || content.slice(0, 2_000);
+}
+
+function countPendingReasons(
+  items: ProjectProgressPendingItem[],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    counts[item.reasonCode] = (counts[item.reasonCode] ?? 0) + 1;
+  }
+  return counts;
 }
 
 async function writeProjectSummary(input: {
@@ -418,29 +660,63 @@ async function writeProjectSummary(input: {
   let mutationsApplied = 0;
   const warnings: string[] = input.warning ? [input.warning] : [];
   try {
-    if (project.status === "archived" && input.input.writeArchivedProjects === false) {
-      warnings.push("archived_project_write_disabled");
-    } else {
-      const existing = (await input.input.oaClient.listCommitSummaries(project.id, summaryDate)).at(0);
-      if (existing && (existing.summary !== match.content || existing.aiNote !== aiNote)) {
-        await input.input.oaClient.updateCommitSummary(existing.id, {
-          summary: match.content,
-          aiConfidence: summary.aiConfidence,
-          aiNote,
-          ...(existing.version === undefined ? {} : { expectedVersion: existing.version }),
-        });
-        mutationsApplied += 1;
-      } else if (!existing) {
-        await input.input.oaClient.createCommitSummary({
-          projectId: project.id,
-          summaryDate,
-          summary: match.content,
-          aiConfidence: summary.aiConfidence,
-          aiNote,
-        });
-        mutationsApplied += 1;
-      }
+    const binding = await input.input.summaryBindingStore.findBinding({
+      sourceReportId: input.input.report.id,
+      projectId: project.id,
+      summaryDate,
+    });
+    if (binding && binding.sourceVersion > input.input.report.version) {
+      throw new Error(
+        `周报总结绑定已推进到版本 ${binding.sourceVersion}`,
+      );
     }
+    let existing: OaCommitSummary | undefined;
+    if (binding) {
+      existing = await input.input.oaClient.getCommitSummary(
+        binding.commitSummaryId,
+      );
+      if (
+        existing.projectId !== project.id ||
+        existing.summaryDate !== summaryDate
+      ) {
+        throw new Error("周报总结绑定指向了不匹配的项目或日期");
+      }
+    } else {
+      const summaries = await input.input.oaClient.listCommitSummaries(
+        project.id,
+        summaryDate,
+      );
+      existing = summaries.find((candidate) =>
+        candidate.aiNote.includes(
+          weeklyReportSourceMarker(input.input.report.id),
+        ),
+      );
+    }
+    if (existing && (existing.summary !== match.content || existing.aiNote !== aiNote)) {
+      await input.input.oaClient.updateCommitSummary(existing.id, {
+        summary: match.content,
+        aiConfidence: summary.aiConfidence,
+        aiNote,
+        ...(existing.version === undefined ? {} : { expectedVersion: existing.version }),
+      });
+      mutationsApplied += 1;
+    } else if (!existing) {
+      existing = await input.input.oaClient.createCommitSummary({
+        projectId: project.id,
+        summaryDate,
+        summary: match.content,
+        aiConfidence: summary.aiConfidence,
+        aiNote,
+      });
+      mutationsApplied += 1;
+    }
+    await input.input.summaryBindingStore.saveBinding({
+      sourceReportId: input.input.report.id,
+      sourceVersion: input.input.report.version,
+      projectId: project.id,
+      summaryDate,
+      commitSummaryId: existing.id,
+    });
   } catch (error) {
     warnings.push(`summary_write_failed:${safeError(error)}`);
   }
@@ -468,8 +744,16 @@ function includesName(content: string, name: string): boolean {
 }
 
 function formatWeeklyReportNote(report: WeeklyReportSnapshot, projectContent: string): string {
+  const marker = weeklyReportSourceMarker(report.id);
   const prefix = `${report.weeklyNum} 周报（${report.updatedAt}）：`;
-  return `${prefix}${report.content}\n项目拆分片段：${projectContent}`.slice(0, 10_000);
+  return `${marker}\n${prefix}${report.content}\n项目拆分片段：${projectContent}`.slice(0, 10_000);
+}
+
+function weeklyReportSourceMarker(sourceReportId: string): string {
+  const digest = createHash("sha256")
+    .update(sourceReportId, "utf8")
+    .digest("hex");
+  return `[OAAGENT_WEEKLY_REPORT_SOURCE:${digest}]`;
 }
 
 function safeError(error: unknown): string {

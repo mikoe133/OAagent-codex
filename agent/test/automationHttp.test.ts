@@ -197,6 +197,100 @@ test("accepts a signed weekly report event through the internal intake", async (
   }
 });
 
+test("routes Worker pending weekly report items through the internal API", async () => {
+  const calls: unknown[] = [];
+  const operations = {
+    async upsertWeeklyReportPendingItems(runId: string, input: unknown) {
+      calls.push({ runId, input });
+      return { pending_item_ids: [1] };
+    },
+  } as unknown as AutomationOperations;
+  const application = new AutomationHttpApplication(
+    {
+      sessionSecret: "dummy",
+      sessionVerifyMaxAgeSeconds: 0,
+      internalToken: "internal-secret",
+    },
+    operations,
+  );
+  const fixture = await startFixture(application);
+  try {
+    const response = await requestJson(
+      fixture.port,
+      "PUT",
+      "/internal/automation-job-runs/run-1/weekly-report-pending-items",
+      { Authorization: "Bearer internal-secret", "Content-Type": "application/json" },
+      { items: [] },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls, [{ runId: "run-1", input: { items: [] } }]);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("routes Worker weekly report summary binding lookup and save operations", async () => {
+  const calls: unknown[] = [];
+  const operations = {
+    async getWeeklyReportSummaryBinding(runId: string, projectId: number, input: unknown) {
+      calls.push({ operation: "get", runId, projectId, input });
+      return null;
+    },
+    async saveWeeklyReportSummaryBinding(runId: string, projectId: number, input: unknown) {
+      calls.push({ operation: "save", runId, projectId, input });
+      return { commit_summary_id: 901, source_version: 2 };
+    },
+  } as unknown as AutomationOperations;
+  const application = new AutomationHttpApplication(
+    {
+      sessionSecret: "dummy",
+      sessionVerifyMaxAgeSeconds: 0,
+      internalToken: "internal-secret",
+    },
+    operations,
+  );
+  const fixture = await startFixture(application);
+  const headers = {
+    Authorization: "Bearer internal-secret",
+    "Content-Type": "application/json",
+  };
+  try {
+    const lookup = await requestJson(
+      fixture.port,
+      "POST",
+      "/internal/automation-job-runs/run-1/weekly-report-summary-bindings/51",
+      headers,
+      { summary_date: "2026-08-30" },
+    );
+    const saved = await requestJson(
+      fixture.port,
+      "PUT",
+      "/internal/automation-job-runs/run-1/weekly-report-summary-bindings/51",
+      headers,
+      { summary_date: "2026-08-30", commit_summary_id: 901 },
+    );
+
+    assert.equal(lookup.status, 200);
+    assert.equal(saved.status, 200);
+    assert.deepEqual(calls, [
+      {
+        operation: "get",
+        runId: "run-1",
+        projectId: 51,
+        input: { summary_date: "2026-08-30" },
+      },
+      {
+        operation: "save",
+        runId: "run-1",
+        projectId: 51,
+        input: { summary_date: "2026-08-30", commit_summary_id: 901 },
+      },
+    ]);
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("returns the OA-compatible 201 envelope when a job is created", async () => {
   const operations = {
     async createJob(input: unknown, userId: number) {

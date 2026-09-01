@@ -7,6 +7,7 @@ import {
   buildAutomationProjectOutcomeChartData,
   hasActiveAutomationRuns,
   hasPollableAutomationRuns,
+  projectOutcomeForDisplay,
   resolveAutomationRunReply,
   shouldRefreshAutomationRunDetail,
 } from "./automation-run-presentation"
@@ -54,6 +55,19 @@ test("aggregates project outcome tags and accounts for unloaded project details"
       { id: "other", label: "其他结果", value: 1 },
       { id: "unloaded", label: "明细未加载", value: 2 },
     ],
+  )
+})
+
+test("distinguishes archived project handling by automation type", () => {
+  const archivedProject = project({ outcome: "archived" })
+
+  assert.equal(
+    projectOutcomeForDisplay(archivedProject, "weekly_report_project_summary_sync"),
+    "archived_processed",
+  )
+  assert.equal(
+    projectOutcomeForDisplay(archivedProject, "github_project_progress_sync"),
+    "archived",
   )
 })
 

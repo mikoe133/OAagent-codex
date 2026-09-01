@@ -181,6 +181,7 @@ export function AutomationRunDetailDialog({
                 <ProjectOutcomeBreakdown
                   projects={run.projects}
                   projectsTotal={run.projects_total}
+                  jobType={run.job_type}
                 />
               ) : null}
               {run.error_summary ? (
@@ -217,7 +218,7 @@ export function AutomationRunDetailDialog({
                           项目 #{project.project_id} · {project.repository_count} 个仓库 · {project.commit_count} 条 Commit
                         </p>
                       </div>
-                      <ProjectOutcomeTag outcome={projectOutcomeForDisplay(project)} />
+                      <ProjectOutcomeTag outcome={projectOutcomeForDisplay(project, run.job_type)} />
                     </div>
                     <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
                       <Detail label="状态变化" value={`${project.status_before ?? "—"} → ${project.status_after ?? "—"}`} />
@@ -475,14 +476,16 @@ function formatTraceTime(value: string): string {
 function ProjectOutcomeBreakdown({
   projects,
   projectsTotal,
+  jobType,
 }: {
   projects: AutomationRunProject[]
   projectsTotal: number
+  jobType: string
 }) {
   const shouldReduceMotion = useReducedMotion()
   const data = React.useMemo(
-    () => buildAutomationProjectOutcomeChartData(projects, projectsTotal),
-    [projects, projectsTotal],
+    () => buildAutomationProjectOutcomeChartData(projects, projectsTotal, jobType),
+    [jobType, projects, projectsTotal],
   )
   const [activeSegmentId, setActiveSegmentId] = React.useState<string | null>(null)
   const activeSegment = data.find((segment) => segment.id === activeSegmentId) ?? null
@@ -711,6 +714,13 @@ function projectOutcomePresentation(outcome: string): {
       icon: Clock5,
       backgroundClass: "bg-zinc-100",
       textClass: "text-[#777777]",
+    },
+    archived_processed: {
+      label: "项目已归档，已后台处理",
+      description: "项目已归档，已后台处理",
+      icon: CircleCheck,
+      backgroundClass: "bg-slate-100",
+      textClass: "text-slate-600",
     },
     no_github_urls: {
       label: "无 GitHub 地址，已跳过处理",

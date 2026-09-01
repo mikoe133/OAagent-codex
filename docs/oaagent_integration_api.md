@@ -476,7 +476,7 @@ Content-Type: application/json
 | 值 | 含义 | OA 成功计数 |
 | --- | --- | --- |
 | `evaluated` | 已正常评估并生成结果 | 成功 |
-| `archived` | 项目已归档，无需继续处理 | 成功 |
+| `archived` | 项目已归档；GitHub 项目进度总结任务跳过处理，周报项目总结任务仍可写入周报总结 | 成功 |
 | `no_github_urls` | 项目未配置 GitHub 仓库 | 成功 |
 | `no_commits` | 仓库读取完成，当天没有新增 Commit | 成功 |
 | `invalid_github_urls` | GitHub URL 不合法 | 失败 |

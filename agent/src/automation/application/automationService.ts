@@ -33,6 +33,9 @@ import {
   automationTagCreateSchema,
   automationTagPatchSchema,
   automationTraceEventUpsertSchema,
+  automationWeeklyReportPendingItemsUpsertSchema,
+  automationWeeklyReportSummaryBindingLookupSchema,
+  automationWeeklyReportSummaryBindingSaveSchema,
 } from "../contracts.js";
 import {
   ACTIVE_RUN_STATUSES,
@@ -72,6 +75,9 @@ type AiInteractionRow = Selectable<
 >;
 type TraceEventRow = Selectable<
   AutomationDatabaseSchema["automation_run_trace_events"]
+>;
+type WeeklyReportPendingItemRow = Selectable<
+  AutomationDatabaseSchema["automation_weekly_report_pending_items"]
 >;
 
 const REQUIRED_PROMPT_CAPABILITIES = [
@@ -1104,7 +1110,14 @@ export class AutomationService implements AutomationOperations {
         .filter(Boolean),
     );
     for (const include of includes) {
-      if (!["projects", "ai_interactions", "attempts"].includes(include)) {
+      if (
+        ![
+          "projects",
+          "ai_interactions",
+          "attempts",
+          "weekly_report_pending_items",
+        ].includes(include)
+      ) {
         throw new AutomationHttpError(422, "invalid_include", "include 参数不支持");
       }
     }
@@ -1117,12 +1130,20 @@ export class AutomationService implements AutomationOperations {
       .executeTakeFirst();
     if (!row) throw notFound("automation_run_not_found", "运行记录不存在");
     const result = serializeRun(row, row.job_deleted_at !== null) as Record<string, unknown>;
-    const aiCount = await this.database.db
-      .selectFrom("automation_ai_interactions")
-      .select(({ fn }) => fn.count<number>("id").as("count"))
-      .where("run_id", "=", runId)
-      .executeTakeFirstOrThrow();
+    const [aiCount, pendingItemCount] = await Promise.all([
+      this.database.db
+        .selectFrom("automation_ai_interactions")
+        .select(({ fn }) => fn.count<number>("id").as("count"))
+        .where("run_id", "=", runId)
+        .executeTakeFirstOrThrow(),
+      this.database.db
+        .selectFrom("automation_weekly_report_pending_items")
+        .select(({ fn }) => fn.count<number>("id").as("count"))
+        .where("run_id", "=", runId)
+        .executeTakeFirstOrThrow(),
+    ]);
     result.ai_interaction_count = Number(aiCount.count);
+    result.weekly_report_pending_item_count = Number(pendingItemCount.count);
     if (includes.has("projects")) {
       const projects = await this.database.db
         .selectFrom("automation_job_run_projects")
@@ -1149,6 +1170,18 @@ export class AutomationService implements AutomationOperations {
         .orderBy("attempt", "asc")
         .execute();
       result.attempts = attempts.map((attempt) => serializeRun(attempt, false));
+    }
+    if (includes.has("weekly_report_pending_items")) {
+      const pendingItems = await this.database.db
+        .selectFrom("automation_weekly_report_pending_items")
+        .selectAll()
+        .where("run_id", "=", runId)
+        .orderBy("segment_order", "asc")
+        .orderBy("id", "asc")
+        .execute();
+      result.weekly_report_pending_items = pendingItems.map(
+        serializeWeeklyReportPendingItem,
+      );
     }
     return result;
   }
@@ -1368,6 +1401,26 @@ export class AutomationService implements AutomationOperations {
 
   createAiInteraction(runId: string, body: unknown): Promise<unknown> {
     return this.createAiInteractionWithLease(runId, body);
+  }
+
+  upsertWeeklyReportPendingItems(runId: string, body: unknown): Promise<unknown> {
+    return this.upsertWeeklyReportPendingItemsWithLease(runId, body);
+  }
+
+  getWeeklyReportSummaryBinding(
+    runId: string,
+    projectId: number,
+    body: unknown,
+  ): Promise<unknown> {
+    return this.getWeeklyReportSummaryBindingWithLease(runId, projectId, body);
+  }
+
+  saveWeeklyReportSummaryBinding(
+    runId: string,
+    projectId: number,
+    body: unknown,
+  ): Promise<unknown> {
+    return this.saveWeeklyReportSummaryBindingWithLease(runId, projectId, body);
   }
 
   upsertTraceEvent(runId: string, body: unknown): Promise<unknown> {
@@ -2093,6 +2146,223 @@ export class AutomationService implements AutomationOperations {
     });
   }
 
+  private async upsertWeeklyReportPendingItemsWithLease(
+    runId: string,
+    body: unknown,
+  ): Promise<unknown> {
+    const input = automationWeeklyReportPendingItemsUpsertSchema.parse(body);
+    return this.withWorkerTransaction(async (connection, now) => {
+      const run = await loadWorkerRun(connection, runId, input, now);
+      if (run.job_type_snapshot !== "weekly_report_project_summary_sync") {
+        throw new AutomationHttpError(
+          422,
+          "automation_run_type_mismatch",
+          "仅周报同步任务可写入待处理内容",
+        );
+      }
+      const source = parseJson(run.source_snapshot, null);
+      if (!source || typeof source !== "object" || Array.isArray(source)) {
+        throw new AutomationHttpError(
+          422,
+          "weekly_report_source_snapshot_invalid",
+          "周报来源快照无效",
+        );
+      }
+      const snapshot = source as Record<string, unknown>;
+      const triggerEventId = run.trigger_event_id;
+      const sourceReportId = snapshot.source_report_id;
+      const sourceVersion = snapshot.source_version;
+      const weeklyNum = snapshot.weekly_num;
+      if (
+        !triggerEventId ||
+        typeof sourceReportId !== "string" ||
+        !Number.isSafeInteger(sourceVersion) ||
+        Number(sourceVersion) < 1 ||
+        !Number.isSafeInteger(weeklyNum) ||
+        Number(weeklyNum) < 1
+      ) {
+        throw new AutomationHttpError(
+          422,
+          "weekly_report_source_snapshot_invalid",
+          "周报来源快照字段不完整",
+        );
+      }
+      const scope = snapshot.scope;
+      const ownerUserId =
+        scope && typeof scope === "object" && !Array.isArray(scope) &&
+        Number.isSafeInteger((scope as Record<string, unknown>).user_id) &&
+        Number((scope as Record<string, unknown>).user_id) > 0
+          ? Number((scope as Record<string, unknown>).user_id)
+          : null;
+
+      for (const item of input.items) {
+        await connection.execute<ResultSetHeader>(
+          `INSERT INTO automation_weekly_report_pending_items (
+             run_id, trigger_event_id, source_report_id, source_version,
+             weekly_num, owner_user_id, segment_key, segment_order,
+             content_digest, original_content, ai_summary, ai_reason,
+             reason_code, classification_source, referenced_project_id,
+             candidate_project_ids, ai_confidence, status, sync_status,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'not_started', ?, ?)
+           ON DUPLICATE KEY UPDATE
+             segment_order = VALUES(segment_order),
+             content_digest = VALUES(content_digest),
+             original_content = VALUES(original_content),
+             ai_summary = VALUES(ai_summary),
+             ai_reason = VALUES(ai_reason),
+             reason_code = VALUES(reason_code),
+             classification_source = VALUES(classification_source),
+             referenced_project_id = VALUES(referenced_project_id),
+             candidate_project_ids = VALUES(candidate_project_ids),
+             ai_confidence = VALUES(ai_confidence),
+             updated_at = VALUES(updated_at)`,
+          [
+            runId,
+            triggerEventId,
+            sourceReportId,
+            Number(sourceVersion),
+            Number(weeklyNum),
+            ownerUserId,
+            item.segment_key,
+            item.segment_order,
+            item.content_digest,
+            item.original_content,
+            item.ai_summary,
+            item.ai_reason ?? null,
+            item.reason_code,
+            item.classification_source,
+            item.referenced_project_id ?? null,
+            JSON.stringify(item.candidate_project_ids),
+            item.ai_confidence ?? null,
+            now,
+            now,
+          ],
+        );
+      }
+      const placeholders = input.items.map(() => "?").join(", ");
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT id, segment_key
+           FROM automation_weekly_report_pending_items
+          WHERE run_id = ? AND segment_key IN (${placeholders})`,
+        [runId, ...input.items.map((item) => item.segment_key)],
+      );
+      const idBySegmentKey = new Map(
+        rows.map((row) => [String(row.segment_key), Number(row.id)]),
+      );
+      return {
+        pending_item_ids: input.items.map((item) => {
+          const id = idBySegmentKey.get(item.segment_key);
+          if (!id) {
+            throw new Error("weekly_report_pending_item_not_persisted");
+          }
+          return id;
+        }),
+      };
+    });
+  }
+
+  private async getWeeklyReportSummaryBindingWithLease(
+    runId: string,
+    projectId: number,
+    body: unknown,
+  ): Promise<unknown> {
+    const input = automationWeeklyReportSummaryBindingLookupSchema.parse(body);
+    return this.withWorkerTransaction(async (connection, now) => {
+      const run = await loadWorkerRun(connection, runId, input, now);
+      const source = weeklyReportRunSource(run);
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT commit_summary_id, source_version
+           FROM automation_weekly_report_summary_bindings
+          WHERE source_report_id = ? AND project_id = ? AND summary_date = ?
+          LIMIT 1`,
+        [source.sourceReportId, projectId, input.summary_date],
+      );
+      const row = rows[0];
+      return row
+        ? {
+            commit_summary_id: Number(row.commit_summary_id),
+            source_version: Number(row.source_version),
+          }
+        : null;
+    });
+  }
+
+  private async saveWeeklyReportSummaryBindingWithLease(
+    runId: string,
+    projectId: number,
+    body: unknown,
+  ): Promise<unknown> {
+    const input = automationWeeklyReportSummaryBindingSaveSchema.parse(body);
+    return this.withWorkerTransaction(async (connection, now) => {
+      const run = await loadWorkerRun(connection, runId, input, now);
+      const source = weeklyReportRunSource(run);
+      const [existingRows] = await connection.query<RowDataPacket[]>(
+        `SELECT id, commit_summary_id, source_version
+           FROM automation_weekly_report_summary_bindings
+          WHERE source_report_id = ? AND project_id = ? AND summary_date = ?
+          LIMIT 1 FOR UPDATE`,
+        [source.sourceReportId, projectId, input.summary_date],
+      );
+      const existing = existingRows[0];
+      if (existing) {
+        if (Number(existing.commit_summary_id) !== input.commit_summary_id) {
+          throw conflict(
+            "weekly_report_summary_binding_conflict",
+            "该周报项目已绑定其他总结记录",
+          );
+        }
+        if (Number(existing.source_version) > source.sourceVersion) {
+          throw conflict(
+            "weekly_report_summary_binding_stale_version",
+            "周报总结绑定已推进到更新版本",
+          );
+        }
+        await connection.execute<ResultSetHeader>(
+          `UPDATE automation_weekly_report_summary_bindings
+              SET source_version = ?, last_run_id = ?, updated_at = ?
+            WHERE id = ?`,
+          [source.sourceVersion, runId, now, Number(existing.id)],
+        );
+      } else {
+        const [commitRows] = await connection.query<RowDataPacket[]>(
+          `SELECT id
+             FROM automation_weekly_report_summary_bindings
+            WHERE commit_summary_id = ?
+            LIMIT 1 FOR UPDATE`,
+          [input.commit_summary_id],
+        );
+        if (commitRows.length > 0) {
+          throw conflict(
+            "weekly_report_summary_commit_already_bound",
+            "该总结记录已绑定其他周报来源",
+          );
+        }
+        await connection.execute<ResultSetHeader>(
+          `INSERT INTO automation_weekly_report_summary_bindings (
+             source_report_id, project_id, summary_date, commit_summary_id,
+             source_version, created_run_id, last_run_id, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            source.sourceReportId,
+            projectId,
+            input.summary_date,
+            input.commit_summary_id,
+            source.sourceVersion,
+            runId,
+            runId,
+            now,
+            now,
+          ],
+        );
+      }
+      return {
+        commit_summary_id: input.commit_summary_id,
+        source_version: source.sourceVersion,
+      };
+    });
+  }
+
   private async upsertTraceEventWithLease(
     runId: string,
     body: unknown,
@@ -2555,6 +2825,43 @@ function stableJson(value: unknown): string {
     .join(",")}}`;
 }
 
+function weeklyReportRunSource(run: RunRow): {
+  sourceReportId: string;
+  sourceVersion: number;
+} {
+  if (run.job_type_snapshot !== "weekly_report_project_summary_sync") {
+    throw new AutomationHttpError(
+      422,
+      "automation_run_type_mismatch",
+      "仅周报同步任务可操作周报总结绑定",
+    );
+  }
+  const source = parseJson(run.source_snapshot, null);
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new AutomationHttpError(
+      422,
+      "weekly_report_source_snapshot_invalid",
+      "周报来源快照无效",
+    );
+  }
+  const snapshot = source as Record<string, unknown>;
+  if (
+    typeof snapshot.source_report_id !== "string" ||
+    !Number.isSafeInteger(snapshot.source_version) ||
+    Number(snapshot.source_version) < 1
+  ) {
+    throw new AutomationHttpError(
+      422,
+      "weekly_report_source_snapshot_invalid",
+      "周报来源快照字段不完整",
+    );
+  }
+  return {
+    sourceReportId: snapshot.source_report_id,
+    sourceVersion: Number(snapshot.source_version),
+  };
+}
+
 function eventMatchesJob(
   job: Selectable<AutomationDatabaseSchema["automation_jobs"]>,
   event: AutomationEventCreateInput,
@@ -2799,6 +3106,44 @@ function serializeAiInteraction(
     response_payload_sanitized: parseJson(row.response_payload_sanitized, null),
     final_summary: row.final_summary,
     limitations: parseJson(row.limitations, []),
+  };
+}
+
+function serializeWeeklyReportPendingItem(
+  row: WeeklyReportPendingItemRow,
+): Record<string, unknown> {
+  return {
+    id: row.id,
+    run_id: row.run_id,
+    trigger_event_id: row.trigger_event_id,
+    source_report_id: row.source_report_id,
+    source_version: row.source_version,
+    weekly_num: row.weekly_num,
+    owner_user_id: row.owner_user_id,
+    segment_key: row.segment_key,
+    segment_order: row.segment_order,
+    content_digest: row.content_digest,
+    original_content: row.original_content,
+    ai_summary: row.ai_summary,
+    ai_reason: row.ai_reason,
+    reason_code: row.reason_code,
+    classification_source: row.classification_source,
+    referenced_project_id: row.referenced_project_id,
+    candidate_project_ids: parseJson(row.candidate_project_ids, []),
+    ai_confidence: row.ai_confidence,
+    status: row.status,
+    resolution_type: row.resolution_type,
+    resolved_project_id: row.resolved_project_id,
+    resolution_batch_id: row.resolution_batch_id,
+    resolution_note: row.resolution_note,
+    resolved_by: row.resolved_by,
+    resolved_at: formatUtc(row.resolved_at),
+    sync_status: row.sync_status,
+    sync_error: row.sync_error,
+    reprocessed_run_id: row.reprocessed_run_id,
+    content_purged_at: formatUtc(row.content_purged_at),
+    created_at: formatUtc(row.created_at),
+    updated_at: formatUtc(row.updated_at),
   };
 }
 

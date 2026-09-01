@@ -23,6 +23,8 @@ test(
     assert.equal(repeatedMigration.baselineApplied, false);
     assert.equal(repeatedMigration.executionParametersApplied, false);
     assert.equal(repeatedMigration.eventTriggersApplied, false);
+    assert.equal(repeatedMigration.weeklyPendingItemsApplied, false);
+    assert.equal(repeatedMigration.weeklySummaryBindingsApplied, false);
     const database = createAutomationDatabase(url);
     await database.db
       .updateTable("automation_job_runs")
@@ -300,6 +302,198 @@ test(
       assert.equal(invalidJob.configuration_status, "invalid");
       assert.equal(invalidJob.configuration_error, "model_configuration_invalid");
       assert.equal(invalidJob.next_run_at, null);
+    } finally {
+      await database.close();
+    }
+  },
+);
+
+test(
+  "idempotently stores unmatched weekly report segments for later review",
+  { skip: !databaseUrl, timeout: 30_000 },
+  async () => {
+    const url = new URL(databaseUrl!);
+    assert.match(url.pathname, /_automation_test$/);
+    await runAutomationMigrations(url, new URL("../..", import.meta.url).pathname);
+    const database = createAutomationDatabase(url);
+    await database.db
+      .updateTable("automation_job_runs")
+      .set({
+        status: "cancelled",
+        finished_at: new Date(),
+        lease_token_digest: null,
+        lease_expires_at: null,
+        updated_at: new Date(),
+      })
+      .where("status", "in", ["pending", "claimed", "running"])
+      .execute();
+    const service = new AutomationService(database, {
+      modelProvider: "nexttoken",
+      model: "gpt-5.6-terra",
+      modelProviders: {
+        nexttoken: {
+          name: "Nexttoken",
+          apiKey: "test",
+          baseUrl: "https://example.test/v1",
+          envKey: "NEXTTOKEN_API_KEY",
+        },
+      },
+      scheduleGraceSeconds: 120,
+      manualTriggerLimit: 3,
+      manualTriggerWindowSeconds: 300,
+    });
+    const suffix = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
+
+    try {
+      await service.createJob({
+        job_key: `weekly-pending-${suffix}`,
+        job_type: "weekly_report_project_summary_sync",
+        name: "Weekly pending integration job",
+        description: "",
+        enabled: true,
+        timezone: "Asia/Shanghai",
+        schedule_type: "event",
+        trigger_type: "event",
+        trigger_config: {
+          resource: "weekly_report",
+          events: ["created", "updated"],
+          scope: "all_users",
+        },
+        cron_expression: null,
+        catch_up_policy: "latest",
+        overlap_policy: "forbid",
+        model_provider: "nexttoken",
+        model_id: "gpt-5.6-terra",
+        model_parameters: { debounce_seconds: 0 },
+        retry_max_attempts: 1,
+        retry_interval_seconds: 0,
+        timeout_seconds: 600,
+        retention_days: 90,
+        tag_ids: [],
+      }, 42);
+      const eventId = randomUUID();
+      const event = (await service.receiveAutomationEvent({
+        event_id: eventId,
+        event_type: "weekly_report.created",
+        aggregate_type: "weekly_report",
+        aggregate_id: `report-${suffix}`,
+        aggregate_version: 1,
+        occurred_at: new Date().toISOString(),
+        actor_id: 42,
+        scope: { user_id: 42 },
+        data: {
+          weekly_num: 202635,
+          content: "项目 72：修复登录问题",
+          updated_at: new Date().toISOString(),
+        },
+      })) as { run_id: string; status: string };
+      assert.equal(event.status, "queued");
+      const claim = (await service.claimRun({
+        worker_instance: "weekly-pending-worker",
+        supported_job_types: ["weekly_report_project_summary_sync"],
+        lease_seconds: 300,
+        claim_request_id: randomUUID(),
+      })) as { run_id: string; lease_token: string };
+      assert.equal(claim.run_id, event.run_id);
+      const lease = {
+        worker_instance: "weekly-pending-worker",
+        lease_token: claim.lease_token,
+      };
+      await service.updateRun(claim.run_id, {
+        ...lease,
+        status: "running",
+        retry_recommended: false,
+      });
+      const pendingItem = {
+        segment_key: "a".repeat(64),
+        segment_order: 1,
+        content_digest: "b".repeat(64),
+        original_content: "项目 72：修复登录问题",
+        ai_summary: "修复登录问题",
+        ai_reason: "项目目录中不存在 ID 72",
+        reason_code: "project_not_found",
+        classification_source: "agent",
+        referenced_project_id: 72,
+        candidate_project_ids: [],
+        ai_confidence: 99,
+      };
+      const first = (await service.upsertWeeklyReportPendingItems(claim.run_id, {
+        ...lease,
+        items: [pendingItem],
+      })) as { pending_item_ids: number[] };
+      const repeated = (await service.upsertWeeklyReportPendingItems(claim.run_id, {
+        ...lease,
+        items: [{ ...pendingItem, ai_reason: "仍未找到项目 72" }],
+      })) as { pending_item_ids: number[] };
+      assert.deepEqual(repeated.pending_item_ids, first.pending_item_ids);
+
+      const detail = (await service.getRun(
+        claim.run_id,
+        new URLSearchParams("include=weekly_report_pending_items"),
+        42,
+      )) as {
+        weekly_report_pending_item_count: number;
+        weekly_report_pending_items: Array<{
+          id: number;
+          trigger_event_id: string;
+          source_report_id: string;
+          owner_user_id: number;
+          original_content: string;
+          ai_summary: string;
+          ai_reason: string;
+          status: string;
+        }>;
+      };
+      assert.equal(detail.weekly_report_pending_item_count, 1);
+      assert.deepEqual(detail.weekly_report_pending_items, [{
+        ...detail.weekly_report_pending_items[0],
+        id: first.pending_item_ids[0],
+        trigger_event_id: eventId,
+        source_report_id: `report-${suffix}`,
+        owner_user_id: 42,
+        original_content: "项目 72：修复登录问题",
+        ai_summary: "修复登录问题",
+        ai_reason: "仍未找到项目 72",
+        status: "pending",
+      }]);
+
+      assert.equal(
+        await service.getWeeklyReportSummaryBinding(claim.run_id, 51, {
+          ...lease,
+          summary_date: "2026-08-30",
+        }),
+        null,
+      );
+      const savedBinding = await service.saveWeeklyReportSummaryBinding(
+        claim.run_id,
+        51,
+        {
+          ...lease,
+          summary_date: "2026-08-30",
+          commit_summary_id: 901,
+        },
+      );
+      assert.deepEqual(savedBinding, {
+        commit_summary_id: 901,
+        source_version: 1,
+      });
+      assert.deepEqual(
+        await service.getWeeklyReportSummaryBinding(claim.run_id, 51, {
+          ...lease,
+          summary_date: "2026-08-30",
+        }),
+        savedBinding,
+      );
+      await assert.rejects(
+        service.saveWeeklyReportSummaryBinding(claim.run_id, 51, {
+          ...lease,
+          summary_date: "2026-08-30",
+          commit_summary_id: 902,
+        }),
+        (error) =>
+          error instanceof AutomationHttpError &&
+          error.code === "weekly_report_summary_binding_conflict",
+      );
     } finally {
       await database.close();
     }

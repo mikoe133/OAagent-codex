@@ -28,6 +28,7 @@ test("asks the Agent to summarize weekly report content into allowlisted project
       finalResponse: JSON.stringify({
         projects: [{
           project_id: 1,
+          segment_keys: ["segment-1"],
           summary: "完成自动任务联调并修复重复执行问题。",
           confidence: 0.96,
           reason: "项目名称匹配",
@@ -37,7 +38,15 @@ test("asks the Agent to summarize weekly report content into allowlisted project
           confidence: 1,
           reason: "模型猜测",
         }],
-        unmatched: [],
+        unmatched: [{
+          segment_key: "segment-2",
+          summary: "修复登录问题",
+          reason_code: "project_not_found",
+          reason: "周报引用的项目 72 不在项目目录中",
+          referenced_project_id: 72,
+          candidate_project_ids: [],
+          confidence: 0.99,
+        }],
         limitations: [],
       }),
       usage: null,
@@ -64,6 +73,15 @@ test("asks the Agent to summarize weekly report content into allowlisted project
   assert.equal(result.projects.length, 1);
   assert.equal(result.projects[0]?.projectId, 1);
   assert.equal(result.projects[0]?.summary, "完成自动任务联调并修复重复执行问题。");
+  assert.deepEqual(result.unmatched, [{
+    segmentKey: "segment-2",
+    summary: "修复登录问题",
+    reasonCode: "project_not_found",
+    reason: "周报引用的项目 72 不在项目目录中",
+    referencedProjectId: 72,
+    candidateProjectIds: [],
+    confidence: 0.99,
+  }]);
   assert.equal(result.interaction?.upstreamRequestId, "weekly-thread-1");
   assert.equal(result.interaction?.fallbackUsed, false);
 });

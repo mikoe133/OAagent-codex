@@ -11,7 +11,7 @@ async function main(): Promise<void> {
     config.repoRoot,
   );
   console.error(
-    `[automation-migrate] baseline=${result.baselineApplied ? "applied" : "existing"} execution_parameters=${result.executionParametersApplied ? "applied" : "existing"} seed=applied tables=${result.tables.length}`,
+    `[automation-migrate] baseline=${result.baselineApplied ? "applied" : "existing"} execution_parameters=${result.executionParametersApplied ? "applied" : "existing"} event_triggers=${result.eventTriggersApplied ? "applied" : "existing"} weekly_pending_items=${result.weeklyPendingItemsApplied ? "applied" : "existing"} weekly_summary_bindings=${result.weeklySummaryBindingsApplied ? "applied" : "existing"} seed=applied tables=${result.tables.length}`,
   );
 }
 

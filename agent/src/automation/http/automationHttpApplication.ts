@@ -31,6 +31,17 @@ export type AutomationOperations = {
   updateRun(runId: string, body: unknown): Promise<unknown>;
   upsertRunProject(runId: string, projectId: number, body: unknown): Promise<unknown>;
   createAiInteraction(runId: string, body: unknown): Promise<unknown>;
+  upsertWeeklyReportPendingItems(runId: string, body: unknown): Promise<unknown>;
+  getWeeklyReportSummaryBinding(
+    runId: string,
+    projectId: number,
+    body: unknown,
+  ): Promise<unknown>;
+  saveWeeklyReportSummaryBinding(
+    runId: string,
+    projectId: number,
+    body: unknown,
+  ): Promise<unknown>;
   upsertTraceEvent(runId: string, body: unknown): Promise<unknown>;
 };
 
@@ -222,6 +233,40 @@ export class AutomationHttpApplication {
         positiveInteger(projectMatch[2], "project_id"),
         await readJsonBody(request),
       );
+    }
+    const weeklyPendingItemsMatch = path.match(
+      /^\/internal\/automation-job-runs\/([^/]+)\/weekly-report-pending-items$/,
+    );
+    if (method === "PUT" && weeklyPendingItemsMatch) {
+      return this.operations.upsertWeeklyReportPendingItems(
+        safeIdentifier(weeklyPendingItemsMatch[1], "run_id"),
+        await readJsonBody(request),
+      );
+    }
+    const weeklySummaryBindingMatch = path.match(
+      /^\/internal\/automation-job-runs\/([^/]+)\/weekly-report-summary-bindings\/(\d+)$/,
+    );
+    if (weeklySummaryBindingMatch) {
+      const runId = safeIdentifier(weeklySummaryBindingMatch[1], "run_id");
+      const projectId = positiveInteger(
+        weeklySummaryBindingMatch[2],
+        "project_id",
+      );
+      const body = await readJsonBody(request);
+      if (method === "POST") {
+        return this.operations.getWeeklyReportSummaryBinding(
+          runId,
+          projectId,
+          body,
+        );
+      }
+      if (method === "PUT") {
+        return this.operations.saveWeeklyReportSummaryBinding(
+          runId,
+          projectId,
+          body,
+        );
+      }
     }
     const actionMatch = path.match(
       /^\/internal\/automation-job-runs\/([^/]+)\/(heartbeat|ai-interactions|trace-events)$/,

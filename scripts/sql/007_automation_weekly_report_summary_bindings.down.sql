@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS automation_weekly_report_summary_bindings;

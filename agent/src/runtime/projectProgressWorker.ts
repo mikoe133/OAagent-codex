@@ -61,14 +61,15 @@ async function main(): Promise<void> {
         laneConcurrency: { p1: baseConfig.concurrency.oaWrite },
       });
       const heartbeatLimiter = new AsyncSemaphore(1);
+      const automationClient = new AutomationOaClient({
+        baseUrl: baseConfig.automation.baseUrl,
+        token: automationToken,
+      }, fetch, operationMetrics, {
+        scheduler: automationRequestScheduler,
+        heartbeatLimiter,
+      });
       const result = await runProjectProgressAutomation({
-        automationClient: new AutomationOaClient({
-          baseUrl: baseConfig.automation.baseUrl,
-          token: automationToken,
-        }, fetch, operationMetrics, {
-          scheduler: automationRequestScheduler,
-          heartbeatLimiter,
-        }),
+        automationClient,
         workerInstance: baseConfig.automation.workerInstance,
         leaseSeconds: baseConfig.automation.leaseSeconds,
         heartbeatSeconds: baseConfig.automation.heartbeatSeconds,
@@ -211,13 +212,42 @@ async function main(): Promise<void> {
                 report: source,
                 projects,
                 oaClient: projectOaClient,
-                includeArchivedProjects: weeklyParameters.include_archived_projects !== false,
-                writeArchivedProjects: weeklyParameters.write_archived_projects !== false,
+                includeArchivedProjects: true,
+                writeArchivedProjects: true,
                 minimumConfidence: typeof weeklyParameters.minimum_confidence === "number"
                   ? weeklyParameters.minimum_confidence
                   : 0.8,
                 shouldCancel,
                 summarizer: weeklyReportAgent,
+                pendingItemSink: async (items) => {
+                  for (let offset = 0; offset < items.length; offset += 100) {
+                    await automationClient.upsertWeeklyReportPendingItems({
+                      claim,
+                      workerInstance: baseConfig.automation.workerInstance,
+                      items: items.slice(offset, offset + 100),
+                    });
+                  }
+                },
+                summaryBindingStore: {
+                  findBinding: async ({ projectId, summaryDate }) =>
+                    automationClient.getWeeklyReportSummaryBinding({
+                      claim,
+                      workerInstance: baseConfig.automation.workerInstance,
+                      projectId,
+                      summaryDate,
+                    }),
+                  saveBinding: async ({
+                    projectId,
+                    summaryDate,
+                    commitSummaryId,
+                  }) => automationClient.saveWeeklyReportSummaryBinding({
+                    claim,
+                    workerInstance: baseConfig.automation.workerInstance,
+                    projectId,
+                    summaryDate,
+                    commitSummaryId,
+                  }),
+                },
                 trace,
                 oaWriteConcurrency: config.concurrency.oaWrite,
               });

@@ -818,9 +818,7 @@ function WeeklyReportMonitorDetails({ task }: { task: AutomationJob }) {
         : "由 OA 配置"
   const scopeLabel = triggerConfig?.scope === "all_users" ? "所有用户" : "任务所属用户"
   const projectScopeLabel = parameters.project_scope === "all_projects" ? "所有项目" : "由服务端配置"
-  const archivedProjectsLabel = parameters.include_archived_projects
-    ? parameters.write_archived_projects ? "包含并写入" : "包含但不写入"
-    : "不包含"
+  const archivedProjectsLabel = "包含并写入（固定策略）"
   const confidenceLabel = typeof parameters.minimum_confidence === "number"
     ? `${Math.round(parameters.minimum_confidence * 100)}%`
     : "服务端默认"

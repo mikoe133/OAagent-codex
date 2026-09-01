@@ -15,6 +15,7 @@ import {
 import type { WeeklyReportSnapshot } from "../../application/weeklyReportProjectSummarySync.js";
 
 const PROJECT_PAGE_SIZE = 100;
+const SUMMARY_PAGE_SIZE = 100;
 const OA_REQUEST_TIMEOUT_MS = 15_000;
 const OA_GET_MAX_ATTEMPTS = 3;
 const OA_GET_RETRY_BASE_DELAY_MS = 200;
@@ -217,13 +218,25 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter, WeeklyR
     summaryDate: string,
     signal?: AbortSignal,
   ): Promise<OaCommitSummary[]> {
-    const payload = await this.request(PROJECT_PROGRESS_ENDPOINTS.oaSummaryList, "/internal/project-sync/github-commit-summaries", {
-      project_id: projectId,
-      summary_date: summaryDate,
-      page: 1,
-      size: 2,
-    }, { signal });
-    return decodePagination(payload, decodeCommitSummary).items;
+    const summaries: OaCommitSummary[] = [];
+    for (let page = 1; ; page += 1) {
+      const payload = await this.request(
+        PROJECT_PROGRESS_ENDPOINTS.oaSummaryList,
+        "/internal/project-sync/github-commit-summaries",
+        {
+          project_id: projectId,
+          summary_date: summaryDate,
+          page,
+          size: SUMMARY_PAGE_SIZE,
+        },
+        { signal },
+      );
+      const pagination = decodePagination(payload, decodeCommitSummary);
+      summaries.push(...pagination.items);
+      if (pagination.items.length === 0 || summaries.length >= pagination.total) {
+        return summaries;
+      }
+    }
   }
 
   async getCommitSummary(summaryId: number, signal?: AbortSignal): Promise<OaCommitSummary> {

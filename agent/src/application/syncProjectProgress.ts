@@ -94,6 +94,26 @@ export type ProjectProgressProjectReport = {
   mutationsApplied?: number;
 };
 
+export type ProjectProgressPendingItem = {
+  segmentKey: string;
+  segmentOrder: number;
+  contentDigest: string;
+  originalContent: string;
+  aiSummary: string;
+  aiReason: string | null;
+  reasonCode:
+    | "project_not_found"
+    | "no_project_match"
+    | "ambiguous_project"
+    | "below_confidence"
+    | "invalid_agent_result"
+    | "archived_write_disabled";
+  classificationSource: "deterministic" | "agent" | "validation" | "fallback";
+  referencedProjectId: number | null;
+  candidateProjectIds: number[];
+  aiConfidence: number | null;
+};
+
 export type ProjectProgressSyncReport = {
   mode: "dry-run" | "unsafe-test-write" | "production-write";
   observedAt: string;
@@ -113,6 +133,7 @@ export type ProjectProgressSyncReport = {
   };
   operationMetrics: OperationMetricSnapshot[];
   projects: ProjectProgressProjectReport[];
+  pendingItems?: ProjectProgressPendingItem[];
 };
 
 type PreparedProject = {

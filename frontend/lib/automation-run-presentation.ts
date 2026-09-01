@@ -23,6 +23,7 @@ const PROJECT_OUTCOME_CHART_PRESENTATIONS: Record<string, Omit<AutomationProject
   status_updated: { id: "status_updated", label: "更新状态", color: "#0D9488" },
   no_commits: { id: "no_commits", label: "当天无提交", color: "#0284C7" },
   archived: { id: "archived", label: "已归档", color: "#71717A" },
+  archived_processed: { id: "archived_processed", label: "归档项目后台处理", color: "#64748B" },
   no_github_urls: { id: "no_github_urls", label: "无 GitHub 地址", color: "#CA8A04" },
   invalid_github_urls: { id: "invalid_github_urls", label: "GitHub 地址无效", color: "#DC2626" },
   incomplete: { id: "incomplete", label: "处理不完整", color: "#EA580C" },
@@ -63,7 +64,11 @@ export function shouldRefreshAutomationRunDetail(
 
 export function projectOutcomeForDisplay(
   project: Pick<AutomationRunProject, "outcome" | "commit_count" | "generated_summary">,
+  jobType?: string,
 ): string {
+  if (project.outcome === "archived" && jobType === "weekly_report_project_summary_sync") {
+    return "archived_processed"
+  }
   if (
     project.outcome === "evaluated" &&
     project.commit_count === 0 &&
@@ -90,11 +95,12 @@ export function automationInteractionRepositoryFullName(
 export function buildAutomationProjectOutcomeChartData(
   projects: AutomationRunProject[],
   projectsTotal: number,
+  jobType?: string,
 ): AutomationProjectOutcomeChartItem[] {
   const counts = new Map<string, number>()
 
   for (const project of projects) {
-    const outcome = projectOutcomeForDisplay(project)
+    const outcome = projectOutcomeForDisplay(project, jobType)
     const key = PROJECT_OUTCOME_CHART_PRESENTATIONS[outcome] ? outcome : "other"
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }

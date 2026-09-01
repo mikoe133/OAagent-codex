@@ -82,7 +82,7 @@ OAagent 需要提供的是 `weekly_report_project_summary_sync` 的受控执行�
 }
 ```
 
-`scope` 至少支持 `job_owner`；`all_users` 或用户白名单应仅向管理员开放。本需求确认所有项目包含归档项目，因此归档项目既参与匹配，也允许写入项目总结；仍需由 OA 项目同步权限明确允许该操作。
+`scope` 至少支持 `job_owner`；`all_users` 或用户白名单应仅向管理员开放。本需求确认所有项目包含归档项目，因此归档项目既参与匹配，也允许写入项目总结；`include_archived_projects` 与 `write_archived_projects` 仅为历史配置兼容字段，周报同步执行器始终按 `true` 处理；仍需由 OA 项目同步权限明确允许该操作。
 
 ### 事件契约
 
@@ -212,10 +212,11 @@ PATCH /internal/project-sync/github-commit-summaries/{summary_id}
 
 - `summary_date` 使用周报的稳定业务日期（建议周末日期），`summary` 只放当前项目的拆分更新点。
 - `ai_note` 放“周报时间 + 周报来源内容”，必须限制长度；完整原文和内容哈希放运行审计/事件快照，不放日志。
-- 先按 `project_id + summary_date` 查询。不存在时 POST；存在时读取 `version` 后 PATCH，并携带 `expected_version`。
-- 同一 `source_report_id + source_version + project_id` 使用相同幂等键重放；不同源版本在相同日期更新同一条记录。
-- 现有目标表没有专门的来源周报字段，因此来源 ID、版本和哈希必须保存在运行快照、AI 审计和事件表中；如果后续需要在项目页面直接追溯来源，再为目标表增加来源字段。
-- 如果同一 `summary_date` 已被 GitHub 日同步任务写入，必须按预先确定的覆盖策略处理；默认使用版本 CAS，冲突标记 `write_conflict`，不静默覆盖人工或其他任务修改。
+- 使用 `source_report_id + project_id + summary_date` 查询 OAagent 的周报总结绑定。不存在绑定时 POST 新建独立 Commit 总结，存在绑定时只 PATCH 绑定的 `commit_summary_id`，并携带 `expected_version`。
+- 同一周报的新版本和 Worker 重试复用绑定记录；不同 `source_report_id` 即使项目和日期相同，也分别新建独立记录。
+- 来源 ID、版本、Commit 总结 ID 和最近运行 ID 保存在 `automation_weekly_report_summary_bindings`；运行快照、AI 审计和事件表继续保存本次执行证据。
+- GitHub 日同步、其他周报和人工总结均视为其他来源，周报同步不得按 `project_id + summary_date` 更新查询结果中的任意记录。
+- OA Commit 总结接口和数据表必须允许同一 `project_id + summary_date` 存在多条来源独立记录；如上游仍保留该组合唯一约束，必须先升级上游接口后再启用本规则。
 
 ### 状态与失败处理
 

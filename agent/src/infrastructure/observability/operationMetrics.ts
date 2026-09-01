@@ -6,6 +6,12 @@ export const PROJECT_PROGRESS_ENDPOINTS = {
   oaAutomationRunUpdate: "oa.automation.run.update",
   oaAutomationRunProjectUpsert: "oa.automation.run-project.upsert",
   oaAutomationAiInteractionUpsert: "oa.automation.ai-interaction.upsert",
+  oaAutomationWeeklyReportPendingItemsUpsert:
+    "oa.automation.weekly-report-pending-items.upsert",
+  oaAutomationWeeklyReportSummaryBindingGet:
+    "oa.automation.weekly-report-summary-binding.get",
+  oaAutomationWeeklyReportSummaryBindingSave:
+    "oa.automation.weekly-report-summary-binding.save",
   oaAutomationTraceUpsert: "oa.automation.trace.upsert",
   oaProjectList: "oa.project.list",
   oaProjectGet: "oa.project.get",

@@ -16,6 +16,10 @@ const AUTOMATION_TABLES = [
   "automation_run_trace_events",
 ] as const;
 const AUTOMATION_EVENT_TABLES = ["automation_trigger_events"] as const;
+const AUTOMATION_WEEKLY_PENDING_TABLES = ["automation_weekly_report_pending_items"] as const;
+const AUTOMATION_WEEKLY_SUMMARY_BINDING_TABLES = [
+  "automation_weekly_report_summary_bindings",
+] as const;
 
 const MIGRATION_LOCK = "oaagent_automation_schema_baseline";
 
@@ -23,6 +27,8 @@ export type AutomationMigrationResult = {
   baselineApplied: boolean;
   executionParametersApplied: boolean;
   eventTriggersApplied: boolean;
+  weeklyPendingItemsApplied: boolean;
+  weeklySummaryBindingsApplied: boolean;
   seedApplied: boolean;
   tables: readonly string[];
 };
@@ -147,6 +153,43 @@ export async function runAutomationMigrations(
       eventTriggersApplied = true;
     }
 
+    const [weeklyPendingTableRows] = await connection.query<RowDataPacket[]>(
+      `SELECT table_name
+         FROM information_schema.tables
+        WHERE table_schema = ?
+          AND table_name = 'automation_weekly_report_pending_items'`,
+      [databaseName],
+    );
+    let weeklyPendingItemsApplied = false;
+    if (weeklyPendingTableRows.length === 0) {
+      const weeklyPendingMigration = await readFile(
+        path.join(sqlDirectory, "006_automation_weekly_report_pending_items.up.sql"),
+        "utf8",
+      );
+      await connection.query(weeklyPendingMigration);
+      weeklyPendingItemsApplied = true;
+    }
+
+    const [weeklySummaryBindingTableRows] = await connection.query<RowDataPacket[]>(
+      `SELECT table_name
+         FROM information_schema.tables
+        WHERE table_schema = ?
+          AND table_name = 'automation_weekly_report_summary_bindings'`,
+      [databaseName],
+    );
+    let weeklySummaryBindingsApplied = false;
+    if (weeklySummaryBindingTableRows.length === 0) {
+      const weeklySummaryBindingMigration = await readFile(
+        path.join(
+          sqlDirectory,
+          "007_automation_weekly_report_summary_bindings.up.sql",
+        ),
+        "utf8",
+      );
+      await connection.query(weeklySummaryBindingMigration);
+      weeklySummaryBindingsApplied = true;
+    }
+
     const seed = await readFile(
       path.join(sqlDirectory, "002_automation_defaults_seed.up.sql"),
       "utf8",
@@ -161,8 +204,15 @@ export async function runAutomationMigrations(
       baselineApplied,
       executionParametersApplied,
       eventTriggersApplied,
+      weeklyPendingItemsApplied,
+      weeklySummaryBindingsApplied,
       seedApplied: true,
-      tables: [...AUTOMATION_TABLES, ...AUTOMATION_EVENT_TABLES],
+      tables: [
+        ...AUTOMATION_TABLES,
+        ...AUTOMATION_EVENT_TABLES,
+        ...AUTOMATION_WEEKLY_PENDING_TABLES,
+        ...AUTOMATION_WEEKLY_SUMMARY_BINDING_TABLES,
+      ],
     };
   } finally {
     if (lockAcquired) {

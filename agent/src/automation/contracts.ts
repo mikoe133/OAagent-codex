@@ -394,6 +394,73 @@ export const automationAiInteractionCreateSchema = z
   })
   .strict();
 
+export const automationWeeklyReportPendingItemsUpsertSchema = z
+  .object({
+    worker_instance: workerInstance,
+    lease_token: leaseToken,
+    items: z
+      .array(
+        z
+          .object({
+            segment_key: z.string().regex(/^[a-f0-9]{64}$/),
+            segment_order: z.number().int().positive().max(10_000),
+            content_digest: z.string().regex(/^[a-f0-9]{64}$/),
+            original_content: z.string().trim().min(1).max(900_000),
+            ai_summary: z.string().trim().min(1).max(2_000),
+            ai_reason: z.string().trim().max(1_000).nullable().optional(),
+            reason_code: z.enum([
+              "project_not_found",
+              "no_project_match",
+              "ambiguous_project",
+              "below_confidence",
+              "invalid_agent_result",
+              "archived_write_disabled",
+            ]),
+            classification_source: z.enum([
+              "deterministic",
+              "agent",
+              "validation",
+              "fallback",
+            ]),
+            referenced_project_id: z.number().int().positive().nullable().optional(),
+            candidate_project_ids: z
+              .array(z.number().int().positive())
+              .max(50)
+              .refine(
+                (items) => new Set(items).size === items.length,
+                "duplicate_candidate_project_ids",
+              )
+              .default([]),
+            ai_confidence: z.number().int().min(0).max(100).nullable().optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100)
+      .refine(
+        (items) => new Set(items.map((item) => item.segment_key)).size === items.length,
+        "duplicate_segment_keys",
+      ),
+  })
+  .strict();
+
+export const automationWeeklyReportSummaryBindingLookupSchema = z
+  .object({
+    worker_instance: workerInstance,
+    lease_token: leaseToken,
+    summary_date: z.string().date(),
+  })
+  .strict();
+
+export const automationWeeklyReportSummaryBindingSaveSchema = z
+  .object({
+    worker_instance: workerInstance,
+    lease_token: leaseToken,
+    summary_date: z.string().date(),
+    commit_summary_id: z.number().int().positive(),
+  })
+  .strict();
+
 export type AutomationClaimInput = z.infer<typeof automationClaimSchema>;
 export type AutomationEventCreateInput = z.infer<typeof automationEventCreateSchema>;
 export type AutomationHeartbeatInput = z.infer<typeof automationHeartbeatSchema>;
@@ -406,6 +473,15 @@ export type AutomationTraceEventUpsertInput = z.infer<
 >;
 export type AutomationAiInteractionCreateInput = z.infer<
   typeof automationAiInteractionCreateSchema
+>;
+export type AutomationWeeklyReportPendingItemsUpsertInput = z.infer<
+  typeof automationWeeklyReportPendingItemsUpsertSchema
+>;
+export type AutomationWeeklyReportSummaryBindingLookupInput = z.infer<
+  typeof automationWeeklyReportSummaryBindingLookupSchema
+>;
+export type AutomationWeeklyReportSummaryBindingSaveInput = z.infer<
+  typeof automationWeeklyReportSummaryBindingSaveSchema
 >;
 
 function jsonByteLength(value: unknown): number {

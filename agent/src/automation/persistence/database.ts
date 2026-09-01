@@ -214,6 +214,51 @@ export type AutomationDatabaseSchema = {
     created_at: Timestamp;
     updated_at: Timestamp;
   };
+  automation_weekly_report_pending_items: {
+    id: Generated<number>;
+    run_id: string;
+    trigger_event_id: string;
+    source_report_id: string;
+    source_version: number;
+    weekly_num: number;
+    owner_user_id: number | null;
+    segment_key: string;
+    segment_order: number;
+    content_digest: string;
+    original_content: string | null;
+    ai_summary: string | null;
+    ai_reason: string | null;
+    reason_code: string;
+    classification_source: string;
+    referenced_project_id: number | null;
+    candidate_project_ids: JsonValue;
+    ai_confidence: number | null;
+    status: string;
+    resolution_type: string | null;
+    resolved_project_id: number | null;
+    resolution_batch_id: string | null;
+    resolution_note: string | null;
+    resolved_by: number | null;
+    resolved_at: Timestamp | null;
+    sync_status: string;
+    sync_error: string | null;
+    reprocessed_run_id: string | null;
+    content_purged_at: Timestamp | null;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+  };
+  automation_weekly_report_summary_bindings: {
+    id: Generated<number>;
+    source_report_id: string;
+    project_id: number;
+    summary_date: Timestamp;
+    commit_summary_id: number;
+    source_version: number;
+    created_run_id: string;
+    last_run_id: string;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+  };
 };
 
 export type AutomationDatabase = {
