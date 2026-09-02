@@ -87,6 +87,29 @@ function pull_images() {
   compose pull agent web
 }
 
+function prepare_github_app_private_key() {
+  local image="$1"
+  local private_key_path="$PWD/.secrets/project-progress-github-app-private-key.pem"
+
+  if [[ ! -f "$private_key_path" ]]; then
+    echo "[deploy] missing GitHub App private key: $private_key_path" >&2
+    return 1
+  fi
+
+  docker run --rm \
+    --user 0:0 \
+    --entrypoint /bin/sh \
+    --mount "type=bind,src=$private_key_path,dst=/run/project-progress-github-app-private-key.pem" \
+    "$image" \
+    -ceu '
+      runtime_uid="$(id -u node)"
+      runtime_gid="$(id -g node)"
+      chown "$runtime_uid:$runtime_gid" /run/project-progress-github-app-private-key.pem
+      chmod 0400 /run/project-progress-github-app-private-key.pem
+      test "$(stat -c "%u:%g:%a" /run/project-progress-github-app-private-key.pem)" = "$runtime_uid:$runtime_gid:400"
+    '
+}
+
 function compose_up_once() {
   : > "$compose_up_log_file"
   compose up -d --no-build --remove-orphans --wait --wait-timeout 180 \
@@ -116,6 +139,8 @@ function start_release() {
 }
 
 function rollback() {
+  local rollback_agent_image
+
   restore_runtime_env
 
   if [[ "$had_previous" -ne 1 ]]; then
@@ -134,6 +159,10 @@ function rollback() {
 
   echo "[deploy] rolling back with $previous_env_file" >&2
   pull_images || echo "[deploy] rollback image pull failed" >&2
+  if rollback_agent_image="$(read_runtime_env_value "$deployment_env_file" "AGENT_IMAGE")"; then
+    prepare_github_app_private_key "$rollback_agent_image" \
+      || echo "[deploy] rollback GitHub App private key preparation failed" >&2
+  fi
   start_release "rollback" \
     || echo "[deploy] rollback failed; manual intervention is required" >&2
 }
@@ -298,6 +327,12 @@ write_deployment_env "$agent_image" "$web_image"
 
 if ! pull_images; then
   echo "[deploy] image pull failed; restoring the previous release" >&2
+  rollback
+  exit 1
+fi
+
+if ! prepare_github_app_private_key "$agent_image"; then
+  echo "[deploy] GitHub App private key preparation failed; restoring the previous release" >&2
   rollback
   exit 1
 fi

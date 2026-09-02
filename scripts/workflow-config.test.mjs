@@ -43,6 +43,8 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.equal(workflow.match(/PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY: \$\{\{ secrets\.PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY \}\}/g)?.length, 2)
   assert.doesNotMatch(workflow, /PROJECT_PROGRESS_GITHUB_TOKEN/)
   assert.equal(workflow.match(/project-progress-github-app-private-key\.pem/g)?.length, 2)
+  assert.equal(workflow.match(/remote_private_key_next="\$\{remote_private_key\}\.next"/g)?.length, 2)
+  assert.equal(workflow.match(/mv -f -- %q %q/g)?.length, 2)
   assert.equal(workflow.match(/PROJECT_PROGRESS_GITHUB_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_GITHUB_CONCURRENCY \|\| '6' \}\}/g)?.length, 2)
   assert.equal(workflow.match(/PROJECT_PROGRESS_AGENT_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_AGENT_CONCURRENCY \|\| '2' \}\}/g)?.length, 2)
   assert.equal(workflow.match(/PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: \$\{\{ vars\.PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \|\| '4' \}\}/g)?.length, 2)
@@ -180,6 +182,7 @@ test("does not expose Node database and session secrets to the project worker", 
   assert.match(workerService, /^      PROJECT_PROGRESS_GITHUB_APP_ID: /m)
   assert.match(workerService, /^      PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH: /m)
   assert.match(workerService, /project-progress-github-app-private-key\.pem:\/run\/secrets\/project-progress-github-app-private-key\.pem:ro/)
+  assert.match(workerService, /accessSync\(process\.env\.PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH/)
 })
 
 test("does not expose worker-only credentials to the agent service", async () => {
