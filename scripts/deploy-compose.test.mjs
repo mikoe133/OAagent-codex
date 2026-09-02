@@ -26,6 +26,10 @@ test("deploys immutable agent and web image tags", async (context) => {
   const dockerLog = await readFile(fixture.logPath, "utf8")
   assert.match(dockerLog, /pull agent web/)
   assert.match(dockerLog, /up -d --no-build --remove-orphans --wait --wait-timeout 180/)
+  assert.match(
+    dockerLog,
+    /exec -T project-progress-worker node agent\/dist\/runtime\/projectProgressGitHubAuthCheck\.js/,
+  )
 })
 
 test("uses preloaded images without contacting the registry", async (context) => {
@@ -73,6 +77,29 @@ test("rejects deployment when the GitHub App private key is missing", async (con
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /missing GitHub App private key/)
   assert.doesNotMatch(await readFile(fixture.logPath, "utf8"), / up /)
+})
+
+test("rolls back when GitHub App authentication fails", async (context) => {
+  const fixture = await createFixture(context)
+  const previous =
+    "AGENT_IMAGE=ghcr.io/example/oa-agent:previous\n" +
+    "WEB_IMAGE=ghcr.io/example/oa-web:previous\n"
+  await writeFile(path.join(fixture.deployDir, ".deploy.env"), previous)
+
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:broken-auth",
+    webImage: "ghcr.io/example/oa-web:broken-auth",
+    failGitHubAuthCheck: true,
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /GitHub App authentication failed/)
+  assert.equal(
+    await readFile(path.join(fixture.deployDir, ".deploy.env"), "utf8"),
+    previous,
+  )
+  const dockerLog = await readFile(fixture.logPath, "utf8")
+  assert.equal(dockerLog.match(/ up /g)?.length, 2)
 })
 
 test("removes stale release images while preserving both environments' rollback images", async (context) => {
@@ -319,6 +346,9 @@ if [[ " $* " == *" up "* ]] && [[ "\${MOCK_FAIL_FIRST_UP_WITH_PORT_CONFLICT:-0}"
   echo "Error response from daemon: failed to bind host port: address already in use" >&2
   exit 42
 fi
+if [[ "$*" == *"projectProgressGitHubAuthCheck.js"* ]] && [[ "\${MOCK_FAIL_GITHUB_AUTH_CHECK:-0}" == "1" ]]; then
+  exit 43
+fi
 `,
   )
   await chmod(dockerPath, 0o755)
@@ -331,6 +361,7 @@ function runDeploy(fixture, {
   webImage,
   failFirstUp = false,
   failFirstUpWithPortConflict = false,
+  failGitHubAuthCheck = false,
   skipImagePull = false,
 }) {
   return spawnSync(
@@ -346,6 +377,7 @@ function runDeploy(fixture, {
         MOCK_DOCKER_IMAGES: fixture.imagesPath,
         MOCK_FAIL_FIRST_UP: failFirstUp ? "1" : "0",
         MOCK_FAIL_FIRST_UP_WITH_PORT_CONFLICT: failFirstUpWithPortConflict ? "1" : "0",
+        MOCK_FAIL_GITHUB_AUTH_CHECK: failGitHubAuthCheck ? "1" : "0",
         SKIP_IMAGE_PULL: skipImagePull ? "1" : "0",
       },
     },

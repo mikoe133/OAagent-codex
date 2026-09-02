@@ -138,6 +138,12 @@ function start_release() {
   compose_up_once
 }
 
+function verify_github_app_access() {
+  echo "[deploy] verifying GitHub App access"
+  compose exec -T project-progress-worker \
+    node agent/dist/runtime/projectProgressGitHubAuthCheck.js
+}
+
 function rollback() {
   local rollback_agent_image
 
@@ -339,6 +345,12 @@ fi
 
 if ! start_release "release"; then
   echo "[deploy] health check failed; restoring the previous release" >&2
+  rollback
+  exit 1
+fi
+
+if ! verify_github_app_access; then
+  echo "[deploy] GitHub App authentication failed; restoring the previous release" >&2
   rollback
   exit 1
 fi

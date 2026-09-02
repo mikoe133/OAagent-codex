@@ -149,8 +149,8 @@ export class GitHubRequestExecutor {
           return response;
         }
 
-        const requestError = responseError(response);
         const retryable = await isRetryableResponse(response);
+        const requestError = await responseError(response);
         if (!retryable || attempt >= this.config.maxAttempts) {
           throw requestError;
         }
@@ -376,14 +376,41 @@ function isRetryableTransportError(error: unknown): boolean {
     error instanceof Error && /ECONNRESET|ETIMEDOUT|EPIPE|fetch failed/iu.test(error.message);
 }
 
-function responseError(response: Response): GitHubRequestError {
+async function responseError(response: Response): Promise<GitHubRequestError> {
   const now = Date.now();
   const retryDelay = retryDelayMilliseconds(response, now);
+  const detail = await readGitHubErrorMessage(response);
+  const requestId = response.headers.get("x-github-request-id")?.trim();
   return new GitHubRequestError(
-    `GitHub 请求失败:HTTP ${response.status}`,
+    [
+      `GitHub 请求失败:HTTP ${response.status}`,
+      detail,
+      requestId ? `request_id=${requestId}` : null,
+    ].filter(Boolean).join(":"),
     response.status,
     retryDelay === null ? null : new Date(now + retryDelay).toISOString(),
   );
+}
+
+async function readGitHubErrorMessage(response: Response): Promise<string | null> {
+  try {
+    const payload = await response.clone().json() as unknown;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return null;
+    }
+    const message = (payload as Record<string, unknown>).message;
+    if (typeof message !== "string") {
+      return null;
+    }
+    return message
+      .replace(/Authorization:\s*Bearer\s+\S+/gi, "Authorization: Bearer [REDACTED]")
+      .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+      .replace(/[\r\n]+/g, " ")
+      .trim()
+      .slice(0, 300) || null;
+  } catch {
+    return null;
+  }
 }
 
 function retryDelayMilliseconds(response: Response, now: number): number | null {
