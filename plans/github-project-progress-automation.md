@@ -347,8 +347,8 @@ Agent 只输出：
 
 - `OA_PROJECT_SYNC_TOKEN`：非人类 OA 机器人/服务身份，最小权限仅限项目读取、项目状态修改、总结创建/更新、工作日历读取，不授予 DELETE。
 - `OA_PROJECT_SYNC_TOKEN_HEADER` / `OA_PROJECT_SYNC_TOKEN_PREFIX`：项目同步专用 header 格式，不复用面向用户 session 的 `OA_API_TOKEN_HEADER/PREFIX`；可独立配置 Bearer 或其他服务鉴权。
-- `PROJECT_PROGRESS_GITHUB_TOKEN`：单 resource owner 时使用 fine-grained PAT，仅 `Metadata: Read`、`Contents: Read`。
-- 跨多个 GitHub owner 时使用 GitHub App installation token，或按 owner 路由多枚 fine-grained PAT；不能用开发者本机 `gh` token。
+- `PROJECT_PROGRESS_GITHUB_APP_ID` / `PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH`：GitHub 读取统一使用 GitHub App installation token，App 仅授予 `Metadata: Read`、`Contents: Read`。
+- GitHub App 私钥必须通过只读文件注入，不写入 prompt、SQLite payload、日志、项目总结或审计内容；不能用开发者本机 `gh` token。
 - `PROJECT_PROGRESS_STATE_DB`：SQLite 路径，不包含 token。
 - Secret 只进入 worker 进程环境，不进入 prompt、SQLite payload、日志、项目总结或审计 before/after。
 - 生产启用前必须验证 OA token 的生命周期、轮换方式和数据范围：能分页读取全部目标项目，但不能 DELETE 总结、归档项目或修改无关项目字段；长期复用人类 session cookie 不通过安全验收。
@@ -675,7 +675,7 @@ flowchart TD
 1. “所有 commits”是所有当前 refs，还是仅默认分支；若包含瞬时已删除分支，需要 webhook 权限。
 2. “工作日”是否采用 OA 法定节假日/调休日历，还是固定周一至周五。
 3. OA 后台能否提供独立、可轮换、最小权限的 `OA_PROJECT_SYNC_TOKEN`。
-4. GitHub 仓库是否跨多个 resource owners；这决定单 PAT、多 PAT 还是 GitHub App。
+4. GitHub App 是否已安装到所有目标仓库；跨多个 resource owners 时需要分别安装或调整 installation 仓库范围。
 5. 既有同日 summary 的 adoption 策略，默认选择“不自动覆盖”。
 6. `ai_confidence` 是否接受程序化质量分；本方案不使用模型自报概率。
 7. “10 天”按滚动 240 小时计算，而不是 10 个北京时间自然日。

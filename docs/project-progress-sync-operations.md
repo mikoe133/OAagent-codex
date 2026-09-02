@@ -26,7 +26,8 @@ OA_AGENT_AUTOMATION_TOKEN=<自动化服务 token>
 OA_PROJECT_SYNC_TOKEN=<项目同步服务 token>
 OA_PROJECT_SYNC_TOKEN_HEADER=Authorization
 OA_PROJECT_SYNC_TOKEN_PREFIX=Bearer
-PROJECT_PROGRESS_GITHUB_TOKEN=<GitHub fine-grained PAT>
+PROJECT_PROGRESS_GITHUB_APP_ID=<GitHub App ID>
+PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/project-progress-github-app-private-key.pem
 PROJECT_PROGRESS_WRITE_ENABLED=true
 PROJECT_PROGRESS_PRODUCTION_WRITES=I_UNDERSTAND_PRODUCTION_WRITES
 PROJECT_PROGRESS_WORKER_INSTANCE=oaagent-local-01
@@ -48,13 +49,13 @@ PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS=12000
 
 `AUTOMATION_API_BASE_URL` 指向 Node 自动任务服务，用于 claim、heartbeat、运行结果、Trace 和 AI 审计。`PROJECT_SYNC_API_BASE_URL` 指向原 OA，用于查询项目/GitHub URL、写 Commit 总结和更新项目状态。未配置这两个变量时，Worker 会兼容回退到 `OA_API_BASE_URL`。
 
-GitHub PAT 只需目标仓库的 `Metadata: Read` 和 `Contents: Read`。两个 OA token 用途不同，不能互换，也不能使用用户 `sessionid`。
+GitHub 读取只支持 GitHub App。App 只需安装到目标仓库，并授予 `Metadata: Read` 和 `Contents: Read`。两个 OA token 用途不同，不能互换，也不能使用用户 `sessionid`。
 
-GitHub PAT 只保留在 Worker 内存。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables，不需要新增 Secret。
+GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Compose 部署默认把服务器 `.secrets/project-progress-github-app-private-key.pem` 挂载到容器 `/run/secrets/project-progress-github-app-private-key.pem`；该文件应 `chmod 600`，目录应 `chmod 700`。Worker 运行时只缓存短期 installation token。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables。
 
 AI interaction 的 `response_payload_sanitized` 会记录 `prefetched_detail_calls`、`detail_calls`、`github_detail_requests`、`files_returned`、`patch_chars_returned` 和 `quality_retries`。判断模型是否真的看过代码证据，应以这些审计字段为准，不能依据模型生成的备注推断。详情失败或发生文件/Patch 裁剪时，Worker 会由代码追加对应 limitation。
 
-一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 token 级执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。周报项目总结写入使用独立的项目 OA 调度器，最多同时写入配置数量个不同项目；同一项目同一周次仍只有一个写入任务。运行 claim、heartbeat、Trace、项目审计和终态更新使用独立控制面调度器，不会被项目写入并发放大。容器建议至少分配 `2 CPU / 3GB`。
+一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 GitHub App 执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。周报项目总结写入使用独立的项目 OA 调度器，最多同时写入配置数量个不同项目；同一项目同一周次仍只有一个写入任务。运行 claim、heartbeat、Trace、项目审计和终态更新使用独立控制面调度器，不会被项目写入并发放大。容器建议至少分配 `2 CPU / 3GB`。
 
 项目总结 Agent 使用隔离的 Codex `exec`：忽略用户级配置和规则、不持久化 thread、禁用 shell、网页、插件能力及多 Agent，并固定 65536 token 上下文窗口和 6000 token 工具输出上限。若运行记录出现任何未授权工具调用，OAagent 会拒绝该输出并使用确定性兜底，同时把越权计数写入 AI interaction 审计。
 

@@ -107,6 +107,57 @@ describe("GitHubRestProjectReader", () => {
     assert.deepEqual(snapshot.commits.map((commit) => commit.sha), ["latest"]);
   });
 
+  it("captures commit author and committer identities from GitHub", async () => {
+    const reader = new GitHubRestProjectReader("token", async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/repos/example/identity") {
+        return Response.json({
+          id: 102,
+          full_name: "example/identity",
+          created_at: "2025-01-01T00:00:00Z",
+        });
+      }
+      if (url.pathname.endsWith("/branches")) {
+        return Response.json([{ name: "main" }]);
+      }
+      return Response.json([
+        githubCommit("identity", "2026-07-24T01:00:00Z", {
+          author: { login: "alice" },
+          committer: { login: "release-bot" },
+          commitAuthor: {
+            name: "Alice",
+            email: "alice@example.test",
+            date: "2026-07-24T01:00:00Z",
+          },
+          commitCommitter: {
+            name: "Release Bot",
+            email: "bot@example.test",
+            date: "2026-07-24T01:00:00Z",
+          },
+        }),
+      ]);
+    });
+
+    const snapshot = await reader.readRepository(
+      normalizeGitHubRepositoryUrl("https://github.com/example/identity"),
+      new Date("2026-07-24T12:00:00Z"),
+    );
+
+    assert.deepEqual(snapshot.commits[0], {
+      repositoryId: 102,
+      repositoryFullName: "example/identity",
+      sha: "identity",
+      committedAt: "2026-07-24T01:00:00.000Z",
+      subject: "commit identity",
+      authorLogin: "alice",
+      authorName: "Alice",
+      authorEmail: "alice@example.test",
+      committerLogin: "release-bot",
+      committerName: "Release Bot",
+      committerEmail: "bot@example.test",
+    });
+  });
+
   it("classifies GitHub rate-limit failures with a retry time", async () => {
     const reader = new GitHubRestProjectReader(
       "token",
@@ -415,12 +466,25 @@ describe("GitHubRestProjectReader", () => {
   });
 });
 
-function githubCommit(sha: string, date: string) {
+function githubCommit(
+  sha: string,
+  date: string,
+  overrides: {
+    author?: Record<string, unknown> | null;
+    committer?: Record<string, unknown> | null;
+    commitAuthor?: Record<string, unknown> | null;
+    commitCommitter?: Record<string, unknown> | null;
+    message?: string;
+  } = {},
+) {
   return {
     sha,
+    ...(overrides.author === undefined ? {} : { author: overrides.author }),
+    ...(overrides.committer === undefined ? {} : { committer: overrides.committer }),
     commit: {
-      message: `commit ${sha}\nbody is not collected`,
-      committer: { date },
+      message: overrides.message ?? `commit ${sha}\nbody is not collected`,
+      author: overrides.commitAuthor ?? { date },
+      committer: overrides.commitCommitter ?? { date },
     },
   };
 }

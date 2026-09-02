@@ -22,6 +22,9 @@ import {
   type ProjectProgressAgentLimits,
   type ProjectProgressGitHubMcpServer,
 } from "../infrastructure/github/projectProgressMcpServer.js";
+import {
+  type GitHubRequestAuth,
+} from "../infrastructure/github/githubAppAuth.js";
 import type { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 import type { GitHubRequestExecutor } from "../infrastructure/github/githubRequestExecutor.js";
 import { resolveCodexModelCatalogPath } from "../infrastructure/codex/modelMetadataCatalog.js";
@@ -86,10 +89,12 @@ export type ProjectProgressPromptProfile = {
 };
 
 export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer {
+  private readonly githubAuth: GitHubRequestAuth;
+
   constructor(
     private readonly config: {
       model: ProjectProgressConfig["model"];
-      githubToken: string;
+      githubAuth?: GitHubRequestAuth;
       githubApiBaseUrl: string;
       agent: ProjectProgressAgentLimits & { maxCandidateCommits: number };
       workingDirectory: string;
@@ -106,7 +111,12 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
     private readonly fallback: ProjectProgressSummarizer = new DeterministicProjectProgressSummarizer(),
-  ) {}
+  ) {
+    if (!config.githubAuth) {
+      throw new Error("CodexProjectProgressSummarizer requires githubAuth.");
+    }
+    this.githubAuth = config.githubAuth;
+  }
 
   async summarize(input: ProjectProgressSummaryInput): Promise<ProjectProgressSummaryOutput> {
     const startedAt = Date.now();
@@ -174,7 +184,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
     let prefetchedDetailCalls = 0;
     try {
       mcpServer = await startProjectProgressGitHubMcpServer({
-        githubToken: this.config.githubToken,
+        githubAuth: this.githubAuth,
         githubApiBaseUrl: this.config.githubApiBaseUrl,
         candidates,
         limits: this.config.agent,

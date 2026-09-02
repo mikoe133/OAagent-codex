@@ -725,7 +725,7 @@ docker compose config
 ## 11. 非目标
 
 - 不让 Agent 自行检索 OA OpenAPI、选择 endpoint 或构造分页参数；
-- 不让 Agent 直接持有 OA token 或 GitHub PAT；
+- 不让 Agent 直接持有 OA token 或 GitHub App installation token；
 - 不 clone 仓库，不开放 shell 或文件系统；
 - 不通过增加 Worker 副本绕过单进程并发限制；
 - 不在首期引入项目级二次润色 Agent；

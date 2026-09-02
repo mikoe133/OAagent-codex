@@ -9,6 +9,9 @@ import {
   OperationMetricsRecorder,
   PROJECT_PROGRESS_ENDPOINTS,
 } from "../observability/operationMetrics.js";
+import {
+  type GitHubRequestAuth,
+} from "./githubAppAuth.js";
 
 const GITHUB_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_GITHUB_RESPONSE_BYTES = 10 * 1024 * 1024;
@@ -75,6 +78,7 @@ export type ProjectProgressCommitDetailResult = {
 
 export class GitHubCommitDetailTool {
   private readonly allowedCommits: Map<string, Set<string>>;
+  private readonly githubAuth: GitHubRequestAuth;
   private readonly requestExecutor: GitHubRequestExecutor;
   private readonly seenCommits = new Set<string>();
   private readonly metrics: ProjectProgressCommitDetailMetrics = {
@@ -87,7 +91,7 @@ export class GitHubCommitDetailTool {
 
   constructor(
     private readonly config: {
-      githubToken: string;
+      githubAuth: GitHubRequestAuth;
       githubApiBaseUrl: string;
       candidates: ProjectProgressCommitCandidate[];
       limits: ProjectProgressAgentLimits;
@@ -98,6 +102,7 @@ export class GitHubCommitDetailTool {
     },
     private readonly fetchImpl: GitHubFetch = fetch,
   ) {
+    this.githubAuth = config.githubAuth;
     this.allowedCommits = buildAllowedCommits(config.candidates);
     this.requestExecutor = config.requestExecutor ?? new GitHubRequestExecutor({
       ...(config.requestLimiter ? { requestLimiter: config.requestLimiter } : {}),
@@ -229,10 +234,14 @@ export class GitHubCommitDetailTool {
     url.searchParams.set("per_page", String(MAX_GITHUB_FILES_PAGE_SIZE));
     this.metrics.githubRequests += 1;
     const request = async () => {
+      const authorization = await this.githubAuth.getAuthorizationHeader(
+        repository,
+        this.config.signal,
+      );
       const execute = () => this.fetchImpl(url, {
         headers: {
           accept: "application/vnd.github+json",
-          authorization: `Bearer ${this.config.githubToken}`,
+          authorization,
           "x-github-api-version": "2022-11-28",
           "user-agent": "oa-project-progress-agent",
         },
@@ -266,7 +275,7 @@ export type ProjectProgressGitHubMcpServer = {
 };
 
 export async function startProjectProgressGitHubMcpServer(input: {
-  githubToken: string;
+  githubAuth: GitHubRequestAuth;
   githubApiBaseUrl: string;
   candidates: ProjectProgressCommitCandidate[];
   limits: ProjectProgressAgentLimits;

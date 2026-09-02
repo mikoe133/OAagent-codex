@@ -80,7 +80,8 @@ OA_AGENT_SSO_SHARED_SECRET=<与对应 OA 服务端一致的密钥>
 OA_AGENT_SSO_TTL_SECONDS=300
 OA_AGENT_AUTOMATION_TOKEN=<与对应 OA 服务端一致的自动化专用密钥>
 OA_PROJECT_SYNC_TOKEN=<OA 项目进度同步专用密钥>
-PROJECT_PROGRESS_GITHUB_TOKEN=<可读取目标仓库与 GitHub Project 的 Token>
+PROJECT_PROGRESS_GITHUB_APP_ID=<GitHub App ID>
+PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/project-progress-github-app-private-key.pem
 PROJECT_PROGRESS_GITHUB_CONCURRENCY=6
 PROJECT_PROGRESS_AGENT_CONCURRENCY=2
 PROJECT_PROGRESS_OA_WRITE_CONCURRENCY=4
@@ -91,7 +92,7 @@ WEB_BIND_ADDRESS=127.0.0.1
 WEB_PORT=3001
 ```
 
-Compose 内的 `AUTOMATION_API_BASE_URL` 已固定为同一项目的 `http://agent:3000`；`PROJECT_SYNC_API_BASE_URL` 继续填写原 OA 地址。完整 `DATABASE_URL` 不得上传到 Git 或源码压缩包。
+Compose 内的 `AUTOMATION_API_BASE_URL` 已固定为同一项目的 `http://agent:3000`；`PROJECT_SYNC_API_BASE_URL` 继续填写原 OA 地址。完整 `DATABASE_URL` 不得上传到 Git 或源码压缩包。GitHub App 私钥也不要放入 `.env`；应在服务器上保存为 `.secrets/project-progress-github-app-private-key.pem`，并将该文件只读挂载给 Worker 容器。
 
 `192.168.251.1` 是当前服务器的 `docker0` 地址,用于让同机但位于其他 Docker 网络的 OA 后端访问测试 Agent。换服务器后用 `ip -4 addr show docker0` 重新确认。测试服务器的 `3002` 端口由 Alphachain/OA Node 服务使用，因此测试 Agent 固定使用 `3003`。生产环境将 `COMPOSE_PROJECT_NAME` 改为 `oa-agent-prod`，将 `AGENT_BIND_ADDRESS` 改为 `127.0.0.1`（生产 OA 后端需要跨容器访问时改为其可达的宿主机地址），将 `AGENT_PORT` 改为 `3011`，将 `WEB_PORT` 改为 `3010`，并使用生产环境自己的 SSO 与自动化密钥。不要把 `.env` 上传到 Git 或源码压缩包。
 
@@ -246,7 +247,8 @@ for name in \
   OA_AGENT_SSO_TTL_SECONDS \
   OA_AGENT_AUTOMATION_TOKEN \
   OA_PROJECT_SYNC_TOKEN \
-  PROJECT_PROGRESS_GITHUB_TOKEN \
+  PROJECT_PROGRESS_GITHUB_APP_ID \
+  PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH \
   AGENT_BIND_ADDRESS \
   AGENT_PORT \
   WEB_PORT; do

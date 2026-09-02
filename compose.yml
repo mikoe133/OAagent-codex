@@ -101,7 +101,8 @@ services:
       OA_PROJECT_SYNC_TOKEN: ${OA_PROJECT_SYNC_TOKEN}
       OA_PROJECT_SYNC_TOKEN_HEADER: ${OA_PROJECT_SYNC_TOKEN_HEADER:-Authorization}
       OA_PROJECT_SYNC_TOKEN_PREFIX: ${OA_PROJECT_SYNC_TOKEN_PREFIX:-Bearer}
-      PROJECT_PROGRESS_GITHUB_TOKEN: ${PROJECT_PROGRESS_GITHUB_TOKEN}
+      PROJECT_PROGRESS_GITHUB_APP_ID: ${PROJECT_PROGRESS_GITHUB_APP_ID}
+      PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/project-progress-github-app-private-key.pem
       PROJECT_PROGRESS_WRITE_ENABLED: ${PROJECT_PROGRESS_WRITE_ENABLED:-true}
       PROJECT_PROGRESS_PRODUCTION_WRITES: ${PROJECT_PROGRESS_PRODUCTION_WRITES:-I_UNDERSTAND_PRODUCTION_WRITES}
       PROJECT_PROGRESS_MODEL_PROVIDER: ${PROJECT_PROGRESS_MODEL_PROVIDER:-nexttoken}
@@ -124,6 +125,7 @@ services:
       - host.docker.internal:host-gateway
     volumes:
       - agent_sessions:/app/.context
+      - ./.secrets/project-progress-github-app-private-key.pem:/run/secrets/project-progress-github-app-private-key.pem:ro
     depends_on:
       agent:
         condition: service_healthy

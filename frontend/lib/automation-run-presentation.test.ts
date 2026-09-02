@@ -1,13 +1,19 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import type { AutomationAiInteraction, AutomationRun, AutomationRunProject } from "./automation-api"
+import type {
+  AutomationAiInteraction,
+  AutomationRun,
+  AutomationRunProject,
+  AutomationWeeklyReportPendingItem,
+} from "./automation-api"
 import {
   automationInteractionRepositoryFullName,
   buildAutomationProjectOutcomeChartData,
   hasActiveAutomationRuns,
   hasPollableAutomationRuns,
   projectOutcomeForDisplay,
+  pendingItemProjectLabel,
   resolveAutomationRunReply,
   shouldRefreshAutomationRunDetail,
 } from "./automation-run-presentation"
@@ -35,7 +41,7 @@ test("reads the repository full name used by an AI interaction", () => {
   )
 })
 
-test("aggregates project outcome tags and accounts for unloaded project details", () => {
+test("aggregates project outcome tags, pending items, and unloaded project details", () => {
   const data = buildAutomationProjectOutcomeChartData([
     project({ id: 1, outcome: "evaluated", commit_count: 3, generated_summary: "完成" }),
     project({ id: 2, outcome: "evaluated", commit_count: 0, generated_summary: null }),
@@ -43,7 +49,7 @@ test("aggregates project outcome tags and accounts for unloaded project details"
     project({ id: 4, outcome: "archived" }),
     project({ id: 5, outcome: "incomplete" }),
     project({ id: 6, outcome: "future_outcome" }),
-  ], 8)
+  ], 8, undefined, 1)
 
   assert.deepEqual(
     data.map(({ id, label, value }) => ({ id, label, value })),
@@ -52,8 +58,9 @@ test("aggregates project outcome tags and accounts for unloaded project details"
       { id: "no_commits", label: "当天无提交", value: 1 },
       { id: "archived", label: "已归档", value: 2 },
       { id: "incomplete", label: "处理不完整", value: 1 },
+      { id: "pending_review", label: "已落库待处理池中", value: 1 },
       { id: "other", label: "其他结果", value: 1 },
-      { id: "unloaded", label: "明细未加载", value: 2 },
+      { id: "unloaded", label: "明细未加载", value: 1 },
     ],
   )
 })
@@ -68,6 +75,19 @@ test("distinguishes archived project handling by automation type", () => {
   assert.equal(
     projectOutcomeForDisplay(archivedProject, "github_project_progress_sync"),
     "archived",
+  )
+})
+
+test("labels pending weekly report items by their referenced project", () => {
+  const item = pendingItem({ referenced_project_id: 73 })
+  assert.equal(pendingItemProjectLabel(item), "项目 #73")
+  assert.equal(
+    pendingItemProjectLabel(pendingItem({ referenced_project_id: null, candidate_project_ids: [40, 41] })),
+    "候选项目 #40、#41",
+  )
+  assert.equal(
+    pendingItemProjectLabel(pendingItem({ referenced_project_id: null, candidate_project_ids: [] })),
+    "待确认内容 #7",
   )
 })
 
@@ -219,6 +239,43 @@ function project(overrides: Partial<AutomationRunProject>): AutomationRunProject
     duration_ms: 100,
     created_at: "2026-08-04T00:00:00.000Z",
     updated_at: "2026-08-04T00:00:00.000Z",
+    ...overrides,
+  }
+}
+
+function pendingItem(overrides: Partial<AutomationWeeklyReportPendingItem>): AutomationWeeklyReportPendingItem {
+  return {
+    id: 7,
+    run_id: "run-1",
+    trigger_event_id: "event-1",
+    source_report_id: "report-1",
+    source_version: 1,
+    weekly_num: 202635,
+    owner_user_id: 42,
+    segment_key: "a".repeat(64),
+    segment_order: 1,
+    content_digest: "b".repeat(64),
+    original_content: "无法归类内容",
+    ai_summary: "无法归类内容",
+    ai_reason: "未找到明确项目归属",
+    reason_code: "no_project_match",
+    classification_source: "agent",
+    referenced_project_id: null,
+    candidate_project_ids: [],
+    ai_confidence: null,
+    status: "pending",
+    resolution_type: null,
+    resolved_project_id: null,
+    resolution_batch_id: null,
+    resolution_note: null,
+    resolved_by: null,
+    resolved_at: null,
+    sync_status: "not_started",
+    sync_error: null,
+    reprocessed_run_id: null,
+    content_purged_at: null,
+    created_at: "2026-08-31T00:00:00.000Z",
+    updated_at: "2026-08-31T00:00:00.000Z",
     ...overrides,
   }
 }
