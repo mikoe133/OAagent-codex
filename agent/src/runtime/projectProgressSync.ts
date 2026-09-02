@@ -11,6 +11,7 @@ import { ProjectProgressStore } from "../infrastructure/persistence/projectProgr
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
 import { OperationMetricsRecorder } from "../infrastructure/observability/operationMetrics.js";
 import { parseProjectProgressOptions } from "./projectProgressOptions.js";
+import { createProjectProgressGitHubAuth } from "./projectProgressGitHubAuth.js";
 
 async function main(): Promise<void> {
   const agentRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -48,13 +49,19 @@ async function main(): Promise<void> {
     maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
     maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
   });
+  const githubAuth = await createProjectProgressGitHubAuth({
+    config,
+    requestLimiter: githubRequestLimiter,
+    requestExecutor: githubRequestExecutor,
+    operationMetrics,
+  });
 
   try {
     const report = await syncProjectProgress({
       observedAt: options.observedAt ?? new Date(),
       oaClient: new ProjectProgressOaClient(config.oa, fetch, operationMetrics),
       githubReader: new GitHubRestProjectReader(
-        config.githubToken,
+        githubAuth,
         fetch,
         config.githubApiBaseUrl,
         undefined,
@@ -68,7 +75,7 @@ async function main(): Promise<void> {
       ),
       summarizer: new CodexProjectProgressSummarizer({
         model: config.model,
-        githubToken: config.githubToken,
+        githubAuth,
         githubApiBaseUrl: config.githubApiBaseUrl,
         agent: config.agent,
         workingDirectory: repoRoot,

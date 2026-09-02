@@ -17,6 +17,13 @@ export type ProjectProgressRequestedModel = {
   modelParameters?: AutomationModelParameters;
 };
 
+export type ProjectProgressGitHubAuthConfig =
+  {
+    type: "app";
+    appId: string;
+    privateKeyPath: string;
+  };
+
 export type ProjectProgressConfig = {
   oa: {
     baseUrl: string;
@@ -26,7 +33,7 @@ export type ProjectProgressConfig = {
     tokenPrefix: string;
     projectDetailCompatibilityMode: boolean;
   };
-  githubToken: string;
+  githubAuth: ProjectProgressGitHubAuthConfig;
   githubApiBaseUrl: string;
   githubLimits: {
     maxBranches: number;
@@ -181,7 +188,7 @@ export function loadProjectProgressConfig(
         false,
       ),
     },
-    githubToken: requireValue(environment, "PROJECT_PROGRESS_GITHUB_TOKEN"),
+    githubAuth: resolveGitHubAuth(environment, repoRoot),
     githubApiBaseUrl: environment.GITHUB_API_BASE_URL?.trim() || "https://api.github.com",
     githubLimits: {
       maxBranches: parseIntegerInRange(
@@ -282,6 +289,25 @@ function requireProjectSyncBaseUrl(environment: Record<string, string | undefine
     throw new Error("缺少 PROJECT_SYNC_API_BASE_URL 或 OA_API_BASE_URL。");
   }
   return value;
+}
+
+function resolveGitHubAuth(
+  environment: Record<string, string | undefined>,
+  repoRoot: string,
+): ProjectProgressGitHubAuthConfig {
+  const appId = environment.PROJECT_PROGRESS_GITHUB_APP_ID?.trim();
+  const privateKeyPath = environment.PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH?.trim();
+  if (!appId) {
+    throw new Error("缺少 PROJECT_PROGRESS_GITHUB_APP_ID。");
+  }
+  if (!privateKeyPath) {
+    throw new Error("缺少 PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH。");
+  }
+  return {
+    type: "app",
+    appId,
+    privateKeyPath: path.resolve(repoRoot, privateKeyPath),
+  };
 }
 
 function parseIntegerInRange(

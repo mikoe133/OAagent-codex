@@ -21,7 +21,7 @@ function reject_multiline() {
 
 readonly output_path="${1:?usage: render-runtime-env.sh OUTPUT_PATH}"
 
-for name in COMPOSE_PROJECT_NAME NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN DATABASE_URL OA_SESSION_SECRET AGENT_PORT WEB_PORT; do
+for name in COMPOSE_PROJECT_NAME NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_APP_ID DATABASE_URL OA_SESSION_SECRET AGENT_PORT WEB_PORT; do
   require_value "$name"
 done
 
@@ -38,6 +38,7 @@ readonly oa_project_sync_token_prefix="${OA_PROJECT_SYNC_TOKEN_PREFIX:-Bearer}"
 readonly project_progress_worker_instance="${PROJECT_PROGRESS_WORKER_INSTANCE:-oaagent-${COMPOSE_PROJECT_NAME}}"
 readonly project_progress_lease_seconds="${PROJECT_PROGRESS_LEASE_SECONDS:-300}"
 readonly project_progress_heartbeat_seconds="${PROJECT_PROGRESS_HEARTBEAT_SECONDS:-10}"
+readonly project_progress_github_app_id="${PROJECT_PROGRESS_GITHUB_APP_ID}"
 readonly project_progress_github_concurrency="${PROJECT_PROGRESS_GITHUB_CONCURRENCY:-6}"
 readonly project_progress_github_max_branches="${PROJECT_PROGRESS_GITHUB_MAX_BRANCHES:-500}"
 readonly project_progress_github_max_commit_pages_per_branch="${PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH:-100}"
@@ -88,7 +89,6 @@ for name in \
   OA_PROJECT_SYNC_TOKEN \
   OA_PROJECT_SYNC_TOKEN_HEADER \
   OA_PROJECT_SYNC_TOKEN_PREFIX \
-  PROJECT_PROGRESS_GITHUB_TOKEN \
   PROJECT_PROGRESS_WORKER_INSTANCE \
   PROJECT_PROGRESS_LEASE_SECONDS \
   PROJECT_PROGRESS_HEARTBEAT_SECONDS \
@@ -97,6 +97,7 @@ for name in \
   PROJECT_PROGRESS_GITHUB_MAX_COMMIT_PAGES_PER_BRANCH \
   PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_REPOSITORY \
   PROJECT_PROGRESS_GITHUB_MAX_REQUESTS_PER_RUN \
+  PROJECT_PROGRESS_GITHUB_APP_ID \
   PROJECT_PROGRESS_AGENT_CONCURRENCY \
   PROJECT_PROGRESS_OA_WRITE_CONCURRENCY \
   PROJECT_PROGRESS_AGENT_MAX_DETAIL_CALLS \
@@ -152,6 +153,8 @@ fi
   || fail "PROJECT_PROGRESS_HEARTBEAT_SECONDS must be between 10 and 300"
 (( project_progress_heartbeat_seconds < project_progress_lease_seconds )) \
   || fail "PROJECT_PROGRESS_HEARTBEAT_SECONDS must be less than PROJECT_PROGRESS_LEASE_SECONDS"
+[[ "$project_progress_github_app_id" =~ ^[0-9]+$ ]] \
+  || fail "PROJECT_PROGRESS_GITHUB_APP_ID must be a number"
 [[ "$project_progress_github_concurrency" =~ ^[0-9]+$ ]] \
   || fail "PROJECT_PROGRESS_GITHUB_CONCURRENCY must be a number"
 (( project_progress_github_concurrency >= 1 && project_progress_github_concurrency <= 20 )) \
@@ -278,7 +281,8 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'OA_PROJECT_SYNC_TOKEN=%s\n' "$OA_PROJECT_SYNC_TOKEN"
   printf 'OA_PROJECT_SYNC_TOKEN_HEADER=%s\n' "$oa_project_sync_token_header"
   printf 'OA_PROJECT_SYNC_TOKEN_PREFIX=%s\n' "$oa_project_sync_token_prefix"
-  printf 'PROJECT_PROGRESS_GITHUB_TOKEN=%s\n' "$PROJECT_PROGRESS_GITHUB_TOKEN"
+  printf 'PROJECT_PROGRESS_GITHUB_APP_ID=%s\n' "$project_progress_github_app_id"
+  printf 'PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/project-progress-github-app-private-key.pem\n'
   printf 'PROJECT_PROGRESS_WORKER_INSTANCE=%s\n' "$project_progress_worker_instance"
   printf 'PROJECT_PROGRESS_LEASE_SECONDS=%s\n' "$project_progress_lease_seconds"
   printf 'PROJECT_PROGRESS_HEARTBEAT_SECONDS=%s\n' "$project_progress_heartbeat_seconds"

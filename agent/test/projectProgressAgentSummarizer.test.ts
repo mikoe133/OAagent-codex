@@ -7,6 +7,7 @@ import {
   CodexProjectProgressSummarizer,
   type ProjectProgressAgentRunner,
 } from "../src/application/projectProgressAgentSummarizer.js";
+import { createStaticGitHubAuth } from "../src/infrastructure/github/githubAppAuth.js";
 
 const input = {
   projectId: 12,
@@ -34,7 +35,7 @@ const config = {
     model: "gpt-5.6-terra",
     parameters: { reasoning_effort: "medium" as const },
   },
-  githubToken: "github-secret",
+  githubAuth: createStaticGitHubAuth({ token: "github-secret" }),
   githubApiBaseUrl: "https://api.github.test",
   agent: {
     maxCandidateCommits: 50,

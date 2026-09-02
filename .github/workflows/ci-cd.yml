@@ -198,7 +198,8 @@ jobs:
       OA_PROJECT_SYNC_TOKEN: ${{ secrets.OA_PROJECT_SYNC_TOKEN }}
       OA_PROJECT_SYNC_TOKEN_HEADER: ${{ vars.OA_PROJECT_SYNC_TOKEN_HEADER || 'Authorization' }}
       OA_PROJECT_SYNC_TOKEN_PREFIX: ${{ vars.OA_PROJECT_SYNC_TOKEN_PREFIX || 'Bearer' }}
-      PROJECT_PROGRESS_GITHUB_TOKEN: ${{ secrets.PROJECT_PROGRESS_GITHUB_TOKEN }}
+      PROJECT_PROGRESS_GITHUB_APP_ID: ${{ vars.PROJECT_PROGRESS_GITHUB_APP_ID }}
+      PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY: ${{ secrets.PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY }}
       PROJECT_PROGRESS_WORKER_INSTANCE: ${{ vars.PROJECT_PROGRESS_WORKER_INSTANCE || 'oaagent-test-01' }}
       PROJECT_PROGRESS_LEASE_SECONDS: ${{ vars.PROJECT_PROGRESS_LEASE_SECONDS || '300' }}
       PROJECT_PROGRESS_HEARTBEAT_SECONDS: ${{ vars.PROJECT_PROGRESS_HEARTBEAT_SECONDS || '10' }}
@@ -234,7 +235,7 @@ jobs:
       - name: Validate deployment configuration
         shell: bash
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN DATABASE_URL OA_SESSION_SECRET OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN DATABASE_URL OA_SESSION_SECRET OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_APP_ID PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY; do
             if [[ -z "${!name}" ]]; then
               echo "Missing test deployment configuration: $name" >&2
               exit 1
@@ -279,6 +280,12 @@ jobs:
           remote_env="$DEPLOY_PATH/.env.next"
           remote_command="$(printf 'mkdir -p -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH" "$remote_env" "$remote_env")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$runtime_env"
+          private_key_path="$RUNNER_TEMP/${COMPOSE_PROJECT_NAME}.github-app-private-key.pem"
+          umask 077
+          printf '%s\n' "$PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY" > "$private_key_path"
+          remote_private_key="$DEPLOY_PATH/.secrets/project-progress-github-app-private-key.pem"
+          remote_command="$(printf 'install -d -m 700 -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH/.secrets" "$remote_private_key" "$remote_private_key")"
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$private_key_path"
           remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml
 
@@ -343,7 +350,8 @@ jobs:
       OA_PROJECT_SYNC_TOKEN: ${{ secrets.OA_PROJECT_SYNC_TOKEN }}
       OA_PROJECT_SYNC_TOKEN_HEADER: ${{ vars.OA_PROJECT_SYNC_TOKEN_HEADER || 'Authorization' }}
       OA_PROJECT_SYNC_TOKEN_PREFIX: ${{ vars.OA_PROJECT_SYNC_TOKEN_PREFIX || 'Bearer' }}
-      PROJECT_PROGRESS_GITHUB_TOKEN: ${{ secrets.PROJECT_PROGRESS_GITHUB_TOKEN }}
+      PROJECT_PROGRESS_GITHUB_APP_ID: ${{ vars.PROJECT_PROGRESS_GITHUB_APP_ID }}
+      PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY: ${{ secrets.PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY }}
       PROJECT_PROGRESS_WORKER_INSTANCE: ${{ vars.PROJECT_PROGRESS_WORKER_INSTANCE || 'oaagent-production-01' }}
       PROJECT_PROGRESS_LEASE_SECONDS: ${{ vars.PROJECT_PROGRESS_LEASE_SECONDS || '300' }}
       PROJECT_PROGRESS_HEARTBEAT_SECONDS: ${{ vars.PROJECT_PROGRESS_HEARTBEAT_SECONDS || '10' }}
@@ -379,7 +387,7 @@ jobs:
       - name: Validate deployment configuration
         shell: bash
         run: |
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN DATABASE_URL OA_SESSION_SECRET OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_TOKEN; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN DATABASE_URL OA_SESSION_SECRET OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_APP_ID PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY; do
             if [[ -z "${!name}" ]]; then
               echo "Missing production deployment configuration: $name" >&2
               exit 1
@@ -424,6 +432,12 @@ jobs:
           remote_env="$DEPLOY_PATH/.env.next"
           remote_command="$(printf 'mkdir -p -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH" "$remote_env" "$remote_env")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$runtime_env"
+          private_key_path="$RUNNER_TEMP/${COMPOSE_PROJECT_NAME}.github-app-private-key.pem"
+          umask 077
+          printf '%s\n' "$PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY" > "$private_key_path"
+          remote_private_key="$DEPLOY_PATH/.secrets/project-progress-github-app-private-key.pem"
+          remote_command="$(printf 'install -d -m 700 -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH/.secrets" "$remote_private_key" "$remote_private_key")"
+          ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$private_key_path"
           remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml
 

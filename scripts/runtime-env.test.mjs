@@ -81,7 +81,9 @@ test("renders a private runtime env for one isolated Compose environment", async
   assert.match(content, /^OA_PROJECT_SYNC_TOKEN=test-worker-secret$/m)
   assert.match(content, /^OA_PROJECT_SYNC_TOKEN_HEADER=Authorization$/m)
   assert.match(content, /^OA_PROJECT_SYNC_TOKEN_PREFIX=Bearer$/m)
-  assert.match(content, /^PROJECT_PROGRESS_GITHUB_TOKEN=test-github-secret$/m)
+  assert.match(content, /^PROJECT_PROGRESS_GITHUB_APP_ID=4801810$/m)
+  assert.match(content, /^PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH=\/run\/secrets\/project-progress-github-app-private-key\.pem$/m)
+  assert.doesNotMatch(content, /^PROJECT_PROGRESS_GITHUB_TOKEN=/m)
   assert.match(content, /^PROJECT_PROGRESS_WORKER_INSTANCE=oaagent-test-01$/m)
   assert.match(content, /^PROJECT_PROGRESS_LEASE_SECONDS=300$/m)
   assert.match(content, /^PROJECT_PROGRESS_HEARTBEAT_SECONDS=10$/m)
@@ -294,7 +296,7 @@ function runRender(outputPath, overrides) {
       OA_PROJECT_SYNC_TOKEN: "test-worker-secret",
       OA_PROJECT_SYNC_TOKEN_HEADER: "Authorization",
       OA_PROJECT_SYNC_TOKEN_PREFIX: "Bearer",
-      PROJECT_PROGRESS_GITHUB_TOKEN: "test-github-secret",
+      PROJECT_PROGRESS_GITHUB_APP_ID: "4801810",
       OA_AGENT_AUTOMATION_TOKEN: "test-automation-secret",
       DATABASE_URL: "mysql://oagent:p%21ss@db.example.test:3306/oagent_test",
       AUTOMATION_EXPECTED_DATABASE_NAME: "oagent_test",

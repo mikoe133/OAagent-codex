@@ -5,6 +5,10 @@ import {
   PROJECT_PROGRESS_ENDPOINTS,
 } from "../observability/operationMetrics.js";
 import {
+  createStaticGitHubAuth,
+  type GitHubRequestAuth,
+} from "./githubAppAuth.js";
+import {
   GitHubRequestBudgetExceededError,
   GitHubRequestError,
   GitHubRequestExecutor,
@@ -47,7 +51,7 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
   private readonly commitSelection: "lookback" | "latest";
 
   constructor(
-    private readonly token: string,
+    auth: string | GitHubRequestAuth,
     private readonly fetchImpl: GitHubFetch = fetch,
     private readonly apiBaseUrl = "https://api.github.com",
     private readonly lookbackHours = DEFAULT_LOOKBACK_HOURS,
@@ -55,6 +59,9 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     private readonly operationMetrics?: OperationMetricsRecorder,
     policy: GitHubRequestPolicy = {},
   ) {
+    this.auth = typeof auth === "string"
+      ? createStaticGitHubAuth({ token: auth })
+      : auth;
     this.maxBranches = positiveInteger(
       policy.maxBranches ?? DEFAULT_MAX_BRANCHES,
       "maxBranches",
@@ -70,6 +77,8 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
       ...requestExecutorConfig(policy),
     });
   }
+
+  private readonly auth: GitHubRequestAuth;
 
   readRepository(
     repository: GitHubRepositoryIdentity,
@@ -245,17 +254,20 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
     }
     const request = async () => {
       const response = await this.requestExecutor.execute(
-        () => this.fetchImpl(url, {
-          headers: {
-            accept: "application/vnd.github+json",
-            authorization: `Bearer ${this.token}`,
-            "x-github-api-version": "2022-11-28",
-            "user-agent": "oa-project-progress-worker",
-          },
-          signal: signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
-            : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
-        }),
+        async () => {
+          const authorization = await this.auth.getAuthorizationHeader(repository, signal);
+          return this.fetchImpl(url, {
+            headers: {
+              accept: "application/vnd.github+json",
+              authorization,
+              "x-github-api-version": "2022-11-28",
+              "user-agent": "oa-project-progress-worker",
+            },
+            signal: signal
+              ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
+              : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
+          });
+        },
         {
           repository,
           ...(acceptedStatuses.length > 0 ? { acceptedStatuses } : {}),
@@ -380,6 +392,8 @@ function decodeCommits(
       throw new Error("GitHub commit 响应字段无效。");
     }
     const details = item.commit;
+    const apiAuthor = isRecord(item.author) ? item.author : null;
+    const apiCommitter = isRecord(item.committer) ? item.committer : null;
     const committer = isRecord(details.committer) ? details.committer : null;
     const author = isRecord(details.author) ? details.author : null;
     const committedAt = parseIsoDate(committer?.date ?? author?.date, "commit date");
@@ -390,6 +404,12 @@ function decodeCommits(
       sha: item.sha,
       committedAt,
       subject: sanitizeSubject(message),
+      authorLogin: typeof apiAuthor?.login === "string" ? apiAuthor.login : null,
+      authorName: typeof author?.name === "string" ? author.name : null,
+      authorEmail: typeof author?.email === "string" ? author.email : null,
+      committerLogin: typeof apiCommitter?.login === "string" ? apiCommitter.login : null,
+      committerName: typeof committer?.name === "string" ? committer.name : null,
+      committerEmail: typeof committer?.email === "string" ? committer.email : null,
     };
   });
 }

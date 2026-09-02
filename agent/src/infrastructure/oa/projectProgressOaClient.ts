@@ -39,6 +39,20 @@ export interface WeeklyReportOaReader {
   getWeeklyReport(reportId: string, signal?: AbortSignal): Promise<WeeklyReportSnapshot>;
 }
 
+export interface WeeklyReportContentOaWriter {
+  getWeeklyReportByWeek(
+    weeklyNum: number,
+    signal?: AbortSignal,
+  ): Promise<WeeklyReportSnapshot | null>;
+  upsertWeeklyReportContent(
+    input: {
+      weeklyNum: number;
+      content: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<WeeklyReportSnapshot>;
+}
+
 export type OaCommitSummary = {
   id: number;
   projectId: number;
@@ -127,7 +141,10 @@ export class ProjectProgressLeaseLostError extends OaRequestError {
   override name = "ProjectProgressLeaseLostError";
 }
 
-export class ProjectProgressOaClient implements ProjectProgressOaWriter, WeeklyReportOaReader {
+export class ProjectProgressOaClient implements
+  ProjectProgressOaWriter,
+  WeeklyReportOaReader,
+  WeeklyReportContentOaWriter {
   private readonly scheduler: OaRequestExecutor;
   private readonly retryRandom: () => number;
   private readonly retrySleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
@@ -192,6 +209,71 @@ export class ProjectProgressOaClient implements ProjectProgressOaWriter, WeeklyR
       updatedAt: data.updated_at,
       deleted: data.deleted === true,
     };
+  }
+
+  async getWeeklyReportByWeek(
+    weeklyNum: number,
+    signal?: AbortSignal,
+  ): Promise<WeeklyReportSnapshot | null> {
+    if (!Number.isInteger(weeklyNum) || weeklyNum < 1) {
+      throw new OaContractError("OA 周报 weeklyNum 无效。");
+    }
+    try {
+      const payload = await this.request(
+        PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportReportGet,
+        "/weekly-report/report",
+        {
+          weekly_num: weeklyNum,
+          alias: this.config.alias,
+        },
+        { signal },
+      );
+      return decodeWeeklyReportSnapshot(decodeEnvelope(payload).data);
+    } catch (error) {
+      if (error instanceof OaRequestError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async upsertWeeklyReportContent(
+    input: {
+      weeklyNum: number;
+      content: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<WeeklyReportSnapshot> {
+    if (!Number.isInteger(input.weeklyNum) || input.weeklyNum < 1) {
+      throw new OaContractError("OA 周报 weeklyNum 无效。");
+    }
+    const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportReportUpsert,
+      "/weekly-report/report",
+      {
+        alias: this.config.alias,
+      },
+      {
+        method: "POST",
+        body: {
+          weekly_num: input.weeklyNum,
+          content: input.content,
+        },
+        signal,
+      },
+    );
+    const data = decodeEnvelope(payload).data;
+    try {
+      return decodeWeeklyReportSnapshot(data);
+    } catch (error) {
+      if (error instanceof OaContractError) {
+        const refetched = await this.getWeeklyReportByWeek(input.weeklyNum, signal);
+        if (refetched) {
+          return refetched;
+        }
+      }
+      throw error;
+    }
   }
 
   async updateProjectStatus(
@@ -597,6 +679,44 @@ function decodeCommitSummary(value: unknown): OaCommitSummary {
     aiConfidence: value.ai_confidence as number,
     aiNote: value.ai_note,
     ...(typeof value.version === "number" ? { version: value.version } : {}),
+  };
+}
+
+function decodeWeeklyReportSnapshot(value: unknown): WeeklyReportSnapshot {
+  const snapshotValue = Array.isArray(value) ? value[0] : value;
+  if (!isRecord(snapshotValue)) {
+    throw new OaContractError("OA 周报响应不是对象。");
+  }
+  if (typeof snapshotValue.id !== "string") {
+    throw new OaContractError("OA 周报 id 无效。");
+  }
+  if (!Number.isInteger(snapshotValue.weekly_num) || (snapshotValue.weekly_num as number) < 1) {
+    throw new OaContractError("OA 周报 weekly_num 无效。");
+  }
+  if (typeof snapshotValue.content !== "string") {
+    throw new OaContractError("OA 周报 content 无效。");
+  }
+  if (!Number.isInteger(snapshotValue.version) || (snapshotValue.version as number) < 1) {
+    throw new OaContractError("OA 周报 version 无效。");
+  }
+  if (typeof snapshotValue.updated_at !== "string") {
+    throw new OaContractError("OA 周报 updated_at 无效。");
+  }
+  if (snapshotValue.owner_id !== undefined && snapshotValue.owner_id !== null &&
+    !Number.isInteger(snapshotValue.owner_id)) {
+    throw new OaContractError("OA 周报 owner_id 无效。");
+  }
+  if (snapshotValue.deleted !== undefined && typeof snapshotValue.deleted !== "boolean") {
+    throw new OaContractError("OA 周报 deleted 无效。");
+  }
+  return {
+    id: snapshotValue.id,
+    weeklyNum: snapshotValue.weekly_num as number,
+    ownerId: typeof snapshotValue.owner_id === "number" ? snapshotValue.owner_id : null,
+    content: snapshotValue.content,
+    version: snapshotValue.version as number,
+    updatedAt: snapshotValue.updated_at,
+    deleted: snapshotValue.deleted === true,
   };
 }
 

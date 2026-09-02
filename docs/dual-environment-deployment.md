@@ -87,7 +87,7 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 | `NEXTTOKEN_API_KEY` | Nexttoken Key | Nexttoken 控制台创建 |
 | `OPENROUTER_API_KEY` | OpenRouter Key | OpenRouter 控制台创建 |
 | `OA_KNOWLEDGE_BASE_API_KEY` | 测试和生产共用的知识库固定 Token | 知识库服务提供方；只配置一次 |
-| `PROJECT_PROGRESS_GITHUB_TOKEN` | GitHub fine-grained PAT | AI GitHub 账号创建，只授予 Metadata/Contents Read |
+| `PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` | GitHub App 私钥 PEM 完整内容 | GitHub App 设置页下载，部署时写入服务器只读文件 |
 
 这是 Repository Secret：两个部署 Job 都通过 `${{ secrets.OA_KNOWLEDGE_BASE_API_KEY }}` 读取它。不要在 `test` 和 `production` Environment 中重复创建同名 Secret，也不要把它配置成 Variable。
 
@@ -99,6 +99,8 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 - 用户 OA token
 
 用户 OA token 会在用户登录后自动取得,并由 Web 和 Agent 共用、验证。
+
+`PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` 不会写入服务器 `.env`。Workflow 会把它写到部署目录的 `.secrets/project-progress-github-app-private-key.pem`，权限为 `600`；Compose 再只读挂载到 Worker 容器内的 `/run/secrets/project-progress-github-app-private-key.pem`。
 
 ## 第 4 步:配置 GitHub Repository Variables
 
@@ -113,6 +115,7 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Variables
 | Variable | 示例 | 怎么获得 |
 | --- | --- | --- |
 | `DEPLOY_PORT` | `22` | SSH 端口,默认 22 |
+| `PROJECT_PROGRESS_GITHUB_APP_ID` | `4801810` | GitHub App 设置页的 App ID |
 | `DEPLOY_PLATFORM` | `linux/amd64` | 服务器执行 `uname -m`;`x86_64` 用 `linux/amd64`,`aarch64` 用 `linux/arm64` |
 
 目录、Compose 项目名和 Web 端口已经写入 Workflow,不需要配置。

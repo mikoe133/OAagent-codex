@@ -2,6 +2,7 @@ import type {
   AutomationAiInteraction,
   AutomationRun,
   AutomationRunProject,
+  AutomationWeeklyReportPendingItem,
 } from "./automation-api"
 
 const ACTIVE_AUTOMATION_RUN_STATUSES = new Set<AutomationRun["status"]>([
@@ -29,6 +30,7 @@ const PROJECT_OUTCOME_CHART_PRESENTATIONS: Record<string, Omit<AutomationProject
   incomplete: { id: "incomplete", label: "处理不完整", color: "#EA580C" },
   write_conflict: { id: "write_conflict", label: "写入冲突", color: "#D97706" },
   failed: { id: "failed", label: "处理失败", color: "#B91C1C" },
+  pending_review: { id: "pending_review", label: "已落库待处理池中", color: "#D97706" },
 }
 
 const PROJECT_OUTCOME_ORDER = Object.keys(PROJECT_OUTCOME_CHART_PRESENTATIONS)
@@ -79,6 +81,18 @@ export function projectOutcomeForDisplay(
   return project.outcome
 }
 
+export function pendingItemProjectLabel(
+  item: Pick<AutomationWeeklyReportPendingItem, "id" | "referenced_project_id" | "candidate_project_ids">,
+): string {
+  if (item.referenced_project_id !== null) {
+    return `项目 #${item.referenced_project_id}`
+  }
+  if (item.candidate_project_ids.length > 0) {
+    return `候选项目 ${item.candidate_project_ids.map((id) => `#${id}`).join("、")}`
+  }
+  return `待确认内容 #${item.id}`
+}
+
 export function automationInteractionRepositoryFullName(
   interaction: Pick<AutomationAiInteraction, "request_payload_sanitized">,
 ): string {
@@ -96,6 +110,7 @@ export function buildAutomationProjectOutcomeChartData(
   projects: AutomationRunProject[],
   projectsTotal: number,
   jobType?: string,
+  pendingItemCount = 0,
 ): AutomationProjectOutcomeChartItem[] {
   const counts = new Map<string, number>()
 
@@ -103,6 +118,9 @@ export function buildAutomationProjectOutcomeChartData(
     const outcome = projectOutcomeForDisplay(project, jobType)
     const key = PROJECT_OUTCOME_CHART_PRESENTATIONS[outcome] ? outcome : "other"
     counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  if (pendingItemCount > 0) {
+    counts.set("pending_review", (counts.get("pending_review") ?? 0) + pendingItemCount)
   }
 
   const data = PROJECT_OUTCOME_ORDER.flatMap((key) => {
@@ -116,7 +134,7 @@ export function buildAutomationProjectOutcomeChartData(
     data.push({ ...OTHER_OUTCOME_PRESENTATION, value: otherCount })
   }
 
-  const unloadedCount = Math.max(0, projectsTotal - projects.length)
+  const unloadedCount = Math.max(0, projectsTotal - projects.length - pendingItemCount)
   if (unloadedCount > 0) {
     data.push({ ...UNLOADED_OUTCOME_PRESENTATION, value: unloadedCount })
   }

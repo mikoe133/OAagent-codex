@@ -10,6 +10,7 @@ import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/gith
 import { AutomationLeaseLostError } from "../src/infrastructure/oa/automationOaClient.js";
 import { ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
+import type { ProjectProgressCommit } from "../src/domain/projectProgress.js";
 
 describe("syncProjectProgress", () => {
   it("records model request outcomes and semaphore queue wait", async () => {
@@ -1378,6 +1379,172 @@ describe("syncProjectProgress", () => {
     assert.equal(result.metrics.oaWritePeakConcurrency, 1);
   });
 
+  it("appends generated summaries into the current weekly report by commit author", async () => {
+    let fetchedWeeklyNum: number | null = null;
+    let writtenWeeklyNum: number | null = null;
+    let writtenWeeklyContent: string | null = null;
+    const project = {
+      id: 51,
+      projectName: "weekly-append",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/weekly-append"],
+    };
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-08-27T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => ({ id: 901, ...input }),
+        updateCommitSummary: async (summaryId, input) => ({
+          id: summaryId,
+          projectId: project.id,
+          summaryDate: "2026-08-27",
+          ...input,
+        }),
+        getCommitSummary: async () => {
+          throw new Error("must not read");
+        },
+        getWeeklyReportByWeek: async (weeklyNum: number) => {
+          fetchedWeeklyNum = weeklyNum;
+          return {
+            id: "weekly-report-1",
+            weeklyNum,
+            ownerId: 42,
+            content: "周报开头",
+            version: 3,
+            updatedAt: "2026-08-27T09:30:00.000Z",
+            deleted: false,
+          };
+        },
+        upsertWeeklyReportContent: async (input: { weeklyNum: number; content: string }) => {
+          writtenWeeklyNum = input.weeklyNum;
+          writtenWeeklyContent = input.content;
+          return {
+            id: "weekly-report-1",
+            weeklyNum: input.weeklyNum,
+            ownerId: 42,
+            content: input.content,
+            version: 4,
+            updatedAt: "2026-08-27T09:40:00.000Z",
+            deleted: false,
+          };
+        },
+      } as never,
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: 1,
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-08-27T02:00:00.000Z",
+          commits: [
+            commit(1, repository.fullName, "alice-sha", "2026-08-27T01:00:00.000Z", {
+              authorLogin: "alice",
+              authorName: "Alice",
+              authorEmail: "alice@example.test",
+            }),
+            commit(1, repository.fullName, "bob-sha", "2026-08-27T02:00:00.000Z", {
+              authorLogin: "bob",
+              authorName: "Bob",
+              authorEmail: "bob@example.test",
+            }),
+          ],
+        }),
+      },
+      summarizer: { summarize: async () => ({ summary: "完成更新。", limitations: [] }) },
+      store: createWritableStore(),
+    });
+
+    assert.equal(result.mode, "production-write");
+    assert.equal(fetchedWeeklyNum, 202635);
+    assert.equal(writtenWeeklyNum, 202635);
+    assert.match(writtenWeeklyContent ?? "", /^周报开头\n\n/);
+    assert.match(writtenWeeklyContent ?? "", /Alice/);
+    assert.match(writtenWeeklyContent ?? "", /Bob/);
+    assert.match(writtenWeeklyContent ?? "", /weekly-append/);
+    assert.match(writtenWeeklyContent ?? "", /完成更新。/);
+  });
+
+  it("writes directly when the weekly report is empty", async () => {
+    let writtenWeeklyNum: number | null = null;
+    let writtenWeeklyContent: string | null = null;
+    const project = {
+      id: 51,
+      projectName: "weekly-empty",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/weekly-empty"],
+    };
+    await syncProjectProgress({
+      observedAt: new Date("2026-08-27T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => ({ id: 901, ...input }),
+        updateCommitSummary: async (summaryId, input) => ({
+          id: summaryId,
+          projectId: project.id,
+          summaryDate: "2026-08-27",
+          ...input,
+        }),
+        getCommitSummary: async () => {
+          throw new Error("must not read");
+        },
+        getWeeklyReportByWeek: async (weeklyNum: number) => ({
+          id: "weekly-report-empty",
+          weeklyNum,
+          ownerId: 42,
+          content: "",
+          version: 1,
+          updatedAt: "2026-08-27T09:30:00.000Z",
+          deleted: false,
+        }),
+        upsertWeeklyReportContent: async (input: { weeklyNum: number; content: string }) => {
+          writtenWeeklyNum = input.weeklyNum;
+          writtenWeeklyContent = input.content;
+          return {
+            id: "weekly-report-empty",
+            weeklyNum: input.weeklyNum,
+            ownerId: 42,
+            content: input.content,
+            version: 2,
+            updatedAt: "2026-08-27T09:40:00.000Z",
+            deleted: false,
+          };
+        },
+      } as never,
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: 1,
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-08-27T02:00:00.000Z",
+          commits: [
+            commit(1, repository.fullName, "alice-sha", "2026-08-27T01:00:00.000Z", {
+              authorLogin: "alice",
+              authorName: "Alice",
+              authorEmail: "alice@example.test",
+            }),
+          ],
+        }),
+      },
+      summarizer: { summarize: async () => ({ summary: "完成更新。", limitations: [] }) },
+      store: createWritableStore(),
+    });
+
+    assert.equal(writtenWeeklyNum, 202635);
+    assert.match(
+      writtenWeeklyContent ?? "",
+      /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\n### 2026-08-27 \| weekly-empty \| Alice\n完成更新。\n\n提交：\n- commit alice-sha$/,
+    );
+  });
+
   it("adopts an exact unmanaged summary without overwriting it", async () => {
     let summaryWrites = 0;
     let adoptedSummaryId: number | null = null;
@@ -1658,6 +1825,7 @@ function commit(
   repositoryFullName: string,
   sha: string,
   committedAt: string,
+  overrides: Partial<ProjectProgressCommit> = {},
 ) {
   return {
     repositoryId,
@@ -1665,6 +1833,7 @@ function commit(
     sha,
     committedAt,
     subject: `commit ${sha}`,
+    ...overrides,
   };
 }
 

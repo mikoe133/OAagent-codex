@@ -25,6 +25,7 @@ import {
   OperationMetricsRecorder,
   type OperationMetricSnapshot,
 } from "../infrastructure/observability/operationMetrics.js";
+import { createProjectProgressGitHubAuth } from "./projectProgressGitHubAuth.js";
 
 const WORKER_POLL_INTERVAL_MS = 5_000;
 
@@ -94,13 +95,6 @@ async function main(): Promise<void> {
           if (config.stateDatabasePath !== baseConfig.stateDatabasePath) {
             throw new Error("运行期间 PROJECT_PROGRESS_STATE_DB 不允许变化。");
           }
-          const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
-          const githubRequestExecutor = new GitHubRequestExecutor({
-            requestLimiter: githubRequestLimiter,
-            maxConcurrentRequestsPerRepository: config.concurrency.github,
-            maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
-            maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
-          });
           const projectOaClient = new ProjectProgressOaClient(
             {
               ...config.oa,
@@ -256,12 +250,25 @@ async function main(): Promise<void> {
           if (!automationParameters) {
             throw new Error("GitHub 项目进度任务缺少自动化参数。");
           }
+          const githubRequestLimiter = new AsyncSemaphore(config.concurrency.github);
+          const githubRequestExecutor = new GitHubRequestExecutor({
+            requestLimiter: githubRequestLimiter,
+            maxConcurrentRequestsPerRepository: config.concurrency.github,
+            maxRequestsPerRun: config.githubLimits.maxRequestsPerRun,
+            maxRequestsPerRepository: config.githubLimits.maxRequestsPerRepository,
+          });
+          const githubAuth = await createProjectProgressGitHubAuth({
+            config,
+            requestLimiter: githubRequestLimiter,
+            requestExecutor: githubRequestExecutor,
+            operationMetrics,
+          });
           return async (shouldCancel, trace) => {
             return await syncProjectProgress({
               observedAt: new Date(claim.scheduledAt),
               oaClient: projectOaClient,
               githubReader: new GitHubRestProjectReader(
-                config.githubToken,
+                githubAuth,
                 fetch,
                 config.githubApiBaseUrl,
                 undefined,
@@ -280,7 +287,7 @@ async function main(): Promise<void> {
               ),
               summarizer: new CodexProjectProgressSummarizer({
                 model: config.model,
-                githubToken: config.githubToken,
+                githubAuth,
                 githubApiBaseUrl: config.githubApiBaseUrl,
                 agent: config.agent,
                 workingDirectory: repoRoot,

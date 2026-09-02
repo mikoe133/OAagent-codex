@@ -2,6 +2,7 @@
 .env
 .deploy.env
 .deploy.env.previous
+.secrets/
 
 # dependencies / build
 node_modules/

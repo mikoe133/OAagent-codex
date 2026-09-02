@@ -37,12 +37,14 @@ import {
   AutomationApiError,
   type AutomationRun,
   type AutomationRunProject,
+  type AutomationWeeklyReportPendingItem,
   type AutomationRunTraceEvent,
   cancelAutomationRun,
 } from "@/lib/automation-api"
 import {
   automationInteractionRepositoryFullName,
   buildAutomationProjectOutcomeChartData,
+  pendingItemProjectLabel,
   projectOutcomeForDisplay,
 } from "@/lib/automation-run-presentation"
 import { cn } from "@/lib/utils"
@@ -101,6 +103,9 @@ export function AutomationRunDetailDialog({
       setIsCancelling(false)
     }
   }
+
+  const pendingItems = run?.weekly_report_pending_items ?? []
+  const projectDetailsCount = (run?.projects?.length ?? 0) + pendingItems.length
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -169,7 +174,8 @@ export function AutomationRunDetailDialog({
                 <div>
                   <h3 className="font-medium">项目处理结果</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    共 {run.projects_total} 个，成功 {run.projects_succeeded} 个，失败 {run.projects_failed} 个
+                    共 {projectDetailsCount} 个，成功 {run.projects_succeeded} 个，失败 {run.projects_failed} 个
+                    {pendingItems.length ? `，待处理 ${pendingItems.length} 个` : ""}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -177,11 +183,12 @@ export function AutomationRunDetailDialog({
                   <Badge variant="outline">AI 调用：{run.ai_interaction_count ?? run.ai_interactions?.length ?? 0}</Badge>
                 </div>
               </div>
-              {run.projects ? (
+              {run.projects || pendingItems.length ? (
                 <ProjectOutcomeBreakdown
-                  projects={run.projects}
+                  projects={run.projects ?? []}
                   projectsTotal={run.projects_total}
                   jobType={run.job_type}
+                  pendingItemCount={pendingItems.length}
                 />
               ) : null}
               {run.error_summary ? (
@@ -193,13 +200,13 @@ export function AutomationRunDetailDialog({
               ) : null}
             </section>
 
-            {run.projects ? (
+            {run.projects || pendingItems.length ? (
               <section className="space-y-3">
                 <div className="flex items-center gap-2">
                   <GitCommitHorizontal className="h-4 w-4" />
                   <h3 className="font-medium">项目明细</h3>
                 </div>
-                {run.projects.length < run.projects_total ? (
+                {run.projects && run.projects.length < run.projects_total ? (
                   <Alert>
                     <TriangleAlert className="text-amber-600" />
                     <AlertDescription>
@@ -209,7 +216,7 @@ export function AutomationRunDetailDialog({
                     </AlertDescription>
                   </Alert>
                 ) : null}
-                {run.projects.length ? run.projects.map((project) => (
+                {run.projects?.length ? run.projects.map((project) => (
                   <article key={project.id} className="rounded-xl border p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -235,7 +242,11 @@ export function AutomationRunDetailDialog({
                       <ProjectWarnings warnings={project.warnings} />
                     ) : null}
                   </article>
-                )) : <Empty text="本次运行尚无项目处理明细。" />}
+                )) : null}
+                {pendingItems.map((item) => (
+                  <PendingProjectDetail key={item.id} item={item} />
+                ))}
+                {!run.projects?.length && !pendingItems.length ? <Empty text="本次运行尚无项目处理明细。" /> : null}
               </section>
             ) : null}
 
@@ -477,15 +488,17 @@ function ProjectOutcomeBreakdown({
   projects,
   projectsTotal,
   jobType,
+  pendingItemCount,
 }: {
   projects: AutomationRunProject[]
   projectsTotal: number
   jobType: string
+  pendingItemCount: number
 }) {
   const shouldReduceMotion = useReducedMotion()
   const data = React.useMemo(
-    () => buildAutomationProjectOutcomeChartData(projects, projectsTotal, jobType),
-    [jobType, projects, projectsTotal],
+    () => buildAutomationProjectOutcomeChartData(projects, projectsTotal, jobType, pendingItemCount),
+    [jobType, pendingItemCount, projects, projectsTotal],
   )
   const [activeSegmentId, setActiveSegmentId] = React.useState<string | null>(null)
   const activeSegment = data.find((segment) => segment.id === activeSegmentId) ?? null
@@ -587,6 +600,51 @@ function ProjectOutcomeBreakdown({
       </div>
     </div>
   )
+}
+
+function PendingProjectDetail({ item }: { item: AutomationWeeklyReportPendingItem }) {
+  return (
+    <article className="rounded-xl border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="font-medium">{pendingItemProjectLabel(item)}</h4>
+          <p className="mt-1 text-xs text-muted-foreground">
+            周报 {item.weekly_num} · 第 {item.segment_order} 条待处理片段
+          </p>
+        </div>
+        <ProjectOutcomeTag outcome="pending_review" />
+      </div>
+      <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+        <Detail label="处理状态" value={pendingItemStatusLabel(item)} />
+        <Detail label="同步状态" value={pendingItemSyncStatusLabel(item)} />
+        <Detail label="AI 置信度" value={item.ai_confidence === null ? "—" : `${item.ai_confidence}%`} />
+      </div>
+      {item.ai_summary ? (
+        <div className="mt-3 rounded-lg bg-muted/50 p-3 text-sm leading-6 whitespace-pre-wrap">
+          {item.ai_summary}
+        </div>
+      ) : null}
+      {item.original_content ? (
+        <p className="mt-2 text-xs text-muted-foreground whitespace-pre-wrap">原文片段：{item.original_content}</p>
+      ) : null}
+      {item.ai_reason ? <p className="mt-2 text-xs text-muted-foreground">待处理原因：{item.ai_reason}</p> : null}
+    </article>
+  )
+}
+
+function pendingItemStatusLabel(item: AutomationWeeklyReportPendingItem): string {
+  if (item.status === "resolved") return "已完成归类"
+  if (item.status === "sync_failed") return "归类完成，项目总结同步失败"
+  if (item.status === "ignored") return "已忽略"
+  if (item.status === "processing") return "处理中"
+  return "已落库待处理池中"
+}
+
+function pendingItemSyncStatusLabel(item: AutomationWeeklyReportPendingItem): string {
+  if (item.sync_status === "succeeded") return "已同步项目总结"
+  if (item.sync_status === "failed") return item.sync_error ? `同步失败：${item.sync_error}` : "同步失败"
+  if (item.sync_status === "pending") return "等待同步"
+  return "未开始"
 }
 
 function formatChartPercentage(value: number): string {
@@ -777,6 +835,13 @@ function projectOutcomePresentation(outcome: string): {
       icon: CircleCheck,
       backgroundClass: "bg-emerald-50",
       textClass: "text-[#57BC6C]",
+    },
+    pending_review: {
+      label: "已落库待处理池中",
+      description: "已落库待处理池中",
+      icon: Clock3,
+      backgroundClass: "bg-amber-50",
+      textClass: "text-amber-700",
     },
   }
   return presentations[outcome] ?? {
