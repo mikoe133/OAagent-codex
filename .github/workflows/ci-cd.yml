@@ -284,7 +284,8 @@ jobs:
           umask 077
           printf '%s\n' "$PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY" > "$private_key_path"
           remote_private_key="$DEPLOY_PATH/.secrets/project-progress-github-app-private-key.pem"
-          remote_command="$(printf 'install -d -m 700 -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH/.secrets" "$remote_private_key" "$remote_private_key")"
+          remote_private_key_next="${remote_private_key}.next"
+          remote_command="$(printf 'install -d -m 700 -- %q && umask 077 && cat > %q && chmod 600 %q && mv -f -- %q %q' "$DEPLOY_PATH/.secrets" "$remote_private_key_next" "$remote_private_key_next" "$remote_private_key_next" "$remote_private_key")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$private_key_path"
           remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml
@@ -436,7 +437,8 @@ jobs:
           umask 077
           printf '%s\n' "$PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY" > "$private_key_path"
           remote_private_key="$DEPLOY_PATH/.secrets/project-progress-github-app-private-key.pem"
-          remote_command="$(printf 'install -d -m 700 -- %q && umask 077 && cat > %q && chmod 600 %q' "$DEPLOY_PATH/.secrets" "$remote_private_key" "$remote_private_key")"
+          remote_private_key_next="${remote_private_key}.next"
+          remote_command="$(printf 'install -d -m 700 -- %q && umask 077 && cat > %q && chmod 600 %q && mv -f -- %q %q' "$DEPLOY_PATH/.secrets" "$remote_private_key_next" "$remote_private_key_next" "$remote_private_key_next" "$remote_private_key")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < "$private_key_path"
           remote_command="$(printf 'cat > %q' "$DEPLOY_PATH/compose.yml")"
           ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" "$remote_command" < compose.yml

@@ -42,6 +42,39 @@ test("uses preloaded images without contacting the registry", async (context) =>
   assert.match(dockerLog, / up /)
 })
 
+test("prepares the GitHub App private key for the non-root runtime user", async (context) => {
+  const fixture = await createFixture(context)
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:abc123",
+    webImage: "ghcr.io/example/oa-web:abc123",
+    skipImagePull: true,
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const dockerLog = await readFile(fixture.logPath, "utf8")
+  assert.match(
+    dockerLog,
+    /run --rm --user 0:0 --entrypoint \/bin\/sh --mount type=bind,src=.*project-progress-github-app-private-key\.pem,dst=\/run\/project-progress-github-app-private-key\.pem ghcr\.io\/example\/oa-agent:abc123/,
+  )
+  assert.match(dockerLog, /chown .*project-progress-github-app-private-key\.pem/)
+  assert.match(dockerLog, /chmod 0400 .*project-progress-github-app-private-key\.pem/)
+})
+
+test("rejects deployment when the GitHub App private key is missing", async (context) => {
+  const fixture = await createFixture(context)
+  await rm(path.join(fixture.deployDir, ".secrets"), { recursive: true, force: true })
+
+  const result = runDeploy(fixture, {
+    agentImage: "ghcr.io/example/oa-agent:abc123",
+    webImage: "ghcr.io/example/oa-web:abc123",
+    skipImagePull: true,
+  })
+
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /missing GitHub App private key/)
+  assert.doesNotMatch(await readFile(fixture.logPath, "utf8"), / up /)
+})
+
 test("removes stale release images while preserving both environments' rollback images", async (context) => {
   const fixture = await createFixture(context)
   const currentSha = "a".repeat(40)
@@ -251,6 +284,11 @@ async function createFixture(context) {
   const markerPath = path.join(root, "failed-once")
   const imagesPath = path.join(root, "docker-images")
   await Promise.all([mkdir(binDir), mkdir(deployDir)])
+  await mkdir(path.join(deployDir, ".secrets"))
+  await writeFile(
+    path.join(deployDir, ".secrets", "project-progress-github-app-private-key.pem"),
+    "test-private-key\n",
+  )
   await writeFile(
     path.join(deployDir, ".env"),
     "COMPOSE_PROJECT_NAME=oa-agent-test\nAGENT_PORT=3003\nWEB_PORT=3001\nOA_DOCKER_API_BASE_URL=http://oa.test\n",

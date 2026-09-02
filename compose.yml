@@ -132,6 +132,16 @@ services:
     command:
       - node
       - agent/dist/runtime/projectProgressWorker.js
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('node:fs').accessSync(process.env.PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH, require('node:fs').constants.R_OK)
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     security_opt:
       - no-new-privileges:true
     cap_drop:
