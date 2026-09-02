@@ -74,6 +74,27 @@ describe("GitHubRequestExecutor", () => {
     }
   });
 
+  it("includes safe GitHub error details and request id", async () => {
+    const executor = new GitHubRequestExecutor();
+
+    await assert.rejects(
+      executor.execute(
+        async () => Response.json(
+          { message: "Bad credentials\nBearer secret-token" },
+          {
+            status: 401,
+            headers: { "x-github-request-id": "request-123" },
+          },
+        ),
+        { repository: "example/api" },
+      ),
+      (error) =>
+        error instanceof GitHubRequestError &&
+        error.message ===
+          "GitHub 请求失败:HTTP 401:Bad credentials Bearer [REDACTED]:request_id=request-123",
+    );
+  });
+
   it("retries a primary rate-limit 403", async () => {
     let calls = 0;
     const executor = new GitHubRequestExecutor({ sleep: async () => undefined });
