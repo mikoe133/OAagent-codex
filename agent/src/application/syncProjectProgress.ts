@@ -24,6 +24,7 @@ import type {
   OaProject,
   ProjectProgressOaReader,
   ProjectProgressOaWriter,
+  WeeklyReportContentOaWriter,
 } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
 import {
@@ -898,6 +899,7 @@ async function executeProjectProgressSync(
     const evaluation = evaluations.get(entry.prepared.project.id)!;
     const { project } = entry.prepared;
     const summaries: ProjectProgressSummaryProposal[] = [];
+    let projectMutationsApplied = 0;
     if (evaluation.complete) {
       for (const plan of evaluation.groups) {
         if (plan.cached) {
@@ -981,10 +983,30 @@ async function executeProjectProgressSync(
           aiConfidence: proposal.aiConfidence,
           aiNote: proposal.aiNote,
         });
+        if (writer) {
+          try {
+            const weeklyWritten = await appendProjectWeeklyReportContent({
+              project,
+              proposal,
+              commits: plan.group.commits,
+              writer,
+              writeLimiter: oaWriteLimiter,
+              cancellationSignal: input.cancellationSignal,
+            });
+            mutationsApplied += weeklyWritten;
+            projectMutationsApplied += weeklyWritten;
+          } catch (error) {
+            if (error instanceof ProjectProgressLeaseLostError) {
+              throw error;
+            }
+            evaluation.warnings.push(
+              `weekly_report_write_failed:${proposal.summaryDate}:${errorMessage(error)}`,
+            );
+          }
+        }
       }
     }
 
-    let projectMutationsApplied = 0;
     if (input.shouldCancel?.()) {
       cancelled = true;
       evaluation.warnings.push("cancel_requested");
@@ -1308,6 +1330,182 @@ function combineRepositorySummaries(
     .map((result) => result.summary.replace(/[。；;]+$/u, "").trim())
     .filter(Boolean);
   return parts.length > 0 ? `${parts.join("；")}。` : "完成当日代码更新。";
+}
+
+function hasWeeklyReportWriter(
+  writer: ProjectProgressOaWriter,
+): writer is ProjectProgressOaWriter & WeeklyReportContentOaWriter {
+  const candidate = writer as Partial<WeeklyReportContentOaWriter>;
+  return typeof candidate.getWeeklyReportByWeek === "function" &&
+    typeof candidate.upsertWeeklyReportContent === "function";
+}
+
+async function appendProjectWeeklyReportContent(input: {
+  project: OaProject;
+  proposal: ProjectProgressSummaryProposal;
+  commits: NormalizedProjectProgressCommit[];
+  writer: ProjectProgressOaWriter;
+  writeLimiter: AsyncSemaphore;
+  cancellationSignal?: AbortSignal;
+}): Promise<number> {
+  const writer = input.writer;
+  if (!hasWeeklyReportWriter(writer)) {
+    return 0;
+  }
+  const authorGroups = groupCommitsByAuthor(input.commits);
+  if (authorGroups.length === 0) {
+    return 0;
+  }
+  const weeklyNum = weeklyNumFromSummaryDate(input.proposal.summaryDate);
+  const current = await input.writeLimiter.run(
+    () => writer.getWeeklyReportByWeek(weeklyNum, input.cancellationSignal),
+    input.cancellationSignal,
+  );
+  let content = current?.content ?? "";
+  let changed = false;
+  for (const group of authorGroups) {
+    const block = buildWeeklyReportAppendBlock({
+      projectId: input.project.id,
+      projectName: input.project.projectName,
+      summaryDate: input.proposal.summaryDate,
+      sourceDigest: input.proposal.sourceDigest,
+      authorKey: group.authorKey,
+      authorLabel: group.authorLabel,
+      summary: input.proposal.summary,
+      commitSubjects: group.commits.map((commit) => commit.subject),
+    });
+    const next = appendWeeklyReportContent(content, block);
+    if (next !== content) {
+      content = next;
+      changed = true;
+    }
+  }
+  if (!changed) {
+    return 0;
+  }
+  await input.writeLimiter.run(
+    () => writer.upsertWeeklyReportContent({
+      weeklyNum,
+      content,
+    }, input.cancellationSignal),
+    input.cancellationSignal,
+  );
+  return 1;
+}
+
+function groupCommitsByAuthor(
+  commits: NormalizedProjectProgressCommit[],
+): Array<{ authorKey: string; authorLabel: string; commits: NormalizedProjectProgressCommit[] }> {
+  const grouped = new Map<string, {
+    authorKey: string;
+    authorLabel: string;
+    commits: NormalizedProjectProgressCommit[];
+  }>();
+  for (const commit of commits) {
+    const identity = resolveCommitAuthorIdentity(commit);
+    const key = identity?.key ?? "unknown";
+    const label = identity?.label ?? "未知提交者";
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.commits.push(commit);
+      continue;
+    }
+    grouped.set(key, {
+      authorKey: key,
+      authorLabel: label,
+      commits: [commit],
+    });
+  }
+  return [...grouped.values()];
+}
+
+function resolveCommitAuthorIdentity(
+  commit: NormalizedProjectProgressCommit,
+): { key: string; label: string } | null {
+  const login = normalizedText(commit.authorLogin) ?? normalizedText(commit.committerLogin);
+  const name = normalizedText(commit.authorName) ?? normalizedText(commit.committerName);
+  const email = normalizedText(commit.authorEmail) ?? normalizedText(commit.committerEmail);
+  const keySource = login ?? email ?? name;
+  const label = name ?? login ?? email;
+  if (!keySource || !label) {
+    return null;
+  }
+  if (login) {
+    return { key: `login:${login.toLowerCase()}`, label };
+  }
+  if (email) {
+    return { key: `email:${email.toLowerCase()}`, label };
+  }
+  if (!name) {
+    return null;
+  }
+  return { key: `name:${name.toLowerCase()}`, label };
+}
+
+function buildWeeklyReportAppendBlock(input: {
+  projectId: number;
+  projectName: string;
+  summaryDate: string;
+  sourceDigest: string;
+  authorKey: string;
+  authorLabel: string;
+  summary: string;
+  commitSubjects: string[];
+}): string {
+  const subjects = [...new Set(
+    input.commitSubjects
+      .map((subject) => subject.trim())
+      .filter(Boolean),
+  )].slice(0, 5);
+  const marker = `<!-- oaagent-project-progress:${input.projectId}:${input.summaryDate}:${input.authorKey}:${input.sourceDigest} -->`;
+  const lines = [
+    marker,
+    `### ${input.summaryDate} | ${input.projectName} | ${input.authorLabel}`,
+    input.summary.trim(),
+  ];
+  if (subjects.length > 0) {
+    lines.push("", "提交：", ...subjects.map((subject) => `- ${subject}`));
+  }
+  return lines.join("\n").trimEnd();
+}
+
+function appendWeeklyReportContent(existingContent: string, block: string): string {
+  const marker = block.split(/\r?\n/, 1)[0]?.trim();
+  const normalizedBlock = block.trim();
+  if (!normalizedBlock) {
+    return existingContent.trimEnd();
+  }
+  if (marker && existingContent.includes(marker)) {
+    return existingContent.trimEnd();
+  }
+  const normalizedExisting = existingContent.trimEnd();
+  if (!normalizedExisting) {
+    return normalizedBlock;
+  }
+  return `${normalizedExisting}\n\n${normalizedBlock}`;
+}
+
+function weeklyNumFromSummaryDate(summaryDate: string): number {
+  const date = new Date(`${summaryDate}T12:00:00+08:00`);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error(`summary_date 无效:${summaryDate}`);
+  }
+  const utcDate = new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+  ));
+  const dayNumber = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - dayNumber);
+  const isoYear = utcDate.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+  return isoYear * 100 + week;
+}
+
+function normalizedText(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
 }
 
 function projectNeedsRetry(report: ProjectProgressProjectReport): boolean {

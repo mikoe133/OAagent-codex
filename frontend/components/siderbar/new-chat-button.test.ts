@@ -397,6 +397,7 @@ test("uses readable Chinese labels for project outcomes", () => {
   assert.match(runDetailSource, /label: "已完成评估并生成结果"/)
   assert.match(runDetailSource, /label: "项目已归档，已跳过处理"/)
   assert.match(runDetailSource, /label: "项目已归档，已后台处理"/)
+  assert.match(runDetailSource, /label: "已落库待处理池中"/)
   assert.match(runDetailSource, /label: "无 GitHub 地址，已跳过处理"/)
   assert.match(runDetailSource, /label: "仓库读取完成，当天无新增 Commit"/)
   assert.match(runDetailSource, /backgroundClass: "bg-sky-100"/)

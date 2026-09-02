@@ -211,6 +211,8 @@ export type AutomationRun = {
   duration_ms: number | null
   ai_interaction_count?: number
   projects?: AutomationRunProject[]
+  weekly_report_pending_item_count?: number
+  weekly_report_pending_items?: AutomationWeeklyReportPendingItem[]
   ai_interactions?: AutomationAiInteraction[]
   attempts?: AutomationRun[]
 }
@@ -235,6 +237,40 @@ export type AutomationRunProject = {
   started_at?: string | null
   finished_at?: string | null
   duration_ms: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type AutomationWeeklyReportPendingItem = {
+  id: number
+  run_id: string
+  trigger_event_id: string
+  source_report_id: string
+  source_version: number
+  weekly_num: number
+  owner_user_id: number | null
+  segment_key: string
+  segment_order: number
+  content_digest: string
+  original_content: string | null
+  ai_summary: string | null
+  ai_reason: string | null
+  reason_code: string
+  classification_source: string
+  referenced_project_id: number | null
+  candidate_project_ids: number[]
+  ai_confidence: number | null
+  status: string
+  resolution_type: string | null
+  resolved_project_id: number | null
+  resolution_batch_id: string | null
+  resolution_note: string | null
+  resolved_by: number | null
+  resolved_at: string | null
+  sync_status: string
+  sync_error: string | null
+  reprocessed_run_id: string | null
+  content_purged_at: string | null
   created_at: string
   updated_at: string
 }
@@ -520,7 +556,7 @@ export function listAutomationRuns(
 
 export function getAutomationRun(
   runId: string,
-  include: "attempts" | "projects,ai_interactions,attempts" = "projects,ai_interactions,attempts",
+  include: "attempts" | "projects,ai_interactions,attempts,weekly_report_pending_items" = "projects,ai_interactions,attempts,weekly_report_pending_items",
 ): Promise<AutomationRun> {
   return automationRequest<AutomationRun>(
     `/runs/${encodeURIComponent(runId)}?include=${encodeURIComponent(include)}`,

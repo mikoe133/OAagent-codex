@@ -8,6 +8,7 @@ import {
   startProjectProgressGitHubMcpServer,
   type ProjectProgressAgentLimits,
 } from "../src/infrastructure/github/projectProgressMcpServer.js";
+import { createStaticGitHubAuth } from "../src/infrastructure/github/githubAppAuth.js";
 import { AsyncSemaphore } from "../src/infrastructure/concurrency/asyncSemaphore.js";
 import { GitHubRequestExecutor } from "../src/infrastructure/github/githubRequestExecutor.js";
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
@@ -21,13 +22,14 @@ const limits: ProjectProgressAgentLimits = {
 };
 
 const candidates = [{ repositoryFullName: "example/api", sha: "abcdef123456" }];
+const githubAuth = createStaticGitHubAuth({ token: "github-secret" });
 
 describe("GitHubCommitDetailTool", () => {
   it("rejects a repository or SHA outside the current candidate set", async () => {
     let fetchCalls = 0;
     const tool = new GitHubCommitDetailTool(
       {
-        githubToken: "github-secret",
+        githubAuth,
         githubApiBaseUrl: "https://api.github.test",
         candidates,
         limits,
@@ -51,7 +53,7 @@ describe("GitHubCommitDetailTool", () => {
   it("sorts files and enforces filename, file-count, and patch budgets", async () => {
     const tool = new GitHubCommitDetailTool(
       {
-        githubToken: "github-secret",
+        githubAuth,
         githubApiBaseUrl: "https://api.github.test",
         candidates,
         limits,
@@ -118,7 +120,7 @@ describe("GitHubCommitDetailTool", () => {
     let fetchCalls = 0;
     const tool = new GitHubCommitDetailTool(
       {
-        githubToken: "github-secret",
+        githubAuth,
         githubApiBaseUrl: "https://api.github.test",
         candidates,
         limits,
@@ -146,7 +148,7 @@ describe("GitHubCommitDetailTool", () => {
   it("returns a safe error for GitHub failures", async () => {
     const tool = new GitHubCommitDetailTool(
       {
-        githubToken: "github-secret",
+        githubAuth,
         githubApiBaseUrl: "https://api.github.test",
         candidates,
         limits,
@@ -168,7 +170,7 @@ describe("GitHubCommitDetailTool", () => {
     const operationMetrics = new OperationMetricsRecorder();
     const tool = new GitHubCommitDetailTool(
       {
-        githubToken: "github-secret",
+        githubAuth,
         githubApiBaseUrl: "https://api.github.test",
         candidates,
         limits,
@@ -202,7 +204,7 @@ describe("GitHubCommitDetailTool", () => {
     let peakRequests = 0;
     const createTool = (repositoryFullName: string, sha: string) => new GitHubCommitDetailTool(
       {
-        githubToken: "github-secret",
+        githubAuth,
         githubApiBaseUrl: "https://api.github.test",
         candidates: [{ repositoryFullName, sha }],
         limits,
@@ -239,7 +241,7 @@ describe("GitHubCommitDetailTool", () => {
     });
     const tool = new GitHubCommitDetailTool(
       {
-        githubToken: "github-secret",
+        githubAuth,
         githubApiBaseUrl: "https://api.github.test",
         candidates,
         limits,
@@ -305,7 +307,7 @@ describe("GitHubCommitDetailTool", () => {
 describe("startProjectProgressGitHubMcpServer", () => {
   it("requires its one-time bearer token and serves the bounded tool", async () => {
     const server = await startProjectProgressGitHubMcpServer({
-      githubToken: "github-secret",
+      githubAuth,
       githubApiBaseUrl: "https://api.github.test",
       candidates,
       limits,

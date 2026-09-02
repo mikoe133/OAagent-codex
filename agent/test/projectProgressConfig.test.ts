@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { loadProjectProgressConfig } from "../src/config/projectProgressConfig.js";
 
+const githubAppEnvironment = {
+  PROJECT_PROGRESS_GITHUB_APP_ID: "4801810",
+  PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH: ".context/app.private-key.pem",
+};
+
 describe("loadProjectProgressConfig", () => {
   it("uses dedicated OA worker authentication settings", () => {
     const config = loadProjectProgressConfig(
@@ -14,7 +19,7 @@ describe("loadProjectProgressConfig", () => {
         OA_PROJECT_SYNC_TOKEN: "worker-token",
         OA_PROJECT_SYNC_TOKEN_HEADER: "X-Worker-Token",
         OA_PROJECT_SYNC_TOKEN_PREFIX: "Token",
-        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        ...githubAppEnvironment,
         NEXTTOKEN_API_KEY: "model-token",
       },
       "/srv/oa-agent",
@@ -42,6 +47,11 @@ describe("loadProjectProgressConfig", () => {
       maxRequestsPerRepository: 2_000,
       maxRequestsPerRun: 20_000,
     });
+    assert.deepEqual(config.githubAuth, {
+      type: "app",
+      appId: "4801810",
+      privateKeyPath: "/srv/oa-agent/.context/app.private-key.pem",
+    });
     assert.equal(
       config.workspaceRoot,
       "/srv/oa-agent/.context/project-progress-workspaces",
@@ -63,7 +73,7 @@ describe("loadProjectProgressConfig", () => {
         PROJECT_SYNC_API_BASE_URL: "https://old-oa.example.test",
         OA_PROJECT_SYNC_TOKEN: "worker-token",
         OA_AGENT_AUTOMATION_TOKEN: "automation-token",
-        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        ...githubAppEnvironment,
         NEXTTOKEN_API_KEY: "model-token",
       },
       "/srv/oa-agent",
@@ -78,7 +88,7 @@ describe("loadProjectProgressConfig", () => {
       {
         OA_API_BASE_URL: "https://legacy-oa.example.test",
         OA_PROJECT_SYNC_TOKEN: "worker-token",
-        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        ...githubAppEnvironment,
         NEXTTOKEN_API_KEY: "model-token",
       },
       "/srv/oa-agent",
@@ -86,6 +96,39 @@ describe("loadProjectProgressConfig", () => {
 
     assert.equal(config.automation.baseUrl, "https://legacy-oa.example.test");
     assert.equal(config.oa.baseUrl, "https://legacy-oa.example.test");
+  });
+
+  it("loads GitHub App credentials", () => {
+    const config = loadProjectProgressConfig(
+      {
+        OA_API_BASE_URL: "https://legacy-oa.example.test",
+        OA_PROJECT_SYNC_TOKEN: "worker-token",
+        ...githubAppEnvironment,
+        NEXTTOKEN_API_KEY: "model-token",
+      },
+      "/srv/oa-agent",
+    );
+
+    assert.deepEqual(config.githubAuth, {
+      type: "app",
+      appId: "4801810",
+      privateKeyPath: "/srv/oa-agent/.context/app.private-key.pem",
+    });
+  });
+
+  it("rejects legacy GitHub PAT credentials", () => {
+    assert.throws(
+      () => loadProjectProgressConfig(
+        {
+          OA_API_BASE_URL: "https://legacy-oa.example.test",
+          OA_PROJECT_SYNC_TOKEN: "worker-token",
+          PROJECT_PROGRESS_GITHUB_TOKEN: "legacy-token",
+          NEXTTOKEN_API_KEY: "model-token",
+        },
+        "/srv/oa-agent",
+      ),
+      /PROJECT_PROGRESS_GITHUB_APP_ID/,
+    );
   });
 
   it("rejects test writes without an explicit unsafe acknowledgement", () => {
@@ -102,7 +145,7 @@ describe("loadProjectProgressConfig", () => {
     const environment = {
       OA_API_BASE_URL: "http://127.0.0.1:3002",
       OA_PROJECT_SYNC_TOKEN: "worker-token",
-      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      ...githubAppEnvironment,
       NEXTTOKEN_API_KEY: "model-token",
       PROJECT_PROGRESS_WRITE_ENABLED: "true",
       PROJECT_PROGRESS_UNSAFE_TEST_WRITES: "I_UNDERSTAND_TEST_ONLY",
@@ -124,7 +167,7 @@ describe("loadProjectProgressConfig", () => {
     const environment = {
       OA_API_BASE_URL: "https://oa.example.com",
       OA_PROJECT_SYNC_TOKEN: "worker-token",
-      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      ...githubAppEnvironment,
       NEXTTOKEN_API_KEY: "model-token",
       PROJECT_PROGRESS_WRITE_ENABLED: "true",
       PROJECT_PROGRESS_PRODUCTION_WRITES: "I_UNDERSTAND_PRODUCTION_WRITES",
@@ -146,7 +189,7 @@ describe("loadProjectProgressConfig", () => {
       {
         OA_API_BASE_URL: "https://oa.example.com",
         OA_PROJECT_SYNC_TOKEN: "worker-token",
-        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        ...githubAppEnvironment,
         NEXTTOKEN_API_KEY: "nexttoken-key",
         OPENROUTER_API_KEY: "openrouter-key",
         OPENROUTER_API_BASE_URL: "https://openrouter.example/v1",
@@ -180,7 +223,7 @@ describe("loadProjectProgressConfig", () => {
         {
           OA_API_BASE_URL: "https://oa.example.com",
           OA_PROJECT_SYNC_TOKEN: "worker-token",
-          PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+          ...githubAppEnvironment,
           OPENROUTER_API_KEY: "openrouter-key",
         },
         "/tmp",
@@ -212,6 +255,15 @@ describe("loadProjectProgressConfig", () => {
     assert.throws(
       () => loadProjectProgressConfig({
         OA_API_BASE_URL: "http://127.0.0.1:3002",
+        OA_PROJECT_SYNC_TOKEN: "worker-token",
+        PROJECT_PROGRESS_GITHUB_APP_ID: "4801810",
+        NEXTTOKEN_API_KEY: "model-token",
+      }, "/tmp"),
+      /PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY_PATH/,
+    );
+    assert.throws(
+      () => loadProjectProgressConfig({
+        OA_API_BASE_URL: "http://127.0.0.1:3002",
         PROJECT_PROGRESS_LEASE_SECONDS: "60",
         PROJECT_PROGRESS_HEARTBEAT_SECONDS: "60",
       }, "/tmp"),
@@ -221,7 +273,7 @@ describe("loadProjectProgressConfig", () => {
       () => loadProjectProgressConfig({
         OA_API_BASE_URL: "http://127.0.0.1:3002",
         OA_PROJECT_SYNC_TOKEN: "worker-token",
-        PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+        ...githubAppEnvironment,
         NEXTTOKEN_API_KEY: "model-token",
         PROJECT_PROGRESS_AGENT_MAX_PATCH_CHARS_PER_FILE: "2000",
         PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS: "1000",
@@ -231,7 +283,7 @@ describe("loadProjectProgressConfig", () => {
     const concurrentWrites = loadProjectProgressConfig({
       OA_API_BASE_URL: "http://127.0.0.1:3002",
       OA_PROJECT_SYNC_TOKEN: "worker-token",
-      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      ...githubAppEnvironment,
       NEXTTOKEN_API_KEY: "model-token",
       PROJECT_PROGRESS_OA_WRITE_CONCURRENCY: "2",
     }, "/tmp");
@@ -242,7 +294,7 @@ describe("loadProjectProgressConfig", () => {
     const config = loadProjectProgressConfig({
       OA_API_BASE_URL: "https://oa.example.test",
       OA_PROJECT_SYNC_TOKEN: "worker-token",
-      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      ...githubAppEnvironment,
       NEXTTOKEN_API_KEY: "model-token",
       PROJECT_PROGRESS_GITHUB_CONCURRENCY: "8",
       PROJECT_PROGRESS_AGENT_CONCURRENCY: "3",
@@ -274,7 +326,7 @@ describe("loadProjectProgressConfig", () => {
     const environment = {
       OA_API_BASE_URL: "https://oa.example.test",
       OA_PROJECT_SYNC_TOKEN: "worker-token",
-      PROJECT_PROGRESS_GITHUB_TOKEN: "github-token",
+      ...githubAppEnvironment,
       NEXTTOKEN_API_KEY: "model-token",
     };
 

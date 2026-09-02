@@ -20,6 +20,12 @@ export type ProjectProgressCommit = {
   sha: string;
   committedAt: string;
   subject: string;
+  authorLogin?: string | null;
+  authorName?: string | null;
+  authorEmail?: string | null;
+  committerLogin?: string | null;
+  committerName?: string | null;
+  committerEmail?: string | null;
   files?: string[];
 };
 
