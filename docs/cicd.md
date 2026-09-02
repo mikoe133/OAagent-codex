@@ -94,7 +94,7 @@ Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份
 
 两个部署 Job 都通过 `${{ secrets.OA_KNOWLEDGE_BASE_API_KEY }}` 读取同一个 Repository Secret。Secret 仅在部署 Job 中生成服务器运行时 `.env`，再由 Compose 注入 `agent` 容器，不会写入 Docker 镜像，也不会提供给 PR、构建镜像 Job、Web 或 Worker 容器。
 
-`PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` 不写入 `.env`。Workflow 会通过 SSH 将它写到服务器部署目录下的 `.secrets/project-progress-github-app-private-key.pem`，权限为 `600`，再由 Compose 只读挂载给 `project-progress-worker`。Worker 环境变量只包含 `PROJECT_PROGRESS_GITHUB_APP_ID` 和容器内私钥路径。
+`PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` 不写入 `.env`。Workflow 会通过 SSH 将它原子写到服务器部署目录下的 `.secrets/project-progress-github-app-private-key.pem`；部署脚本使用目标 Agent 镜像将文件设置为运行时 `node` 用户所有和 `0400`，再由 Compose 只读挂载给 `project-progress-worker`。Worker 环境变量只包含 `PROJECT_PROGRESS_GITHUB_APP_ID` 和容器内私钥路径，健康检查会在发布完成前验证私钥可读。
 
 当前单 `agent` 实例使用进程内手动触发限流，不读取 `REDIS_URL`。在代码接入共享 Redis 前不要新增一个看似生效但实际未使用的 Redis Secret。
 

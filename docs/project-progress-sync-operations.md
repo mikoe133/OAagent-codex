@@ -51,7 +51,7 @@ PROJECT_PROGRESS_AGENT_MAX_TOTAL_PATCH_CHARS=12000
 
 GitHub 读取只支持 GitHub App。App 只需安装到目标仓库，并授予 `Metadata: Read` 和 `Contents: Read`。两个 OA token 用途不同，不能互换，也不能使用用户 `sessionid`。
 
-GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Compose 部署默认把服务器 `.secrets/project-progress-github-app-private-key.pem` 挂载到容器 `/run/secrets/project-progress-github-app-private-key.pem`；该文件应 `chmod 600`，目录应 `chmod 700`。Worker 运行时只缓存短期 installation token。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables。
+GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Workflow 先以 `600` 原子上传服务器 `.secrets/project-progress-github-app-private-key.pem`，部署脚本再用目标 Agent 镜像把文件所有者调整为容器运行时 `node` 用户并设置为 `0400`；Compose 将它只读挂载到容器 `/run/secrets/project-progress-github-app-private-key.pem`。Worker 健康检查会验证该路径可读，运行时只缓存短期 installation token。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables。
 
 AI interaction 的 `response_payload_sanitized` 会记录 `prefetched_detail_calls`、`detail_calls`、`github_detail_requests`、`files_returned`、`patch_chars_returned` 和 `quality_retries`。判断模型是否真的看过代码证据，应以这些审计字段为准，不能依据模型生成的备注推断。详情失败或发生文件/Patch 裁剪时，Worker 会由代码追加对应 limitation。
 

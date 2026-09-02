@@ -100,7 +100,7 @@ GitHub 仓库 -> Settings -> Secrets and variables -> Actions -> Secrets
 
 用户 OA token 会在用户登录后自动取得,并由 Web 和 Agent 共用、验证。
 
-`PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` 不会写入服务器 `.env`。Workflow 会把它写到部署目录的 `.secrets/project-progress-github-app-private-key.pem`，权限为 `600`；Compose 再只读挂载到 Worker 容器内的 `/run/secrets/project-progress-github-app-private-key.pem`。
+`PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` 不会写入服务器 `.env`。Workflow 会把它以 `600` 原子写到部署目录的 `.secrets/project-progress-github-app-private-key.pem`，部署脚本随后将文件设置为目标镜像运行时 `node` 用户所有和 `0400`；Compose 再只读挂载到 Worker 容器内的 `/run/secrets/project-progress-github-app-private-key.pem`，并在健康检查中验证可读性。
 
 ## 第 4 步:配置 GitHub Repository Variables
 
