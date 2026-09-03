@@ -253,21 +253,19 @@ export class GitHubRestProjectReader implements ProjectProgressGitHubReader {
       url.searchParams.set(name, String(value));
     }
     const request = async () => {
+      const authorization = await this.auth.getAuthorizationHeader(repository, signal);
       const response = await this.requestExecutor.execute(
-        async () => {
-          const authorization = await this.auth.getAuthorizationHeader(repository, signal);
-          return this.fetchImpl(url, {
-            headers: {
-              accept: "application/vnd.github+json",
-              authorization,
-              "x-github-api-version": "2022-11-28",
-              "user-agent": "oa-project-progress-worker",
-            },
-            signal: signal
-              ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
-              : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
-          });
-        },
+        () => this.fetchImpl(url, {
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization,
+            "x-github-api-version": "2022-11-28",
+            "user-agent": "oa-project-progress-worker",
+          },
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)])
+            : AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS),
+        }),
         {
           repository,
           ...(acceptedStatuses.length > 0 ? { acceptedStatuses } : {}),

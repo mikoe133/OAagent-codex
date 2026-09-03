@@ -8,6 +8,7 @@ import { PROJECT_PROGRESS_ENDPOINTS } from "../observability/operationMetrics.js
 const GITHUB_API_VERSION = "2022-11-28";
 const RESPONSE_LIMIT_BYTES = 10 * 1024 * 1024;
 const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1_000;
+const GITHUB_APP_REQUEST_TIMEOUT_MS = 20_000;
 
 type GitHubFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -396,6 +397,12 @@ export class GitHubAppAuth implements GitHubRequestAuth {
     for (const [key, value] of Object.entries(input.query ?? {})) {
       url.searchParams.set(key, String(value));
     }
+    const requestSignal = input.signal
+      ? AbortSignal.any([
+          input.signal,
+          AbortSignal.timeout(GITHUB_APP_REQUEST_TIMEOUT_MS),
+        ])
+      : AbortSignal.timeout(GITHUB_APP_REQUEST_TIMEOUT_MS);
     const request = async () => {
       const response = await this.requestExecutor.execute(
         () => this.fetchImpl(url, {
@@ -406,11 +413,11 @@ export class GitHubAppAuth implements GitHubRequestAuth {
             "x-github-api-version": GITHUB_API_VERSION,
             "user-agent": "oa-project-progress-worker",
           },
-          ...(input.signal ? { signal: input.signal } : {}),
+          signal: requestSignal,
         }),
         {
           repository: input.repositoryKey,
-          ...(input.signal ? { signal: input.signal } : {}),
+          signal: requestSignal,
           ...(input.acceptedStatuses ? { acceptedStatuses: input.acceptedStatuses } : {}),
         },
       );

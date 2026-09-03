@@ -554,7 +554,7 @@ async function executeProjectProgressSync(
         ),
         message: input.cancellationSignal?.aborted
           ? "已停止读取"
-          : "仓库读取失败",
+          : `仓库读取失败:${traceErrorMessage(error)}`,
       });
     } finally {
       completedRepositoryReads += 1;
@@ -1871,4 +1871,13 @@ function incompleteReport(project: OaProject, warning: string): ProjectProgressP
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function traceErrorMessage(error: unknown): string {
+  return errorMessage(error)
+    .replace(/Authorization:\s*Bearer\s+\S+/giu, "Authorization: Bearer [REDACTED]")
+    .replace(/Bearer\s+\S+/giu, "Bearer [REDACTED]")
+    .replace(/[\r\n]+/gu, " ")
+    .trim()
+    .slice(0, 500);
 }
