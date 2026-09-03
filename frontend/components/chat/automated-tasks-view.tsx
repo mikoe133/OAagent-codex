@@ -279,10 +279,6 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
     await loadOverview()
   }, [loadOverview])
 
-  const handleTaskDeleted = React.useCallback(async () => {
-    await loadOverview()
-  }, [loadOverview])
-
   const handleTagsChanged = React.useCallback((nextTags: AutomationTag[]) => {
     setTags(nextTags)
     void listAutomationJobs({ includeDeleted: true }).then((jobPage) => {
@@ -572,7 +568,6 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
         tags={tags}
         runs={selectedTaskRuns}
         onTaskChanged={handleTaskChanged}
-        onTaskDeleted={handleTaskDeleted}
         onTagsChanged={handleTagsChanged}
         onTriggered={handleTriggered}
         onRunSelected={openRunDetail}

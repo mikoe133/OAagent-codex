@@ -150,9 +150,8 @@ describe("ProjectProgressOaClient", () => {
     assert.equal(calls[1]?.signal, controller.signal);
   });
 
-  it("reads and writes weekly report content through the weekly report endpoint", async () => {
+  it("appends weekly report content through the targeted project-sync endpoint", async () => {
     const requested: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
-    let weeklyReads = 0;
     const client = new ProjectProgressOaClient(
       {
         baseUrl: "https://oa.example.test",
@@ -170,66 +169,46 @@ describe("ProjectProgressOaClient", () => {
             ? { body: JSON.parse(String(init.body)) as Record<string, unknown> }
             : {}),
         });
-        if (init?.method === "POST") {
-          return Response.json({
-            code: 200,
-            success: true,
-            data: {
-              weekly_num: 202635,
-              content: "existing\n\nnew block",
-            },
-          });
-        }
-        weeklyReads += 1;
         return Response.json({
           code: 200,
           success: true,
-          data: weeklyReads === 1
-            ? {
-                id: "weekly-report-1",
-                weekly_num: 202635,
-                owner_id: 42,
-                content: "existing",
-                version: 3,
-                updated_at: "2026-08-27T09:30:00Z",
-                deleted: false,
-              }
-            : {
-                id: "weekly-report-1",
-                weekly_num: 202635,
-                owner_id: 42,
-                content: "existing\n\nnew block",
-                version: 4,
-                updated_at: "2026-08-27T09:35:00Z",
-                deleted: false,
-              },
+          data: {
+            report_id: 42,
+            weekly_num: 202635,
+            owner_id: 7,
+            github_id: "alice",
+            appended: true,
+          },
         });
       },
       undefined,
       { getRetry: { random: () => 0 } },
     );
 
-    const before = await client.getWeeklyReportByWeek(202635);
-    const after = await client.upsertWeeklyReportContent({
+    const result = await client.appendWeeklyReportContent({
       weeklyNum: 202635,
-      content: "existing\n\nnew block",
+      githubId: "alice",
+      marker: "<!-- marker -->",
+      content: "<!-- marker -->\nnew block",
     });
 
-    assert.equal(before.content, "existing");
-    assert.equal(after.content, "existing\n\nnew block");
-    assert.deepEqual(requested[0], {
-      method: "GET",
-      url: "https://oa.example.test/weekly-report/report?weekly_num=202635&alias=default",
+    assert.deepEqual(result, {
+      reportId: 42,
+      weeklyNum: 202635,
+      ownerId: 7,
+      githubId: "alice",
+      appended: true,
     });
-    assert.deepEqual(requested[1], {
+    assert.deepEqual(requested[0], {
       method: "POST",
-      url: "https://oa.example.test/weekly-report/report?alias=default",
+      url: "https://oa.example.test/internal/project-sync/weekly-reports/append",
       body: {
         weekly_num: 202635,
-        content: "existing\n\nnew block",
+        github_id: "alice",
+        marker: "<!-- marker -->",
+        content: "<!-- marker -->\nnew block",
       },
     });
-    assert.equal(weeklyReads, 2);
   });
 
   it("aborts an in-flight OA read with the caller signal", async () => {

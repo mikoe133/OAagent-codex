@@ -426,12 +426,12 @@ test("polls and renders live automation run trace stages", () => {
   assert.match(runDetailSource, /实时更新/)
 })
 
-test("soft deletes jobs and keeps deleted task history readable", () => {
+test("keeps deleted task history readable without exposing task deletion", () => {
   assert.match(automatedTasksSource, /includeDeleted: true/)
   assert.match(automatedTasksSource, /job\.deleted/)
   assert.match(automatedTasksSource, /deletedCards/)
-  assert.match(taskDialogSource, /deleteAutomationJob\(task\.id, task\.version\)/)
-  assert.match(taskDialogSource, /确认软删除/)
+  assert.doesNotMatch(taskDialogSource, /deleteAutomationJob\(task\.id, task\.version\)/)
+  assert.doesNotMatch(taskDialogSource, /删除任务/)
   assert.match(taskDialogSource, /任务已于[\s\S]*?软删除/)
   assert.match(taskDialogSource, /历史运行和审计仍可查询/)
   assert.match(taskDialogSource, /isDeleted \? "关闭" : "取消"/)

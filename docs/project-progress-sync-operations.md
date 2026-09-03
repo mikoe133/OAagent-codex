@@ -53,6 +53,8 @@ GitHub 读取只支持 GitHub App。App 只需安装到目标仓库，并授予 
 
 GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Workflow 先以 `600` 原子上传服务器 `.secrets/project-progress-github-app-private-key.pem`，部署脚本再用目标 Agent 镜像把文件所有者调整为容器运行时 `node` 用户并设置为 `0400`；Compose 将它只读挂载到容器 `/run/secrets/project-progress-github-app-private-key.pem`。Worker 健康检查会验证该路径可读，运行时只缓存短期 installation token。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables。
 
+每日总结任务会在成功读取 GitHub 时持久化当天 Commit 的作者身份。某个仓库后续因 GitHub App 未授权而返回 `401` 时，如果本地仍有同日项目总结和对应 Commit 作者证据，任务会跳过 AI 重算；优先使用本地总结草稿，没有本地草稿时读取 OA 已有的同日项目总结，然后继续执行周报增量追加。没有作者证据或已有总结时不会猜测人员或内容，也不会写入周报，Trace 会记录 `weekly_report_skipped_no_commit_authors`。周报写入使用 OA 的 `POST /internal/project-sync/weekly-reports/append`，由 OA 按 `user_profile.github_id` 定位提交者，锁定该用户的周报行，并用 marker 保证重试幂等。该接口必须和 OAagent 使用同一 `OA_PROJECT_SYNC_TOKEN`，部署 OA 端后才会生效。
+
 AI interaction 的 `response_payload_sanitized` 会记录 `prefetched_detail_calls`、`detail_calls`、`github_detail_requests`、`files_returned`、`patch_chars_returned` 和 `quality_retries`。判断模型是否真的看过代码证据，应以这些审计字段为准，不能依据模型生成的备注推断。详情失败或发生文件/Patch 裁剪时，Worker 会由代码追加对应 limitation。
 
 一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 GitHub App 执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。周报项目总结写入使用独立的项目 OA 调度器，最多同时写入配置数量个不同项目；同一项目同一周次仍只有一个写入任务。运行 claim、heartbeat、Trace、项目审计和终态更新使用独立控制面调度器，不会被项目写入并发放大。容器建议至少分配 `2 CPU / 3GB`。

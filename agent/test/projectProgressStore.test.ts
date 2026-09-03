@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
+import type { ProjectProgressCommit } from "../src/domain/projectProgress.js";
 import { ProjectProgressStore } from "../src/infrastructure/persistence/projectProgressStore.js";
 
 const temporaryDirectories: string[] = [];
@@ -156,6 +157,31 @@ describe("ProjectProgressStore", () => {
       aiConfidence: 90,
       aiNote: "基于 1 条提交。",
     });
+    store.close();
+  });
+
+  it("persists commit authors for later weekly report recovery", async () => {
+    const store = await createStore();
+    const commits: ProjectProgressCommit[] = [{
+      repositoryId: 9001,
+      repositoryFullName: "alpha/api",
+      sha: "abc123",
+      committedAt: "2026-07-24T10:00:00.000Z",
+      subject: "完成接口改造",
+      authorLogin: "alice",
+      authorName: "Alice",
+      authorEmail: "alice@example.test",
+      committerLogin: "alice",
+      committerName: "Alice",
+      committerEmail: "alice@example.test",
+    }];
+
+    store.saveProcessedCommits(commits, "2026-07-24", "2026-07-24T12:00:00.000Z");
+    assert.deepEqual(
+      store.getProcessedCommits("2026-07-24", ["alpha/api"]),
+      commits,
+    );
+    assert.deepEqual(store.getProcessedCommits("2026-07-25", ["alpha/api"]), []);
     store.close();
   });
 

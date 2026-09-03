@@ -6,6 +6,7 @@ import {
   PROJECT_PROGRESS_TIME_ZONE,
   type NormalizedProjectProgressCommit,
   type ProjectDailyCommitGroup,
+  type ProjectProgressCommit,
   type ProjectProgressSummaryScope,
   type ProjectStatus,
 } from "../domain/projectProgress.js";
@@ -199,6 +200,8 @@ type ProjectProgressStateSink = {
     repositoryId: number,
     watermark: string,
   ): void;
+  saveProcessedCommits?(commits: ProjectProgressCommit[], summaryDate: string, firstSeenAt: string): void;
+  getProcessedCommits?(summaryDate: string, repositoryFullNames: string[]): ProjectProgressCommit[];
   saveDailySummaryDraft?(input: {
     projectId: number;
     summaryDate: string;
@@ -641,6 +644,13 @@ async function executeProjectProgressSync(
         snapshots.flatMap((snapshot) => snapshot.commits),
         input.observedAt,
       );
+      for (const group of allGroups) {
+        input.store?.saveProcessedCommits?.(
+          group.commits,
+          group.summaryDate,
+          input.observedAt.toISOString(),
+        );
+      }
       const selectedGroups = selectSummaryGroups(
         allGroups,
         summaryScope,
@@ -682,6 +692,79 @@ async function executeProjectProgressSync(
             });
           }
         }
+      }
+    } else if (
+      !input.forceRegenerateSummaries &&
+      writeMode === "production" &&
+      input.store &&
+      input.store.getProcessedCommits
+    ) {
+      const existing = input.store.getDailySummaryDraft?.(
+        project.id,
+        currentBusinessDate,
+      );
+      const historicalCommits = input.store.getProcessedCommits(
+        currentBusinessDate,
+        repositories.map((repository) => repository.fullName),
+      );
+      if (historicalCommits.length > 0) {
+        const historicalGroup = buildProjectDailyCommitGroups(
+          historicalCommits,
+          input.observedAt,
+        ).find((group) => group.summaryDate === currentBusinessDate);
+        if (historicalGroup) {
+          const localCached = existing &&
+            existing.sourceDigest === historicalGroup.sourceDigest &&
+            !isInvalidProjectProgressSummary(existing.summary)
+            ? {
+              summaryDate: currentBusinessDate,
+              commitCount: historicalGroup.commits.length,
+              sourceDigest: historicalGroup.sourceDigest,
+              summary: existing.summary,
+              aiConfidence: existing.aiConfidence,
+              aiNote: existing.aiNote,
+            }
+            : null;
+          let cached = localCached;
+          if (!cached && writer) {
+            try {
+              const oaSummaries = await writer.listCommitSummaries(
+                project.id,
+                currentBusinessDate,
+                input.cancellationSignal,
+              );
+              const oaSummary = oaSummaries.find((summary) =>
+                summary.summaryDate === currentBusinessDate &&
+                !isInvalidProjectProgressSummary(summary.summary)
+              );
+              if (oaSummary) {
+                cached = {
+                  summaryDate: currentBusinessDate,
+                  commitCount: historicalGroup.commits.length,
+                  sourceDigest: historicalGroup.sourceDigest,
+                  summary: oaSummary.summary,
+                  aiConfidence: oaSummary.aiConfidence,
+                  aiNote: oaSummary.aiNote,
+                };
+                warnings.push(`oa_existing_summary:${currentBusinessDate}`);
+              }
+            } catch (error) {
+              warnings.push(
+                `weekly_report_existing_summary_read_failed:${currentBusinessDate}:${errorMessage(error)}`,
+              );
+            }
+          }
+          if (cached) {
+            groups.push({ group: historicalGroup, cached });
+            warnings.push(
+              `historical_commit_authors:${currentBusinessDate}:${historicalCommits.length}`,
+            );
+          }
+        }
+      } else if (existing) {
+        warnings.push(
+          `weekly_report_skipped_no_commit_authors:${currentBusinessDate}`,
+        );
       }
     }
     evaluations.set(project.id, {
@@ -900,10 +983,48 @@ async function executeProjectProgressSync(
     const { project } = entry.prepared;
     const summaries: ProjectProgressSummaryProposal[] = [];
     let projectMutationsApplied = 0;
-    if (evaluation.complete) {
+    const appendWeeklyReport = async (
+      proposal: ProjectProgressSummaryProposal,
+      commits: NormalizedProjectProgressCommit[],
+    ): Promise<{ appended: number; skipped: number }> => {
+      if (!writer) {
+        return { appended: 0, skipped: 0 };
+      }
+      try {
+        const result = await appendProjectWeeklyReportContent({
+          project,
+          proposal,
+          commits,
+          writer,
+          writeLimiter: oaWriteLimiter,
+          cancellationSignal: input.cancellationSignal,
+        });
+        if (result.skipped > 0) {
+          evaluation.warnings.push(
+            `weekly_report_skipped_no_github_identity:${proposal.summaryDate}:${result.skipped}`,
+          );
+        }
+        return result;
+      } catch (error) {
+        if (error instanceof ProjectProgressLeaseLostError) {
+          throw error;
+        }
+        evaluation.warnings.push(
+          `weekly_report_write_failed:${proposal.summaryDate}:${errorMessage(error)}`,
+        );
+        return { appended: 0, skipped: 0 };
+      }
+    };
+    if (evaluation.complete || evaluation.groups.some((plan) => plan.cached)) {
       for (const plan of evaluation.groups) {
         if (plan.cached) {
           summaries.push(plan.cached);
+          const weeklyResult = await appendWeeklyReport(plan.cached, plan.group.commits);
+          mutationsApplied += weeklyResult.appended;
+          projectMutationsApplied += weeklyResult.appended;
+          continue;
+        }
+        if (!evaluation.complete) {
           continue;
         }
         const expectedRepositoryKeys = [...groupCommitsByRepository(
@@ -983,27 +1104,9 @@ async function executeProjectProgressSync(
           aiConfidence: proposal.aiConfidence,
           aiNote: proposal.aiNote,
         });
-        if (writer) {
-          try {
-            const weeklyWritten = await appendProjectWeeklyReportContent({
-              project,
-              proposal,
-              commits: plan.group.commits,
-              writer,
-              writeLimiter: oaWriteLimiter,
-              cancellationSignal: input.cancellationSignal,
-            });
-            mutationsApplied += weeklyWritten;
-            projectMutationsApplied += weeklyWritten;
-          } catch (error) {
-            if (error instanceof ProjectProgressLeaseLostError) {
-              throw error;
-            }
-            evaluation.warnings.push(
-              `weekly_report_write_failed:${proposal.summaryDate}:${errorMessage(error)}`,
-            );
-          }
-        }
+        const weeklyResult = await appendWeeklyReport(proposal, plan.group.commits);
+        mutationsApplied += weeklyResult.appended;
+        projectMutationsApplied += weeklyResult.appended;
       }
     }
 
@@ -1336,8 +1439,7 @@ function hasWeeklyReportWriter(
   writer: ProjectProgressOaWriter,
 ): writer is ProjectProgressOaWriter & WeeklyReportContentOaWriter {
   const candidate = writer as Partial<WeeklyReportContentOaWriter>;
-  return typeof candidate.getWeeklyReportByWeek === "function" &&
-    typeof candidate.upsertWeeklyReportContent === "function";
+  return typeof candidate.appendWeeklyReportContent === "function";
 }
 
 async function appendProjectWeeklyReportContent(input: {
@@ -1347,64 +1449,79 @@ async function appendProjectWeeklyReportContent(input: {
   writer: ProjectProgressOaWriter;
   writeLimiter: AsyncSemaphore;
   cancellationSignal?: AbortSignal;
-}): Promise<number> {
+}): Promise<{ appended: number; skipped: number }> {
   const writer = input.writer;
   if (!hasWeeklyReportWriter(writer)) {
-    return 0;
+    return { appended: 0, skipped: 0 };
   }
   const authorGroups = groupCommitsByAuthor(input.commits);
-  if (authorGroups.length === 0) {
-    return 0;
+  if (authorGroups.groups.length === 0) {
+    return { appended: 0, skipped: authorGroups.skipped };
   }
   const weeklyNum = weeklyNumFromSummaryDate(input.proposal.summaryDate);
-  const current = await input.writeLimiter.run(
-    () => writer.getWeeklyReportByWeek(weeklyNum, input.cancellationSignal),
-    input.cancellationSignal,
-  );
-  let content = current?.content ?? "";
-  let changed = false;
-  for (const group of authorGroups) {
+  let appended = 0;
+  for (const group of authorGroups.groups) {
     const block = buildWeeklyReportAppendBlock({
-      projectId: input.project.id,
       projectName: input.project.projectName,
       summaryDate: input.proposal.summaryDate,
-      sourceDigest: input.proposal.sourceDigest,
       authorKey: group.authorKey,
       authorLabel: group.authorLabel,
+      marker: buildWeeklyReportMarker(
+        input.project.id,
+        input.proposal.summaryDate,
+        group.authorKey,
+        input.proposal.sourceDigest,
+      ),
       summary: input.proposal.summary,
       commitSubjects: group.commits.map((commit) => commit.subject),
     });
-    const next = appendWeeklyReportContent(content, block);
-    if (next !== content) {
-      content = next;
-      changed = true;
+    const result = await input.writeLimiter.run(
+      () => writer.appendWeeklyReportContent({
+        weeklyNum,
+        githubId: group.githubId,
+        marker: buildWeeklyReportMarker(
+          input.project.id,
+          input.proposal.summaryDate,
+          group.authorKey,
+          input.proposal.sourceDigest,
+        ),
+        content: block,
+      }, input.cancellationSignal),
+      input.cancellationSignal,
+    );
+    if (result.appended) {
+      appended += 1;
     }
   }
-  if (!changed) {
-    return 0;
-  }
-  await input.writeLimiter.run(
-    () => writer.upsertWeeklyReportContent({
-      weeklyNum,
-      content,
-    }, input.cancellationSignal),
-    input.cancellationSignal,
-  );
-  return 1;
+  return { appended, skipped: authorGroups.skipped };
 }
 
 function groupCommitsByAuthor(
   commits: NormalizedProjectProgressCommit[],
-): Array<{ authorKey: string; authorLabel: string; commits: NormalizedProjectProgressCommit[] }> {
+): {
+  groups: Array<{
+    authorKey: string;
+    githubId: string;
+    authorLabel: string;
+    commits: NormalizedProjectProgressCommit[];
+  }>;
+  skipped: number;
+} {
   const grouped = new Map<string, {
     authorKey: string;
+    githubId: string;
     authorLabel: string;
     commits: NormalizedProjectProgressCommit[];
   }>();
+  let skipped = 0;
   for (const commit of commits) {
     const identity = resolveCommitAuthorIdentity(commit);
-    const key = identity?.key ?? "unknown";
-    const label = identity?.label ?? "未知提交者";
+    if (!identity) {
+      skipped += 1;
+      continue;
+    }
+    const key = identity.key;
+    const label = identity.label;
     const existing = grouped.get(key);
     if (existing) {
       existing.commits.push(commit);
@@ -1412,43 +1529,40 @@ function groupCommitsByAuthor(
     }
     grouped.set(key, {
       authorKey: key,
+      githubId: identity.githubId,
       authorLabel: label,
       commits: [commit],
     });
   }
-  return [...grouped.values()];
+  return {
+    groups: [...grouped.values()].map((group) => ({
+      ...group,
+    })),
+    skipped,
+  };
 }
 
 function resolveCommitAuthorIdentity(
   commit: NormalizedProjectProgressCommit,
-): { key: string; label: string } | null {
+): { key: string; githubId: string; label: string } | null {
   const login = normalizedText(commit.authorLogin) ?? normalizedText(commit.committerLogin);
   const name = normalizedText(commit.authorName) ?? normalizedText(commit.committerName);
-  const email = normalizedText(commit.authorEmail) ?? normalizedText(commit.committerEmail);
-  const keySource = login ?? email ?? name;
-  const label = name ?? login ?? email;
-  if (!keySource || !label) {
+  if (!login) {
     return null;
   }
-  if (login) {
-    return { key: `login:${login.toLowerCase()}`, label };
-  }
-  if (email) {
-    return { key: `email:${email.toLowerCase()}`, label };
-  }
-  if (!name) {
-    return null;
-  }
-  return { key: `name:${name.toLowerCase()}`, label };
+  return {
+    key: `login:${login.toLowerCase()}`,
+    githubId: login,
+    label: name ?? login,
+  };
 }
 
 function buildWeeklyReportAppendBlock(input: {
-  projectId: number;
   projectName: string;
   summaryDate: string;
-  sourceDigest: string;
   authorKey: string;
   authorLabel: string;
+  marker: string;
   summary: string;
   commitSubjects: string[];
 }): string {
@@ -1457,9 +1571,8 @@ function buildWeeklyReportAppendBlock(input: {
       .map((subject) => subject.trim())
       .filter(Boolean),
   )].slice(0, 5);
-  const marker = `<!-- oaagent-project-progress:${input.projectId}:${input.summaryDate}:${input.authorKey}:${input.sourceDigest} -->`;
   const lines = [
-    marker,
+    input.marker,
     `### ${input.summaryDate} | ${input.projectName} | ${input.authorLabel}`,
     input.summary.trim(),
   ];
@@ -1469,20 +1582,13 @@ function buildWeeklyReportAppendBlock(input: {
   return lines.join("\n").trimEnd();
 }
 
-function appendWeeklyReportContent(existingContent: string, block: string): string {
-  const marker = block.split(/\r?\n/, 1)[0]?.trim();
-  const normalizedBlock = block.trim();
-  if (!normalizedBlock) {
-    return existingContent.trimEnd();
-  }
-  if (marker && existingContent.includes(marker)) {
-    return existingContent.trimEnd();
-  }
-  const normalizedExisting = existingContent.trimEnd();
-  if (!normalizedExisting) {
-    return normalizedBlock;
-  }
-  return `${normalizedExisting}\n\n${normalizedBlock}`;
+function buildWeeklyReportMarker(
+  projectId: number,
+  summaryDate: string,
+  authorKey: string,
+  sourceDigest: string,
+): string {
+  return `<!-- oaagent-project-progress:${projectId}:${summaryDate}:${authorKey}:${sourceDigest} -->`;
 }
 
 function weeklyNumFromSummaryDate(summaryDate: string): number {
@@ -1512,7 +1618,8 @@ function projectNeedsRetry(report: ProjectProgressProjectReport): boolean {
   return report.warnings.some((warning) =>
     warning.startsWith("repository_summary_fallback:") ||
     warning.startsWith("repository_summary_failed:") ||
-    warning.startsWith("repository_summary_incomplete:")
+    warning.startsWith("repository_summary_incomplete:") ||
+    warning.startsWith("weekly_report_write_failed:")
   );
 }
 

@@ -14,17 +14,6 @@ import {
 } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -62,7 +51,6 @@ import {
   type AutomationTag,
   createAutomationJob,
   createAutomationTag,
-  deleteAutomationJob,
   triggerAutomationJob,
   updateAutomationJob,
   validateAutomationJob,
@@ -90,7 +78,6 @@ interface Dialog11Props {
   tags?: AutomationTag[]
   runs?: AutomationRun[]
   onTaskChanged?: (task: AutomationJob) => void | Promise<void>
-  onTaskDeleted?: (task: AutomationJob) => void | Promise<void>
   onTagsChanged?: (tags: AutomationTag[]) => void
   onTriggered?: (runId: string) => void | Promise<void>
   onRunSelected?: (runId: string) => void
@@ -118,7 +105,7 @@ type TaskFormState = {
   retentionDays: string
 }
 
-type PendingAction = "save" | "validate" | "trigger" | "create-tag" | "delete" | null
+type PendingAction = "save" | "validate" | "trigger" | "create-tag" | null
 
 const DEFAULT_FORM: TaskFormState = {
   jobType: "github_project_progress_sync",
@@ -153,7 +140,6 @@ export default function Dialog11({
   tags = [],
   runs = [],
   onTaskChanged,
-  onTaskDeleted,
   onTagsChanged,
   onTriggered,
   onRunSelected,
@@ -324,23 +310,6 @@ export default function Dialog11({
       onTagsChanged?.([...tags, tag])
       setForm((current) => ({ ...current, tagIds: [...current.tagIds, tag.id] }))
       setNewTagName("")
-    } catch (error) {
-      setFeedback({ tone: "error", text: resolveAutomationError(error) })
-    } finally {
-      setPendingAction(null)
-    }
-  }
-
-  async function handleDelete() {
-    if (!task || task.deleted) {
-      return
-    }
-    setPendingAction("delete")
-    setFeedback(null)
-    try {
-      const deletedTask = await deleteAutomationJob(task.id, task.version)
-      await onTaskDeleted?.(deletedTask)
-      setDialogOpen(false)
     } catch (error) {
       setFeedback({ tone: "error", text: resolveAutomationError(error) })
     } finally {
@@ -732,31 +701,6 @@ export default function Dialog11({
             </div>
 
             <DialogFooter className="flex-row items-center border-t px-6 py-4 sm:justify-between">
-              <div>
-                {!isCreateMode && task && !task.deleted && !isManagedMonitorTask ? (
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button type="button" variant="destructive" disabled={isBusy}>
-                        <Trash2 className="h-4 w-4" />删除任务
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>软删除“{task.name}”？</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          删除后任务会停用且无法恢复，但历史运行和审计会继续保留。存在未结束运行时 OA 会拒绝删除。
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>取消</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => void handleDelete()} className="bg-destructive text-white hover:bg-destructive/90">
-                          确认软删除
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                ) : null}
-              </div>
               <div className="flex gap-2">
                 <DialogClose asChild>
                   <Button type="button" variant="ghost" disabled={isBusy}>{isDeleted ? "关闭" : "取消"}</Button>
@@ -915,9 +859,6 @@ function requireTask(task: AutomationJob | undefined): AutomationJob {
 }
 
 function resolveAutomationError(error: unknown): string {
-  if (error instanceof AutomationApiError && error.errorCode === "job_has_active_run") {
-    return "任务仍有等待、已领取或运行中的记录。请先取消运行并等待进入终态，再执行软删除。"
-  }
   if (error instanceof AutomationApiError && error.errorCode === "automation_job_version_conflict") {
     return "任务已被其他人修改，请关闭窗口并重新打开后再操作。"
   }

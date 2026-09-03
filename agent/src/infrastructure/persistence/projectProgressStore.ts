@@ -6,6 +6,7 @@ import type {
   CachedRepositorySummary,
   RepositorySummaryCache,
 } from "../../domain/repositorySummaryCache.js";
+import type { ProjectProgressCommit } from "../../domain/projectProgress.js";
 
 export type ProjectProgressOutboxIntent = {
   intentKey: string;
@@ -152,6 +153,101 @@ export class ProjectProgressStore implements RepositorySummaryCache {
       WHERE project_id = ? AND repository_id = ?
     `).get(projectId, repositoryId) as { last_consumed_at: string | null } | undefined;
     return row?.last_consumed_at ?? null;
+  }
+
+  saveProcessedCommits(
+    commits: ProjectProgressCommit[],
+    summaryDate: string,
+    firstSeenAt: string,
+  ): void {
+    assertDate(summaryDate, "summaryDate");
+    assertIsoDate(firstSeenAt, "firstSeenAt");
+    const statement = this.database.prepare(`
+      INSERT INTO processed_commit (
+        repository_id, repository_full_name, sha, committed_at, first_seen_at,
+        subject, summary_date, author_login, author_name, author_email,
+        committer_login, committer_name, committer_email
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(repository_id, sha) DO UPDATE SET
+        repository_full_name = excluded.repository_full_name,
+        committed_at = excluded.committed_at,
+        subject = excluded.subject,
+        summary_date = excluded.summary_date,
+        author_login = excluded.author_login,
+        author_name = excluded.author_name,
+        author_email = excluded.author_email,
+        committer_login = excluded.committer_login,
+        committer_name = excluded.committer_name,
+        committer_email = excluded.committer_email
+    `);
+    for (const commit of commits) {
+      assertPositiveInteger(commit.repositoryId, "repositoryId");
+      assertNonEmptyString(commit.repositoryFullName, "repositoryFullName");
+      assertNonEmptyString(commit.sha, "sha");
+      assertIsoDate(commit.committedAt, "committedAt");
+      statement.run(
+        commit.repositoryId,
+        commit.repositoryFullName,
+        commit.sha,
+        commit.committedAt,
+        firstSeenAt,
+        commit.subject,
+        summaryDate,
+        commit.authorLogin ?? null,
+        commit.authorName ?? null,
+        commit.authorEmail ?? null,
+        commit.committerLogin ?? null,
+        commit.committerName ?? null,
+        commit.committerEmail ?? null,
+      );
+    }
+  }
+
+  getProcessedCommits(
+    summaryDate: string,
+    repositoryFullNames: string[],
+  ): ProjectProgressCommit[] {
+    assertDate(summaryDate, "summaryDate");
+    const repositories = [...new Set(
+      repositoryFullNames.map((repository) => repository.trim().toLowerCase()).filter(Boolean),
+    )];
+    if (repositories.length === 0) {
+      return [];
+    }
+    const placeholders = repositories.map(() => "?").join(", ");
+    const rows = this.database.prepare(`
+      SELECT repository_id, repository_full_name, sha, committed_at, subject,
+             author_login, author_name, author_email,
+             committer_login, committer_name, committer_email
+      FROM processed_commit
+      WHERE summary_date = ? AND LOWER(repository_full_name) IN (${placeholders})
+      ORDER BY committed_at, repository_id, sha
+    `).all(summaryDate, ...repositories) as Array<{
+      repository_id: number;
+      repository_full_name: string;
+      sha: string;
+      committed_at: string;
+      subject: string | null;
+      author_login: string | null;
+      author_name: string | null;
+      author_email: string | null;
+      committer_login: string | null;
+      committer_name: string | null;
+      committer_email: string | null;
+    }>;
+    return rows.map((row) => ({
+      repositoryId: row.repository_id,
+      repositoryFullName: row.repository_full_name,
+      sha: row.sha,
+      committedAt: row.committed_at,
+      subject: row.subject ?? "",
+      ...(row.author_login === null ? {} : { authorLogin: row.author_login }),
+      ...(row.author_name === null ? {} : { authorName: row.author_name }),
+      ...(row.author_email === null ? {} : { authorEmail: row.author_email }),
+      ...(row.committer_login === null ? {} : { committerLogin: row.committer_login }),
+      ...(row.committer_name === null ? {} : { committerName: row.committer_name }),
+      ...(row.committer_email === null ? {} : { committerEmail: row.committer_email }),
+    }));
   }
 
   saveDailySummaryDraft(input: {
@@ -622,6 +718,27 @@ export class ProjectProgressStore implements RepositorySummaryCache {
 
       PRAGMA user_version = 4;
     `);
+    this.ensureProcessedCommitColumns();
+  }
+
+  private ensureProcessedCommitColumns(): void {
+    const columns = new Set(
+      (this.database.prepare("PRAGMA table_info(processed_commit)").all() as Array<{ name: string }>)
+        .map((column) => column.name),
+    );
+    for (const column of [
+      "repository_full_name",
+      "author_login",
+      "author_name",
+      "author_email",
+      "committer_login",
+      "committer_name",
+      "committer_email",
+    ]) {
+      if (!columns.has(column)) {
+        this.database.exec(`ALTER TABLE processed_commit ADD COLUMN ${column} TEXT`);
+      }
+    }
   }
 }
 
@@ -703,6 +820,12 @@ function assertPositiveInteger(value: number, name: string): void {
 function assertIsoDate(value: string, name: string): void {
   if (!Number.isFinite(Date.parse(value))) {
     throw new Error(`${name} 必须是有效时间。`);
+  }
+}
+
+function assertDate(value: string, name: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`${name} 必须是 YYYY-MM-DD。`);
   }
 }
 

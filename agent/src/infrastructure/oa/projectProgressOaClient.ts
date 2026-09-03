@@ -40,18 +40,24 @@ export interface WeeklyReportOaReader {
 }
 
 export interface WeeklyReportContentOaWriter {
-  getWeeklyReportByWeek(
-    weeklyNum: number,
-    signal?: AbortSignal,
-  ): Promise<WeeklyReportSnapshot | null>;
-  upsertWeeklyReportContent(
+  appendWeeklyReportContent(
     input: {
       weeklyNum: number;
+      githubId: string;
+      marker: string;
       content: string;
     },
     signal?: AbortSignal,
-  ): Promise<WeeklyReportSnapshot>;
+  ): Promise<WeeklyReportAppendResult>;
 }
+
+export type WeeklyReportAppendResult = {
+  reportId: number;
+  weeklyNum: number;
+  ownerId: number;
+  githubId: string;
+  appended: boolean;
+};
 
 export type OaCommitSummary = {
   id: number;
@@ -211,69 +217,40 @@ export class ProjectProgressOaClient implements
     };
   }
 
-  async getWeeklyReportByWeek(
-    weeklyNum: number,
-    signal?: AbortSignal,
-  ): Promise<WeeklyReportSnapshot | null> {
-    if (!Number.isInteger(weeklyNum) || weeklyNum < 1) {
-      throw new OaContractError("OA 周报 weeklyNum 无效。");
-    }
-    try {
-      const payload = await this.request(
-        PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportReportGet,
-        "/weekly-report/report",
-        {
-          weekly_num: weeklyNum,
-          alias: this.config.alias,
-        },
-        { signal },
-      );
-      return decodeWeeklyReportSnapshot(decodeEnvelope(payload).data);
-    } catch (error) {
-      if (error instanceof OaRequestError && error.status === 404) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async upsertWeeklyReportContent(
+  async appendWeeklyReportContent(
     input: {
       weeklyNum: number;
+      githubId: string;
+      marker: string;
       content: string;
     },
     signal?: AbortSignal,
-  ): Promise<WeeklyReportSnapshot> {
+  ): Promise<WeeklyReportAppendResult> {
     if (!Number.isInteger(input.weeklyNum) || input.weeklyNum < 1) {
       throw new OaContractError("OA 周报 weeklyNum 无效。");
     }
+    if (!input.githubId.trim()) {
+      throw new OaContractError("OA 周报 githubId 不能为空。");
+    }
+    if (!input.marker.trim() || !input.content.includes(input.marker)) {
+      throw new OaContractError("OA 周报追加内容缺少幂等 marker。");
+    }
     const payload = await this.request(
-      PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportReportUpsert,
-      "/weekly-report/report",
-      {
-        alias: this.config.alias,
-      },
+      PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportAppend,
+      "/internal/project-sync/weekly-reports/append",
+      {},
       {
         method: "POST",
         body: {
           weekly_num: input.weeklyNum,
+          github_id: input.githubId,
+          marker: input.marker,
           content: input.content,
         },
         signal,
       },
     );
-    const data = decodeEnvelope(payload).data;
-    try {
-      return decodeWeeklyReportSnapshot(data);
-    } catch (error) {
-      if (error instanceof OaContractError) {
-        const refetched = await this.getWeeklyReportByWeek(input.weeklyNum, signal);
-        if (refetched) {
-          return refetched;
-        }
-      }
-      throw error;
-    }
+    return decodeWeeklyReportAppendResult(decodeEnvelope(payload).data);
   }
 
   async updateProjectStatus(
@@ -717,6 +694,22 @@ function decodeWeeklyReportSnapshot(value: unknown): WeeklyReportSnapshot {
     version: snapshotValue.version as number,
     updatedAt: snapshotValue.updated_at,
     deleted: snapshotValue.deleted === true,
+  };
+}
+
+function decodeWeeklyReportAppendResult(value: unknown): WeeklyReportAppendResult {
+  if (!isRecord(value) || !Number.isInteger(value.report_id) ||
+    (value.report_id as number) < 1 ||
+    !Number.isInteger(value.weekly_num) || !Number.isInteger(value.owner_id) ||
+    typeof value.github_id !== "string" || typeof value.appended !== "boolean") {
+    throw new OaContractError("OA 周报追加响应字段无效。");
+  }
+  return {
+    reportId: value.report_id as number,
+    weeklyNum: value.weekly_num as number,
+    ownerId: value.owner_id as number,
+    githubId: value.github_id,
+    appended: value.appended,
   };
 }
 

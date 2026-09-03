@@ -5,6 +5,7 @@ import {
   syncProjectProgress,
   type ProjectProgressTraceEvent,
 } from "../src/application/syncProjectProgress.js";
+import { buildProjectDailyCommitGroups } from "../src/domain/projectProgress.js";
 import { GitHubRequestError } from "../src/infrastructure/github/githubClient.js";
 import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/githubTypes.js";
 import { AutomationLeaseLostError } from "../src/infrastructure/oa/automationOaClient.js";
@@ -790,6 +791,310 @@ describe("syncProjectProgress", () => {
     assert.equal(result.retryRecommended, false);
   });
 
+  it("continues weekly report writes for authorized projects when another project is unauthorized", async () => {
+    const unauthorized = {
+      id: 10,
+      projectName: "unauthorized-project",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/unauthorized"],
+    };
+    const authorized = {
+      id: 11,
+      projectName: "authorized-project",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/authorized"],
+    };
+    const weeklyWrites: string[] = [];
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [unauthorized, authorized],
+        getProject: async (projectId) => projectId === unauthorized.id ? unauthorized : authorized,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => ({ id: 901, ...input }),
+        updateCommitSummary: async (summaryId, input) => ({
+          id: summaryId,
+          projectId: authorized.id,
+          summaryDate: "2026-07-24",
+          ...input,
+        }),
+        appendWeeklyReportContent: async (input: {
+          weeklyNum: number;
+          githubId: string;
+          marker: string;
+          content: string;
+        }) => {
+          weeklyWrites.push(input.content);
+          return {
+            reportId: 42,
+            weeklyNum: input.weeklyNum,
+            ownerId: 7,
+            githubId: input.githubId,
+            appended: true,
+          };
+        },
+      } as never,
+      githubReader: {
+        readRepository: async (repository) => {
+          if (repository.repository === "unauthorized") {
+            throw new GitHubRequestError("GitHub 请求失败:HTTP 401", 401, null);
+          }
+          return {
+            repositoryId: authorized.id,
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: "2026-07-24T01:00:00.000Z",
+            commits: [commit(
+              authorized.id,
+              repository.fullName,
+              "authorized-sha",
+              "2026-07-24T01:00:00.000Z",
+              {
+                authorLogin: "alice",
+                authorName: "Alice",
+              },
+            )],
+          };
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "授权项目完成更新。", limitations: [] }) },
+      store: createWritableStore(),
+    });
+
+    assert.deepEqual(result.projects.map((project) => project.outcome), ["incomplete", "evaluated"]);
+    assert.equal(weeklyWrites.length, 1);
+    assert.match(weeklyWrites[0] ?? "", /authorized-project/);
+    assert.match(weeklyWrites[0] ?? "", /Alice/);
+  });
+
+  it("uses a cached project summary and persisted commit authors when the project is unauthorized", async () => {
+    const project = {
+      id: 12,
+      projectName: "historical-weekly",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/historical-weekly"],
+    };
+    let weeklyContent = "已有周报内容";
+    let weeklyWrites = 0;
+    const historicalCommit = commit(
+      1201,
+      "alpha/historical-weekly",
+      "historical-sha",
+      "2026-07-24T01:00:00.000Z",
+      {
+        authorLogin: "alice",
+        authorName: "Alice",
+      },
+    );
+    const sourceDigest = buildProjectDailyCommitGroups(
+      [historicalCommit],
+      new Date("2026-07-24T12:00:00.000Z"),
+    )[0]!.sourceDigest;
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => ({ id: 903, ...input }),
+        updateCommitSummary: async (summaryId, input) => ({
+          id: summaryId,
+          projectId: project.id,
+          summaryDate: "2026-07-24",
+          ...input,
+        }),
+        appendWeeklyReportContent: async (input: {
+          weeklyNum: number;
+          githubId: string;
+          marker: string;
+          content: string;
+        }) => {
+          weeklyWrites += 1;
+          weeklyContent = `${weeklyContent}\n\n${input.content}`;
+          return {
+            reportId: 43,
+            weeklyNum: input.weeklyNum,
+            ownerId: 7,
+            githubId: input.githubId,
+            appended: true,
+          };
+        },
+      } as never,
+      githubReader: {
+        readRepository: async () => {
+          throw new GitHubRequestError("GitHub 请求失败:HTTP 401", 401, null);
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "不应重新生成", limitations: [] }) },
+      store: {
+        saveProjectRepositoryWatermark: () => undefined,
+        getDailySummaryDraft: () => ({
+          sourceDigest,
+          summary: "已有项目总结",
+          aiConfidence: 90,
+          aiNote: "历史读取结果",
+        }),
+        getProcessedCommits: () => [historicalCommit],
+        enqueueOutbox: () => undefined,
+        markOutboxApplied: () => undefined,
+        markSummaryApplied: () => undefined,
+        getManagedSummary: () => null,
+      } as never,
+    });
+
+    assert.equal(result.projects[0]?.outcome, "incomplete");
+    assert.equal(result.projects[0]?.summaries.length, 1);
+    assert.equal(weeklyWrites, 1);
+    assert.match(weeklyContent, /已有项目总结/);
+    assert.match(weeklyContent, /Alice/);
+    assert.match(result.projects[0]?.warnings.join(" ") ?? "", /historical_commit_authors/);
+  });
+
+  it("recovers an existing OA summary when local draft state is unavailable", async () => {
+    const project = {
+      id: 15,
+      projectName: "oa-summary-recovery",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/oa-summary-recovery"],
+    };
+    const historicalCommit = commit(
+      1501,
+      "alpha/oa-summary-recovery",
+      "oa-summary-sha",
+      "2026-07-24T01:00:00.000Z",
+      { authorLogin: "alice", authorName: "Alice" },
+    );
+    const weeklyWrites: string[] = [];
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [{
+          id: 905,
+          projectId: project.id,
+          summaryDate: "2026-07-24",
+          summary: "OA 中已有项目总结。",
+          aiConfidence: 88,
+          aiNote: "已完成历史总结",
+        }],
+        getCommitSummary: async () => ({
+          id: 905,
+          projectId: project.id,
+          summaryDate: "2026-07-24",
+          summary: "OA 中已有项目总结。",
+          aiConfidence: 88,
+          aiNote: "已完成历史总结",
+        }),
+        createCommitSummary: async (input: { projectId: number; summaryDate: string; summary: string; aiConfidence: number; aiNote: string }) => ({
+          id: 905,
+          ...input,
+        }),
+        updateCommitSummary: async (summaryId: number, input: { summary: string; aiConfidence: number; aiNote: string }) => ({
+          id: summaryId,
+          projectId: project.id,
+          summaryDate: "2026-07-24",
+          ...input,
+        }),
+        appendWeeklyReportContent: async (input: { content: string }) => {
+          weeklyWrites.push(input.content);
+          return {
+            reportId: 45,
+            weeklyNum: 202635,
+            ownerId: 7,
+            githubId: "alice",
+            appended: true,
+          };
+        },
+      } as never,
+      githubReader: {
+        readRepository: async () => {
+          throw new GitHubRequestError("GitHub 请求失败:HTTP 401", 401, null);
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "不应重新生成", limitations: [] }) },
+      store: {
+        saveProjectRepositoryWatermark: () => undefined,
+        getDailySummaryDraft: () => null,
+        getProcessedCommits: () => [historicalCommit],
+        enqueueOutbox: () => undefined,
+        markOutboxApplied: () => undefined,
+        markSummaryApplied: () => undefined,
+        getManagedSummary: () => null,
+      } as never,
+    });
+
+    assert.equal(result.projects[0]?.summaries[0]?.summary, "OA 中已有项目总结。");
+    assert.equal(weeklyWrites.length, 1);
+    assert.match(weeklyWrites[0] ?? "", /oa-summary-recovery/);
+    assert.match(result.projects[0]?.warnings.join(" ") ?? "", /oa_existing_summary/);
+  });
+
+  it("does not guess a weekly report owner when an unauthorized project has no author evidence", async () => {
+    const project = {
+      id: 14,
+      projectName: "missing-author-evidence",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/missing-author-evidence"],
+    };
+    let weeklyWrites = 0;
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production",
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input) => ({ id: 904, ...input }),
+        updateCommitSummary: async (summaryId, input) => ({
+          id: summaryId,
+          projectId: project.id,
+          summaryDate: "2026-07-24",
+          ...input,
+        }),
+        appendWeeklyReportContent: async () => {
+          weeklyWrites += 1;
+          throw new Error("must not write");
+        },
+      } as never,
+      githubReader: {
+        readRepository: async () => {
+          throw new GitHubRequestError("GitHub 请求失败:HTTP 401", 401, null);
+        },
+      },
+      summarizer: { summarize: async () => ({ summary: "不应重新生成", limitations: [] }) },
+      store: {
+        saveProjectRepositoryWatermark: () => undefined,
+        getDailySummaryDraft: () => ({
+          sourceDigest: "b".repeat(64),
+          summary: "已有项目总结",
+          aiConfidence: 90,
+          aiNote: "历史读取结果",
+        }),
+        getProcessedCommits: () => [],
+        enqueueOutbox: () => undefined,
+        markOutboxApplied: () => undefined,
+        markSummaryApplied: () => undefined,
+        getManagedSummary: () => null,
+      } as never,
+    });
+
+    assert.equal(weeklyWrites, 0);
+    assert.equal(result.projects[0]?.summaries.length, 0);
+    assert.match(
+      result.projects[0]?.warnings.join(" ") ?? "",
+      /weekly_report_skipped_no_commit_authors/,
+    );
+  });
+
   it("treats a GitHub 404 as a non-retryable repository configuration error", async () => {
     const project = {
       id: 26,
@@ -883,6 +1188,95 @@ describe("syncProjectProgress", () => {
 
     assert.equal(summaries, 3);
     assert.equal(regeneratedResult.metrics.repositoryTasksTotal, 1);
+  });
+
+  it("appends a cached summary to the weekly report without regenerating it", async () => {
+    let summaries = 0;
+    let weeklyWrites = 0;
+    let weeklyContent = "";
+    const weeklyMarkers = new Set<string>();
+    const project = {
+      id: 13,
+      projectName: "cached-weekly",
+      status: "updating" as const,
+      githubUrls: ["https://github.com/alpha/cached-weekly"],
+    };
+    const store = createWritableStore();
+    const dependencies = {
+      observedAt: new Date("2026-07-24T12:00:00.000Z"),
+      writeMode: "production" as const,
+      oaClient: {
+        listProjects: async () => [project],
+        getProject: async () => project,
+        updateProjectStatus: async () => undefined,
+        listCommitSummaries: async () => [],
+        createCommitSummary: async (input: { projectId: number; summaryDate: string; summary: string; aiConfidence: number; aiNote: string }) => ({
+          id: 902,
+          ...input,
+        }),
+        updateCommitSummary: async (summaryId: number, input: { summary: string; aiConfidence: number; aiNote: string }) => ({
+          id: summaryId,
+          projectId: project.id,
+          summaryDate: "2026-07-24",
+          ...input,
+        }),
+        appendWeeklyReportContent: async (input: {
+          weeklyNum: number;
+          githubId: string;
+          marker: string;
+          content: string;
+        }) => {
+          if (weeklyMarkers.has(input.marker)) {
+            return {
+              reportId: 44,
+              weeklyNum: input.weeklyNum,
+              ownerId: 7,
+              githubId: input.githubId,
+              appended: false,
+            };
+          }
+          weeklyMarkers.add(input.marker);
+          weeklyWrites += 1;
+          weeklyContent = input.content;
+          return {
+            reportId: 44,
+            weeklyNum: input.weeklyNum,
+            ownerId: 7,
+            githubId: input.githubId,
+            appended: true,
+          };
+        },
+      } as never,
+      githubReader: {
+        readRepository: async (repository) => ({
+          repositoryId: 1,
+          fullName: repository.fullName,
+          canonicalUrl: repository.canonicalUrl,
+          complete: true,
+          lastActivityAt: "2026-07-24T01:00:00.000Z",
+          commits: [commit(1, repository.fullName, "cached-sha", "2026-07-24T01:00:00.000Z", {
+            authorLogin: "alice",
+            authorName: "Alice",
+          })],
+        }),
+      },
+      summarizer: {
+        summarize: async () => {
+          summaries += 1;
+          return { summary: "缓存项目完成更新。", limitations: [] };
+        },
+      },
+      store,
+    };
+
+    await syncProjectProgress(dependencies);
+    const cachedResult = await syncProjectProgress(dependencies);
+
+    assert.equal(summaries, 1);
+    assert.equal(cachedResult.metrics.repositoryTasksTotal, 0);
+    assert.equal(weeklyWrites, 1);
+    assert.match(weeklyContent, /cached-weekly/);
+    assert.match(weeklyContent, /Alice/);
   });
 
   it("applies status and summary writes only in explicit single-project test mode", async () => {
@@ -1380,9 +1774,12 @@ describe("syncProjectProgress", () => {
   });
 
   it("appends generated summaries into the current weekly report by commit author", async () => {
-    let fetchedWeeklyNum: number | null = null;
-    let writtenWeeklyNum: number | null = null;
-    let writtenWeeklyContent: string | null = null;
+    const weeklyAppends: Array<{
+      weeklyNum: number;
+      githubId: string;
+      marker: string;
+      content: string;
+    }> = [];
     const project = {
       id: 51,
       projectName: "weekly-append",
@@ -1407,29 +1804,19 @@ describe("syncProjectProgress", () => {
         getCommitSummary: async () => {
           throw new Error("must not read");
         },
-        getWeeklyReportByWeek: async (weeklyNum: number) => {
-          fetchedWeeklyNum = weeklyNum;
+        appendWeeklyReportContent: async (input: {
+          weeklyNum: number;
+          githubId: string;
+          marker: string;
+          content: string;
+        }) => {
+          weeklyAppends.push(input);
           return {
-            id: "weekly-report-1",
-            weeklyNum,
-            ownerId: 42,
-            content: "周报开头",
-            version: 3,
-            updatedAt: "2026-08-27T09:30:00.000Z",
-            deleted: false,
-          };
-        },
-        upsertWeeklyReportContent: async (input: { weeklyNum: number; content: string }) => {
-          writtenWeeklyNum = input.weeklyNum;
-          writtenWeeklyContent = input.content;
-          return {
-            id: "weekly-report-1",
+            reportId: 45,
             weeklyNum: input.weeklyNum,
-            ownerId: 42,
-            content: input.content,
-            version: 4,
-            updatedAt: "2026-08-27T09:40:00.000Z",
-            deleted: false,
+            ownerId: input.githubId === "alice" ? 7 : 8,
+            githubId: input.githubId,
+            appended: true,
           };
         },
       } as never,
@@ -1459,13 +1846,12 @@ describe("syncProjectProgress", () => {
     });
 
     assert.equal(result.mode, "production-write");
-    assert.equal(fetchedWeeklyNum, 202635);
-    assert.equal(writtenWeeklyNum, 202635);
-    assert.match(writtenWeeklyContent ?? "", /^周报开头\n\n/);
-    assert.match(writtenWeeklyContent ?? "", /Alice/);
-    assert.match(writtenWeeklyContent ?? "", /Bob/);
-    assert.match(writtenWeeklyContent ?? "", /weekly-append/);
-    assert.match(writtenWeeklyContent ?? "", /完成更新。/);
+    assert.deepEqual(weeklyAppends.map((append) => append.githubId), ["alice", "bob"]);
+    assert.deepEqual(weeklyAppends.map((append) => append.weeklyNum), [202635, 202635]);
+    assert.match(weeklyAppends[0]?.content ?? "", /Alice/);
+    assert.match(weeklyAppends[1]?.content ?? "", /Bob/);
+    assert.match(weeklyAppends[0]?.content ?? "", /weekly-append/);
+    assert.match(weeklyAppends[1]?.content ?? "", /完成更新。/);
   });
 
   it("writes directly when the weekly report is empty", async () => {
@@ -1495,26 +1881,20 @@ describe("syncProjectProgress", () => {
         getCommitSummary: async () => {
           throw new Error("must not read");
         },
-        getWeeklyReportByWeek: async (weeklyNum: number) => ({
-          id: "weekly-report-empty",
-          weeklyNum,
-          ownerId: 42,
-          content: "",
-          version: 1,
-          updatedAt: "2026-08-27T09:30:00.000Z",
-          deleted: false,
-        }),
-        upsertWeeklyReportContent: async (input: { weeklyNum: number; content: string }) => {
+        appendWeeklyReportContent: async (input: {
+          weeklyNum: number;
+          githubId: string;
+          marker: string;
+          content: string;
+        }) => {
           writtenWeeklyNum = input.weeklyNum;
           writtenWeeklyContent = input.content;
           return {
-            id: "weekly-report-empty",
+            reportId: 46,
             weeklyNum: input.weeklyNum,
-            ownerId: 42,
-            content: input.content,
-            version: 2,
-            updatedAt: "2026-08-27T09:40:00.000Z",
-            deleted: false,
+            ownerId: 7,
+            githubId: input.githubId,
+            appended: true,
           };
         },
       } as never,
