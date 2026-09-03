@@ -186,7 +186,7 @@ describe("ProjectProgressOaClient", () => {
     );
 
     const result = await client.appendWeeklyReportContent({
-      weeklyNum: 202635,
+      summaryDate: "2026-08-27",
       githubId: "alice",
       marker: "<!-- marker -->",
       content: "<!-- marker -->\nnew block",
@@ -203,7 +203,7 @@ describe("ProjectProgressOaClient", () => {
       method: "POST",
       url: "https://oa.example.test/internal/project-sync/weekly-reports/append",
       body: {
-        weekly_num: 202635,
+        summary_date: "2026-08-27",
         github_id: "alice",
         marker: "<!-- marker -->",
         content: "<!-- marker -->\nnew block",

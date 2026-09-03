@@ -1458,7 +1458,6 @@ async function appendProjectWeeklyReportContent(input: {
   if (authorGroups.groups.length === 0) {
     return { appended: 0, skipped: authorGroups.skipped };
   }
-  const weeklyNum = weeklyNumFromSummaryDate(input.proposal.summaryDate);
   let appended = 0;
   for (const group of authorGroups.groups) {
     const block = buildWeeklyReportAppendBlock({
@@ -1477,7 +1476,7 @@ async function appendProjectWeeklyReportContent(input: {
     });
     const result = await input.writeLimiter.run(
       () => writer.appendWeeklyReportContent({
-        weeklyNum,
+        summaryDate: input.proposal.summaryDate,
         githubId: group.githubId,
         marker: buildWeeklyReportMarker(
           input.project.id,
@@ -1589,24 +1588,6 @@ function buildWeeklyReportMarker(
   sourceDigest: string,
 ): string {
   return `<!-- oaagent-project-progress:${projectId}:${summaryDate}:${authorKey}:${sourceDigest} -->`;
-}
-
-function weeklyNumFromSummaryDate(summaryDate: string): number {
-  const date = new Date(`${summaryDate}T12:00:00+08:00`);
-  if (!Number.isFinite(date.getTime())) {
-    throw new Error(`summary_date 无效:${summaryDate}`);
-  }
-  const utcDate = new Date(Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate(),
-  ));
-  const dayNumber = utcDate.getUTCDay() || 7;
-  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - dayNumber);
-  const isoYear = utcDate.getUTCFullYear();
-  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
-  const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
-  return isoYear * 100 + week;
 }
 
 function normalizedText(value: string | null | undefined): string | null {

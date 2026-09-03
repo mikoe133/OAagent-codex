@@ -821,7 +821,7 @@ describe("syncProjectProgress", () => {
           ...input,
         }),
         appendWeeklyReportContent: async (input: {
-          weeklyNum: number;
+          summaryDate: string;
           githubId: string;
           marker: string;
           content: string;
@@ -829,7 +829,7 @@ describe("syncProjectProgress", () => {
           weeklyWrites.push(input.content);
           return {
             reportId: 42,
-            weeklyNum: input.weeklyNum,
+            weeklyNum: 100,
             ownerId: 7,
             githubId: input.githubId,
             appended: true,
@@ -909,7 +909,7 @@ describe("syncProjectProgress", () => {
           ...input,
         }),
         appendWeeklyReportContent: async (input: {
-          weeklyNum: number;
+          summaryDate: string;
           githubId: string;
           marker: string;
           content: string;
@@ -918,7 +918,7 @@ describe("syncProjectProgress", () => {
           weeklyContent = `${weeklyContent}\n\n${input.content}`;
           return {
             reportId: 43,
-            weeklyNum: input.weeklyNum,
+            weeklyNum: 100,
             ownerId: 7,
             githubId: input.githubId,
             appended: true,
@@ -1221,7 +1221,7 @@ describe("syncProjectProgress", () => {
           ...input,
         }),
         appendWeeklyReportContent: async (input: {
-          weeklyNum: number;
+          summaryDate: string;
           githubId: string;
           marker: string;
           content: string;
@@ -1229,7 +1229,7 @@ describe("syncProjectProgress", () => {
           if (weeklyMarkers.has(input.marker)) {
             return {
               reportId: 44,
-              weeklyNum: input.weeklyNum,
+              weeklyNum: 100,
               ownerId: 7,
               githubId: input.githubId,
               appended: false,
@@ -1240,7 +1240,7 @@ describe("syncProjectProgress", () => {
           weeklyContent = input.content;
           return {
             reportId: 44,
-            weeklyNum: input.weeklyNum,
+            weeklyNum: 100,
             ownerId: 7,
             githubId: input.githubId,
             appended: true,
@@ -1775,7 +1775,7 @@ describe("syncProjectProgress", () => {
 
   it("appends generated summaries into the current weekly report by commit author", async () => {
     const weeklyAppends: Array<{
-      weeklyNum: number;
+      summaryDate: string;
       githubId: string;
       marker: string;
       content: string;
@@ -1805,7 +1805,7 @@ describe("syncProjectProgress", () => {
           throw new Error("must not read");
         },
         appendWeeklyReportContent: async (input: {
-          weeklyNum: number;
+          summaryDate: string;
           githubId: string;
           marker: string;
           content: string;
@@ -1813,7 +1813,7 @@ describe("syncProjectProgress", () => {
           weeklyAppends.push(input);
           return {
             reportId: 45,
-            weeklyNum: input.weeklyNum,
+            weeklyNum: 100,
             ownerId: input.githubId === "alice" ? 7 : 8,
             githubId: input.githubId,
             appended: true,
@@ -1847,7 +1847,7 @@ describe("syncProjectProgress", () => {
 
     assert.equal(result.mode, "production-write");
     assert.deepEqual(weeklyAppends.map((append) => append.githubId), ["alice", "bob"]);
-    assert.deepEqual(weeklyAppends.map((append) => append.weeklyNum), [202635, 202635]);
+    assert.deepEqual(weeklyAppends.map((append) => append.summaryDate), ["2026-08-27", "2026-08-27"]);
     assert.match(weeklyAppends[0]?.content ?? "", /Alice/);
     assert.match(weeklyAppends[1]?.content ?? "", /Bob/);
     assert.match(weeklyAppends[0]?.content ?? "", /weekly-append/);
@@ -1855,7 +1855,7 @@ describe("syncProjectProgress", () => {
   });
 
   it("writes directly when the weekly report is empty", async () => {
-    let writtenWeeklyNum: number | null = null;
+    let writtenSummaryDate: string | null = null;
     let writtenWeeklyContent: string | null = null;
     const project = {
       id: 51,
@@ -1882,16 +1882,16 @@ describe("syncProjectProgress", () => {
           throw new Error("must not read");
         },
         appendWeeklyReportContent: async (input: {
-          weeklyNum: number;
+          summaryDate: string;
           githubId: string;
           marker: string;
           content: string;
         }) => {
-          writtenWeeklyNum = input.weeklyNum;
+          writtenSummaryDate = input.summaryDate;
           writtenWeeklyContent = input.content;
           return {
             reportId: 46,
-            weeklyNum: input.weeklyNum,
+            weeklyNum: 100,
             ownerId: 7,
             githubId: input.githubId,
             appended: true,
@@ -1918,7 +1918,7 @@ describe("syncProjectProgress", () => {
       store: createWritableStore(),
     });
 
-    assert.equal(writtenWeeklyNum, 202635);
+    assert.equal(writtenSummaryDate, "2026-08-27");
     assert.match(
       writtenWeeklyContent ?? "",
       /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\n### 2026-08-27 \| weekly-empty \| Alice\n完成更新。\n\n提交：\n- commit alice-sha$/,

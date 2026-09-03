@@ -42,7 +42,7 @@ export interface WeeklyReportOaReader {
 export interface WeeklyReportContentOaWriter {
   appendWeeklyReportContent(
     input: {
-      weeklyNum: number;
+      summaryDate: string;
       githubId: string;
       marker: string;
       content: string;
@@ -219,15 +219,15 @@ export class ProjectProgressOaClient implements
 
   async appendWeeklyReportContent(
     input: {
-      weeklyNum: number;
+      summaryDate: string;
       githubId: string;
       marker: string;
       content: string;
     },
     signal?: AbortSignal,
   ): Promise<WeeklyReportAppendResult> {
-    if (!Number.isInteger(input.weeklyNum) || input.weeklyNum < 1) {
-      throw new OaContractError("OA 周报 weeklyNum 无效。");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.summaryDate)) {
+      throw new OaContractError("OA 周报 summaryDate 无效。");
     }
     if (!input.githubId.trim()) {
       throw new OaContractError("OA 周报 githubId 不能为空。");
@@ -242,7 +242,7 @@ export class ProjectProgressOaClient implements
       {
         method: "POST",
         body: {
-          weekly_num: input.weeklyNum,
+          summary_date: input.summaryDate,
           github_id: input.githubId,
           marker: input.marker,
           content: input.content,
