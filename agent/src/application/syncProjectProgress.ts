@@ -1462,9 +1462,6 @@ async function appendProjectWeeklyReportContent(input: {
   for (const group of authorGroups.groups) {
     const block = buildWeeklyReportAppendBlock({
       projectName: input.project.projectName,
-      summaryDate: input.proposal.summaryDate,
-      authorKey: group.authorKey,
-      authorLabel: group.authorLabel,
       marker: buildWeeklyReportMarker(
         input.project.id,
         input.proposal.summaryDate,
@@ -1472,7 +1469,6 @@ async function appendProjectWeeklyReportContent(input: {
         input.proposal.sourceDigest,
       ),
       summary: input.proposal.summary,
-      commitSubjects: group.commits.map((commit) => commit.subject),
     });
     const result = await input.writeLimiter.run(
       () => writer.appendWeeklyReportContent({
@@ -1558,26 +1554,14 @@ function resolveCommitAuthorIdentity(
 
 function buildWeeklyReportAppendBlock(input: {
   projectName: string;
-  summaryDate: string;
-  authorKey: string;
-  authorLabel: string;
   marker: string;
   summary: string;
-  commitSubjects: string[];
 }): string {
-  const subjects = [...new Set(
-    input.commitSubjects
-      .map((subject) => subject.trim())
-      .filter(Boolean),
-  )].slice(0, 5);
   const lines = [
     input.marker,
-    `### ${input.summaryDate} | ${input.projectName} | ${input.authorLabel}`,
+    `### ${input.projectName}`,
     input.summary.trim(),
   ];
-  if (subjects.length > 0) {
-    lines.push("", "提交：", ...subjects.map((subject) => `- ${subject}`));
-  }
   return lines.join("\n").trimEnd();
 }
 
