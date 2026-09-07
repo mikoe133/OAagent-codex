@@ -10,6 +10,7 @@ import type {
 import {
   automationInteractionRepositoryFullName,
   buildAutomationProjectOutcomeChartData,
+  formatAutomationWeeklyNum,
   hasActiveAutomationRuns,
   hasPollableAutomationRuns,
   projectOutcomeForDisplay,
@@ -17,6 +18,11 @@ import {
   resolveAutomationRunReply,
   shouldRefreshAutomationRunDetail,
 } from "./automation-run-presentation"
+
+test("formats OA business weekly numbers for project sync details", () => {
+  assert.equal(formatAutomationWeeklyNum(202635), "2026 年第 35 周")
+  assert.equal(formatAutomationWeeklyNum(35), "第 35 周")
+})
 
 test("reads the repository full name used by an AI interaction", () => {
   assert.equal(
@@ -234,6 +240,7 @@ function project(overrides: Partial<AutomationRunProject>): AutomationRunProject
     generated_summary: "项目总结",
     ai_confidence: 90,
     ai_note: null,
+    weekly_report_syncs: [],
     warnings: [],
     mutations_applied: false,
     duration_ms: 100,

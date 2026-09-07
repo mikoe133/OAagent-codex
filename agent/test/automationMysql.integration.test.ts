@@ -25,6 +25,7 @@ test(
     assert.equal(repeatedMigration.eventTriggersApplied, false);
     assert.equal(repeatedMigration.weeklyPendingItemsApplied, false);
     assert.equal(repeatedMigration.weeklySummaryBindingsApplied, false);
+    assert.equal(repeatedMigration.projectWeeklyReportSyncsApplied, false);
     const database = createAutomationDatabase(url);
     await database.db
       .updateTable("automation_job_runs")

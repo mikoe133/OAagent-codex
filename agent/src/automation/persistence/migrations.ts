@@ -29,6 +29,7 @@ export type AutomationMigrationResult = {
   eventTriggersApplied: boolean;
   weeklyPendingItemsApplied: boolean;
   weeklySummaryBindingsApplied: boolean;
+  projectWeeklyReportSyncsApplied: boolean;
   seedApplied: boolean;
   tables: readonly string[];
 };
@@ -190,6 +191,27 @@ export async function runAutomationMigrations(
       weeklySummaryBindingsApplied = true;
     }
 
+    const [projectWeeklyReportSyncColumnRows] = await connection.query<RowDataPacket[]>(
+      `SELECT column_name
+         FROM information_schema.columns
+        WHERE table_schema = ?
+          AND table_name = 'automation_job_run_projects'
+          AND column_name = 'weekly_report_syncs'`,
+      [databaseName],
+    );
+    let projectWeeklyReportSyncsApplied = false;
+    if (projectWeeklyReportSyncColumnRows.length === 0) {
+      const projectWeeklyReportSyncsMigration = await readFile(
+        path.join(
+          sqlDirectory,
+          "008_automation_project_weekly_report_syncs.up.sql",
+        ),
+        "utf8",
+      );
+      await connection.query(projectWeeklyReportSyncsMigration);
+      projectWeeklyReportSyncsApplied = true;
+    }
+
     const seed = await readFile(
       path.join(sqlDirectory, "002_automation_defaults_seed.up.sql"),
       "utf8",
@@ -206,6 +228,7 @@ export async function runAutomationMigrations(
       eventTriggersApplied,
       weeklyPendingItemsApplied,
       weeklySummaryBindingsApplied,
+      projectWeeklyReportSyncsApplied,
       seedApplied: true,
       tables: [
         ...AUTOMATION_TABLES,

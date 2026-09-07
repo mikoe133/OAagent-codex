@@ -232,6 +232,7 @@ export type AutomationRunProject = {
   generated_summary: string | null
   ai_confidence: number | null
   ai_note: string | null
+  weekly_report_syncs?: AutomationWeeklyReportSync[]
   warnings: Array<Record<string, unknown>>
   mutations_applied: boolean
   started_at?: string | null
@@ -239,6 +240,16 @@ export type AutomationRunProject = {
   duration_ms: number | null
   created_at: string
   updated_at: string
+}
+
+export type AutomationWeeklyReportSync = {
+  report_id: number
+  weekly_num: number
+  owner_id: number
+  github_id: string
+  author_name: string
+  content: string
+  appended: boolean
 }
 
 export type AutomationWeeklyReportPendingItem = {

@@ -25,6 +25,17 @@ const traceMetadata = jsonObject
     (value) => jsonByteLength(value) <= 16 * 1024,
     "trace_metadata_too_large",
   );
+const weeklyReportSyncAudit = z
+  .object({
+    report_id: z.number().int().positive(),
+    weekly_num: z.number().int().positive(),
+    owner_id: z.number().int().positive(),
+    github_id: z.string().trim().min(1).max(255),
+    author_name: z.string().trim().min(1).max(255),
+    content: z.string().trim().min(1).max(100_000),
+    appended: z.boolean(),
+  })
+  .strict();
 const uniquePositiveIds = z
   .array(z.number().int().positive())
   .max(50)
@@ -313,6 +324,11 @@ export const automationRunProjectUpsertSchema = z
     generated_summary: z.string().max(1_000_000).nullable().optional(),
     ai_confidence: z.number().int().min(0).max(100).nullable().optional(),
     ai_note: z.string().max(10_000).nullable().optional(),
+    weekly_report_syncs: z
+      .array(weeklyReportSyncAudit)
+      .max(100)
+      .refine((value) => jsonByteLength(value) <= 256 * 1024, "json_payload_too_large")
+      .default([]),
     warnings: z
       .array(jsonObject)
       .max(100)

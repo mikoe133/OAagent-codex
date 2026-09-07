@@ -137,6 +137,7 @@ export type AutomationDatabaseSchema = {
     generated_summary: string | null;
     ai_confidence: number | null;
     ai_note: string | null;
+    weekly_report_syncs: JsonValue;
     warnings: JsonValue;
     mutations_applied: number;
     started_at: Timestamp | null;

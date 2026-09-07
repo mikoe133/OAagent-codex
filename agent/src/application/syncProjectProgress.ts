@@ -72,6 +72,16 @@ export type ProjectProgressRepositoryInteraction = {
   interaction: ProjectProgressAiInteraction;
 };
 
+export type ProjectProgressWeeklyReportSync = {
+  reportId: number;
+  weeklyNum: number;
+  ownerId: number;
+  githubId: string;
+  authorName: string;
+  content: string;
+  appended: boolean;
+};
+
 export type ProjectProgressSummaryProposal = {
   summaryDate: string;
   commitCount: number;
@@ -94,6 +104,7 @@ export type ProjectProgressProjectReport = {
   repositoryCount?: number;
   commitCount?: number;
   mutationsApplied?: number;
+  weeklyReportSyncs?: ProjectProgressWeeklyReportSync[];
 };
 
 export type ProjectProgressPendingItem = {
@@ -982,6 +993,7 @@ async function executeProjectProgressSync(
     const evaluation = evaluations.get(entry.prepared.project.id)!;
     const { project } = entry.prepared;
     const summaries: ProjectProgressSummaryProposal[] = [];
+    const weeklyReportSyncs: ProjectProgressWeeklyReportSync[] = [];
     let projectMutationsApplied = 0;
     const appendWeeklyReport = async (
       proposal: ProjectProgressSummaryProposal,
@@ -990,6 +1002,7 @@ async function executeProjectProgressSync(
       if (!writer) {
         return { appended: 0, skipped: 0 };
       }
+      let appended = 0;
       try {
         const result = await appendProjectWeeklyReportContent({
           project,
@@ -998,6 +1011,10 @@ async function executeProjectProgressSync(
           writer,
           writeLimiter: oaWriteLimiter,
           cancellationSignal: input.cancellationSignal,
+          onSynced: (sync) => {
+            weeklyReportSyncs.push(sync);
+            if (sync.appended) appended += 1;
+          },
         });
         if (result.skipped > 0) {
           evaluation.warnings.push(
@@ -1012,7 +1029,7 @@ async function executeProjectProgressSync(
         evaluation.warnings.push(
           `weekly_report_write_failed:${proposal.summaryDate}:${errorMessage(error)}`,
         );
-        return { appended: 0, skipped: 0 };
+        return { appended, skipped: 0 };
       }
     };
     if (evaluation.complete || evaluation.groups.some((plan) => plan.cached)) {
@@ -1159,6 +1176,7 @@ async function executeProjectProgressSync(
       repositoryCount: evaluation.snapshots.length,
       commitCount: summaries.reduce((total, summary) => total + summary.commitCount, 0),
       mutationsApplied: projectMutationsApplied,
+      weeklyReportSyncs,
     });
     completedProjectEntries += 1;
     await emitTrace(input.trace, {
@@ -1449,7 +1467,11 @@ async function appendProjectWeeklyReportContent(input: {
   writer: ProjectProgressOaWriter;
   writeLimiter: AsyncSemaphore;
   cancellationSignal?: AbortSignal;
-}): Promise<{ appended: number; skipped: number }> {
+  onSynced: (sync: ProjectProgressWeeklyReportSync) => void;
+}): Promise<{
+  appended: number;
+  skipped: number;
+}> {
   const writer = input.writer;
   if (!hasWeeklyReportWriter(writer)) {
     return { appended: 0, skipped: 0 };
@@ -1487,6 +1509,15 @@ async function appendProjectWeeklyReportContent(input: {
     if (result.appended) {
       appended += 1;
     }
+    input.onSynced({
+      reportId: result.reportId,
+      weeklyNum: result.weeklyNum,
+      ownerId: result.ownerId,
+      githubId: result.githubId,
+      authorName: group.authorLabel,
+      content: input.proposal.summary,
+      appended: result.appended,
+    });
   }
   return { appended, skipped: authorGroups.skipped };
 }

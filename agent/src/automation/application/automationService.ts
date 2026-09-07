@@ -2017,9 +2017,9 @@ export class AutomationService implements AutomationOperations {
         `INSERT INTO automation_job_run_projects (
            run_id, project_id, project_name_snapshot, status_before, status_after,
            outcome, repository_count, commit_count, summary_date, source_digest,
-           generated_summary, ai_confidence, ai_note, warnings, mutations_applied,
+           generated_summary, ai_confidence, ai_note, weekly_report_syncs, warnings, mutations_applied,
            started_at, finished_at, duration_ms, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
            project_name_snapshot = VALUES(project_name_snapshot),
            status_before = VALUES(status_before), status_after = VALUES(status_after),
@@ -2027,6 +2027,7 @@ export class AutomationService implements AutomationOperations {
            commit_count = VALUES(commit_count), summary_date = VALUES(summary_date),
            source_digest = VALUES(source_digest), generated_summary = VALUES(generated_summary),
            ai_confidence = VALUES(ai_confidence), ai_note = VALUES(ai_note),
+           weekly_report_syncs = VALUES(weekly_report_syncs),
            warnings = VALUES(warnings), mutations_applied = VALUES(mutations_applied),
            started_at = VALUES(started_at), finished_at = VALUES(finished_at),
            duration_ms = VALUES(duration_ms), updated_at = VALUES(updated_at)`,
@@ -2044,6 +2045,7 @@ export class AutomationService implements AutomationOperations {
           input.generated_summary ?? null,
           input.ai_confidence ?? null,
           input.ai_note ?? null,
+          JSON.stringify(input.weekly_report_syncs),
           JSON.stringify(warnings),
           input.mutations_applied ? 1 : 0,
           input.started_at ? new Date(input.started_at) : null,
@@ -3069,6 +3071,7 @@ function serializeRunProject(
     generated_summary: row.generated_summary,
     ai_confidence: row.ai_confidence,
     ai_note: row.ai_note,
+    weekly_report_syncs: parseJson(row.weekly_report_syncs, []),
     warnings: parseJson(row.warnings, []),
     mutations_applied: Boolean(row.mutations_applied),
     started_at: formatUtc(row.started_at),

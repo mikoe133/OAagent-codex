@@ -173,6 +173,15 @@ describe("runProjectProgressAutomation", () => {
       upsertProjectResult: async ({ result }) => {
         projectCalls += 1;
         assert.deepEqual(result.warnings, [{ code: "summary_adopted" }]);
+        assert.deepEqual(result.weeklyReportSyncs, [{
+          reportId: 88,
+          weeklyNum: 202631,
+          ownerId: 7,
+          githubId: "alice",
+          authorName: "Alice",
+          content: "完成联调。",
+          appended: true,
+        }]);
         return 123;
       },
       upsertAiInteraction: async ({ interaction }) => {
@@ -658,6 +667,15 @@ function report(options: {
       repositoryCount: 1,
       commitCount: 2,
       mutationsApplied: 1,
+      weeklyReportSyncs: [{
+        reportId: 88,
+        weeklyNum: 202631,
+        ownerId: 7,
+        githubId: "alice",
+        authorName: "Alice",
+        content: "完成联调。",
+        appended: true,
+      }],
       summaries: [{
         summaryDate: "2026-07-30",
         commitCount: 2,

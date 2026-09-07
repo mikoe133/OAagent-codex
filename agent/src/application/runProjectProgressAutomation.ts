@@ -513,6 +513,7 @@ function buildProjectResult(
     generatedSummary: summary?.summary ?? null,
     aiConfidence: summary?.aiConfidence ?? null,
     aiNote: summary?.aiNote ?? null,
+    weeklyReportSyncs: project.weeklyReportSyncs ?? [],
     warnings: project.warnings.map((code) => ({ code: code.slice(0, 1_000) })),
     mutationsApplied: (project.mutationsApplied ?? 0) > 0,
     startedAt: startedAt.toISOString(),

@@ -55,6 +55,10 @@ GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Wor
 
 每日总结任务会在成功读取 GitHub 时持久化当天 Commit 的作者身份。某个仓库后续因 GitHub App 未授权而返回 `401` 时，如果本地仍有同日项目总结和对应 Commit 作者证据，任务会跳过 AI 重算；优先使用本地总结草稿，没有本地草稿时读取 OA 已有的同日项目总结，然后继续执行周报增量追加。没有作者证据或已有总结时不会猜测人员或内容，也不会写入周报，Trace 会记录 `weekly_report_skipped_no_commit_authors`。周报写入使用 OA 的 `POST /internal/project-sync/weekly-reports/append`，Agent 传提交所属的 `summary_date`，由 OA 通过 `weekly_report_days` 解析真实 `weekly_num`，再按 `user_profile.github_id` 定位提交者、锁定该用户的周报行，并用 marker 保证重试幂等。该接口必须和 OAagent 使用同一 `OA_PROJECT_SYNC_TOKEN`，部署 OA 端后才会生效。
 
+GitHub 同步任务的运行详情在项目总结下展示“周报同步内容”：包括 OA 返回的周次、周报编号、提交作者姓名及 GitHub 账号、同步的项目内容，并区分本次追加与幂等命中（周报中已存在）。人数按 OA 用户去重，条数按同步记录统计；多人同步中途失败仍保留之前成功的明细。这里展示的是该项目同步到周报的内容片段，不是整份个人周报；作者姓名来自 Commit，周报归属由 OA 返回的 `owner_id` 确认。
+
+这些明细通过项目运行审计的 `weekly_report_syncs` 字段持久化。部署时需执行 `008_automation_project_weekly_report_syncs.up.sql`（或启用服务启动自动迁移），并更新服务端、Worker 和前端。旧运行没有保存明细，迁移后为空列表，页面明确提示未记录；不会推测或自动补写历史明细。后续任务运行使用已有总结同步时也会记录明细。
+
 AI interaction 的 `response_payload_sanitized` 会记录 `prefetched_detail_calls`、`detail_calls`、`github_detail_requests`、`files_returned`、`patch_chars_returned` 和 `quality_retries`。判断模型是否真的看过代码证据，应以这些审计字段为准，不能依据模型生成的备注推断。详情失败或发生文件/Patch 裁剪时，Worker 会由代码追加对应 limitation。
 
 一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 GitHub App 执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。周报项目总结写入使用独立的项目 OA 调度器，最多同时写入配置数量个不同项目；同一项目同一周次仍只有一个写入任务。运行 claim、heartbeat、Trace、项目审计和终态更新使用独立控制面调度器，不会被项目写入并发放大。容器建议至少分配 `2 CPU / 3GB`。

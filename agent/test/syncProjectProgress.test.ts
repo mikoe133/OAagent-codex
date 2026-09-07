@@ -949,6 +949,15 @@ describe("syncProjectProgress", () => {
     assert.equal(result.projects[0]?.outcome, "incomplete");
     assert.equal(result.projects[0]?.summaries.length, 1);
     assert.equal(weeklyWrites, 1);
+    assert.deepEqual(result.projects[0]?.weeklyReportSyncs, [{
+      reportId: 43,
+      weeklyNum: 100,
+      ownerId: 7,
+      githubId: "alice",
+      authorName: "Alice",
+      content: "已有项目总结",
+      appended: true,
+    }]);
     assert.match(weeklyContent, /已有项目总结/);
     assert.match(weeklyContent, /### historical-weekly\n已有项目总结$/);
     assert.match(result.projects[0]?.warnings.join(" ") ?? "", /historical_commit_authors/);
@@ -1772,84 +1781,119 @@ describe("syncProjectProgress", () => {
     assert.equal(result.metrics.oaWritePeakConcurrency, 1);
   });
 
-  it("appends generated summaries into the current weekly report by commit author", async () => {
-    const weeklyAppends: Array<{
-      summaryDate: string;
-      githubId: string;
-      marker: string;
-      content: string;
-    }> = [];
-    const project = {
-      id: 51,
-      projectName: "weekly-append",
-      status: "updating" as const,
-      githubUrls: ["https://github.com/alpha/weekly-append"],
-    };
-    const result = await syncProjectProgress({
-      observedAt: new Date("2026-08-27T12:00:00.000Z"),
-      writeMode: "production",
-      oaClient: {
-        listProjects: async () => [project],
-        getProject: async () => project,
-        updateProjectStatus: async () => undefined,
-        listCommitSummaries: async () => [],
-        createCommitSummary: async (input) => ({ id: 901, ...input }),
-        updateCommitSummary: async (summaryId, input) => ({
-          id: summaryId,
-          projectId: project.id,
-          summaryDate: "2026-08-27",
-          ...input,
-        }),
-        getCommitSummary: async () => {
-          throw new Error("must not read");
+  for (const scenario of ["appended", "already exists", "partial failure"] as const) {
+    it(`records weekly report details by commit author: ${scenario}`, async () => {
+      const weeklyAppends: Array<{
+        summaryDate: string;
+        githubId: string;
+        marker: string;
+        content: string;
+      }> = [];
+      const project = {
+        id: 51,
+        projectName: "weekly-append",
+        status: "updating" as const,
+        githubUrls: ["https://github.com/alpha/weekly-append"],
+      };
+      const result = await syncProjectProgress({
+        observedAt: new Date("2026-08-27T12:00:00.000Z"),
+        writeMode: "production",
+        oaClient: {
+          listProjects: async () => [project],
+          getProject: async () => project,
+          updateProjectStatus: async () => undefined,
+          listCommitSummaries: async () => [],
+          createCommitSummary: async (input) => ({ id: 901, ...input }),
+          updateCommitSummary: async (summaryId, input) => ({
+            id: summaryId,
+            projectId: project.id,
+            summaryDate: "2026-08-27",
+            ...input,
+          }),
+          getCommitSummary: async () => {
+            throw new Error("must not read");
+          },
+          appendWeeklyReportContent: async (input: {
+            summaryDate: string;
+            githubId: string;
+            marker: string;
+            content: string;
+          }) => {
+            weeklyAppends.push(input);
+            if (scenario === "partial failure" && input.githubId === "bob") {
+              throw new Error("weekly report unavailable");
+            }
+            return {
+              reportId: 45,
+              weeklyNum: 100,
+              ownerId: input.githubId === "alice" ? 7 : 8,
+              githubId: input.githubId,
+              appended: scenario !== "already exists",
+            };
+          },
+        } as never,
+        githubReader: {
+          readRepository: async (repository) => ({
+            repositoryId: 1,
+            fullName: repository.fullName,
+            canonicalUrl: repository.canonicalUrl,
+            complete: true,
+            lastActivityAt: "2026-08-27T02:00:00.000Z",
+            commits: [
+              commit(1, repository.fullName, "alice-sha", "2026-08-27T01:00:00.000Z", {
+                authorLogin: "alice",
+                authorName: "Alice",
+                authorEmail: "alice@example.test",
+              }),
+              commit(1, repository.fullName, "bob-sha", "2026-08-27T02:00:00.000Z", {
+                authorLogin: "bob",
+                authorName: "Bob",
+                authorEmail: "bob@example.test",
+              }),
+            ],
+          }),
         },
-        appendWeeklyReportContent: async (input: {
-          summaryDate: string;
-          githubId: string;
-          marker: string;
-          content: string;
-        }) => {
-          weeklyAppends.push(input);
-          return {
-            reportId: 45,
-            weeklyNum: 100,
-            ownerId: input.githubId === "alice" ? 7 : 8,
-            githubId: input.githubId,
-            appended: true,
-          };
-        },
-      } as never,
-      githubReader: {
-        readRepository: async (repository) => ({
-          repositoryId: 1,
-          fullName: repository.fullName,
-          canonicalUrl: repository.canonicalUrl,
-          complete: true,
-          lastActivityAt: "2026-08-27T02:00:00.000Z",
-          commits: [
-            commit(1, repository.fullName, "alice-sha", "2026-08-27T01:00:00.000Z", {
-              authorLogin: "alice",
-              authorName: "Alice",
-              authorEmail: "alice@example.test",
-            }),
-            commit(1, repository.fullName, "bob-sha", "2026-08-27T02:00:00.000Z", {
-              authorLogin: "bob",
-              authorName: "Bob",
-              authorEmail: "bob@example.test",
-            }),
-          ],
-        }),
-      },
-      summarizer: { summarize: async () => ({ summary: "完成更新。", limitations: [] }) },
-      store: createWritableStore(),
-    });
+        summarizer: { summarize: async () => ({ summary: "完成更新。", limitations: [] }) },
+        store: createWritableStore(),
+      });
 
-    assert.equal(result.mode, "production-write");
-    assert.deepEqual(weeklyAppends.map((append) => append.githubId), ["alice", "bob"]);
-    assert.deepEqual(weeklyAppends.map((append) => append.summaryDate), ["2026-08-27", "2026-08-27"]);
-    assert.match(weeklyAppends[0]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\n### weekly-append\n完成更新。$/);
-    assert.match(weeklyAppends[1]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:bob:[a-f0-9]{64} -->\n### weekly-append\n完成更新。$/);
-  });
+      assert.equal(result.mode, "production-write");
+      assert.deepEqual(weeklyAppends.map((append) => append.githubId), ["alice", "bob"]);
+      assert.deepEqual(weeklyAppends.map((append) => append.summaryDate), ["2026-08-27", "2026-08-27"]);
+      assert.match(weeklyAppends[0]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\n### weekly-append\n完成更新。$/);
+      assert.match(weeklyAppends[1]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:bob:[a-f0-9]{64} -->\n### weekly-append\n完成更新。$/);
+      const expectedSyncs = [
+        {
+          reportId: 45,
+          weeklyNum: 100,
+          ownerId: 7,
+          githubId: "alice",
+          authorName: "Alice",
+          content: "完成更新。",
+          appended: scenario !== "already exists",
+        },
+        {
+          reportId: 45,
+          weeklyNum: 100,
+          ownerId: 8,
+          githubId: "bob",
+          authorName: "Bob",
+          content: "完成更新。",
+          appended: scenario !== "already exists",
+        },
+      ];
+      assert.deepEqual(
+        result.projects[0]?.weeklyReportSyncs,
+        scenario === "partial failure" ? expectedSyncs.slice(0, 1) : expectedSyncs,
+      );
+      // One project summary write plus the weekly reports actually appended.
+      assert.equal(result.projects[0]?.mutationsApplied,
+        scenario === "partial failure" ? 2 : scenario === "already exists" ? 1 : 3);
+      if (scenario === "partial failure") {
+        assert.match(result.projects[0]?.warnings.join(" ") ?? "", /weekly_report_write_failed/);
+      }
+    });
+  }
 
   it("writes directly when the weekly report is empty", async () => {
     let writtenSummaryDate: string | null = null;

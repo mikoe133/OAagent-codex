@@ -111,3 +111,23 @@ test("automation migration runs the monitor seed after event schema", async () =
   assert.ok(eventMigration >= 0)
   assert.ok(monitorSeed > eventMigration)
 })
+
+test("project run audit stores weekly report sync details with a reversible migration", async () => {
+  const baseline = await readFile(
+    path.join(sqlDir, "001_automation_schema_baseline.up.sql"),
+    "utf8",
+  )
+  const up = await readFile(
+    path.join(sqlDir, "008_automation_project_weekly_report_syncs.up.sql"),
+    "utf8",
+  )
+  const down = await readFile(
+    path.join(sqlDir, "008_automation_project_weekly_report_syncs.down.sql"),
+    "utf8",
+  )
+
+  assert.match(baseline, /weekly_report_syncs JSON NOT NULL/)
+  assert.match(up, /ADD COLUMN weekly_report_syncs JSON NULL/)
+  assert.match(up, /SET weekly_report_syncs = JSON_ARRAY\(\)/)
+  assert.match(down, /DROP COLUMN weekly_report_syncs/)
+})

@@ -415,6 +415,15 @@ test("shows project warnings and incomplete project visibility hints", () => {
   assert.match(runDetailSource, /repository_read_failed: "读取 GitHub 仓库失败"/)
 })
 
+test("shows weekly report sync details below generated project summaries", () => {
+  assert.match(runDetailSource, /周报同步内容/)
+  assert.match(runDetailSource, /formatAutomationWeeklyNum\(sync\.weekly_num\)/)
+  assert.match(runDetailSource, /label="周报作者"/)
+  assert.match(runDetailSource, /label="内容"/)
+  assert.match(runDetailSource, /project\.generated_summary/)
+  assert.match(runDetailSource, /project\.weekly_report_syncs\?\.length/)
+})
+
 test("polls and renders live automation run trace stages", () => {
   assert.match(automatedTasksSource, /getAutomationRunTrace\(runId\)/)
   assert.match(automatedTasksSource, /isActiveAutomationRun\(selectedRun\)/)

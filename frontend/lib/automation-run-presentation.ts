@@ -93,6 +93,14 @@ export function pendingItemProjectLabel(
   return `待确认内容 #${item.id}`
 }
 
+export function formatAutomationWeeklyNum(weeklyNum: number): string {
+  const year = Math.floor(weeklyNum / 100)
+  const week = weeklyNum % 100
+  return year >= 1970 && week >= 1 && week <= 53
+    ? `${year} 年第 ${week} 周`
+    : `第 ${weeklyNum} 周`
+}
+
 export function automationInteractionRepositoryFullName(
   interaction: Pick<AutomationAiInteraction, "request_payload_sanitized">,
 ): string {

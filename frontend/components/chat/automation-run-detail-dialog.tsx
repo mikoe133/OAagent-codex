@@ -6,6 +6,7 @@ import {
   Activity,
   Ban,
   Bot,
+  BookOpenText,
   CheckCircle2,
   Circle,
   CircleCheckBig,
@@ -46,6 +47,7 @@ import {
   buildAutomationProjectOutcomeChartData,
   pendingItemProjectLabel,
   projectOutcomeForDisplay,
+  formatAutomationWeeklyNum,
 } from "@/lib/automation-run-presentation"
 import { cn } from "@/lib/utils"
 
@@ -235,6 +237,44 @@ export function AutomationRunDetailDialog({
                     {project.generated_summary ? (
                       <div className="mt-3 rounded-lg bg-muted/50 p-3 text-sm leading-6 whitespace-pre-wrap">
                         {project.generated_summary}
+                      </div>
+                    ) : null}
+                    {run.job_type === "github_project_progress_sync" && (project.generated_summary || project.weekly_report_syncs?.length) ? (
+                      <div className="mt-4 border-t pt-4">
+                        <div className="flex items-center gap-2">
+                          <BookOpenText className="h-4 w-4 text-muted-foreground" />
+                          <h5 className="text-sm font-medium">周报同步内容</h5>
+                          {project.weekly_report_syncs?.length ? (
+                            <Badge variant="outline">
+                              {new Set(project.weekly_report_syncs.map((sync) => sync.owner_id)).size} 人 · {project.weekly_report_syncs.length} 条
+                            </Badge>
+                          ) : null}
+                        </div>
+                        {project.weekly_report_syncs?.length ? (
+                          <div className="mt-3 divide-y border-y">
+                            {project.weekly_report_syncs.map((sync, index) => (
+                              <div
+                                key={`${sync.report_id}-${sync.weekly_num}-${sync.github_id}-${index}`}
+                                className="grid gap-2 px-3 py-3 text-sm sm:grid-cols-[10rem_10rem_minmax(0,1fr)]"
+                              >
+                                <div className="space-y-1">
+                                  <Detail label="周次" value={formatAutomationWeeklyNum(sync.weekly_num)} />
+                                  <p className="text-xs text-muted-foreground">周报 #{sync.report_id}</p>
+                                </div>
+                                <div className="min-w-0 space-y-1">
+                                  <Detail label="周报作者" value={sync.author_name || sync.github_id} />
+                                  <Detail label="GitHub" value={sync.github_id} />
+                                </div>
+                                <div className="min-w-0 space-y-1">
+                                  <Detail label="内容" value={sync.content} preserveWhitespace />
+                                  <p className="text-xs text-muted-foreground">{sync.appended ? "本次已追加" : "周报中已存在"}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-sm text-muted-foreground">本次运行未记录周报同步明细，无法展示对应周次、人物和内容。</p>
+                        )}
                       </div>
                     ) : null}
                     {project.ai_note ? <p className="mt-2 text-xs text-muted-foreground">AI 备注：{project.ai_note}</p> : null}
@@ -660,8 +700,20 @@ function Metric({ label, value }: { label: string; value: string }) {
   )
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return <p><span className="text-muted-foreground">{label}：</span>{value}</p>
+function Detail({
+  label,
+  value,
+  preserveWhitespace = false,
+}: {
+  label: string
+  value: string
+  preserveWhitespace?: boolean
+}) {
+  return (
+    <p className={cn("min-w-0 break-words", preserveWhitespace && "whitespace-pre-wrap")}>
+      <span className="text-muted-foreground">{label}：</span>{value}
+    </p>
+  )
 }
 
 function Empty({ text }: { text: string }) {

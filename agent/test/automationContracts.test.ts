@@ -194,6 +194,33 @@ test("keeps no_commits compatible with the existing worker", () => {
   });
 
   assert.equal(result.outcome, "no_commits");
+  assert.deepEqual(result.weekly_report_syncs, []);
+});
+
+test("accepts weekly report audit details including idempotent syncs", () => {
+  const sync = {
+    report_id: 45,
+    weekly_num: 202635,
+    owner_id: 7,
+    github_id: "alice",
+    author_name: "Alice",
+    content: "完成项目更新。\n补充回归验证。",
+    appended: false,
+  };
+  const input = {
+    worker_instance: "worker-01",
+    lease_token: "a".repeat(64),
+    project_name_snapshot: "Project A",
+    outcome: "evaluated",
+    weekly_report_syncs: [sync],
+  };
+  assert.deepEqual(automationRunProjectUpsertSchema.parse(input).weekly_report_syncs, [sync]);
+  for (const invalid of [{ owner_id: 0 }, { weekly_num: 0 }, { content: "" }]) {
+    assert.equal(automationRunProjectUpsertSchema.safeParse({
+      ...input,
+      weekly_report_syncs: [{ ...sync, ...invalid }],
+    }).success, false);
+  }
 });
 
 test("rejects unsupported worker status and invalid trace progress", () => {

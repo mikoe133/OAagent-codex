@@ -101,6 +101,15 @@ export type AutomationRunProjectInput = {
   generatedSummary: string | null;
   aiConfidence: number | null;
   aiNote: string | null;
+  weeklyReportSyncs?: Array<{
+    reportId: number;
+    weeklyNum: number;
+    ownerId: number;
+    githubId: string;
+    authorName: string;
+    content: string;
+    appended: boolean;
+  }>;
   warnings: Array<Record<string, unknown>>;
   mutationsApplied: boolean;
   startedAt: string;
@@ -340,6 +349,15 @@ export class AutomationOaClient {
           generated_summary: input.result.generatedSummary,
           ai_confidence: input.result.aiConfidence,
           ai_note: input.result.aiNote,
+          weekly_report_syncs: (input.result.weeklyReportSyncs ?? []).map((sync) => ({
+            report_id: sync.reportId,
+            weekly_num: sync.weeklyNum,
+            owner_id: sync.ownerId,
+            github_id: sync.githubId,
+            author_name: sync.authorName,
+            content: sync.content,
+            appended: sync.appended,
+          })),
           warnings: input.result.warnings,
           mutations_applied: input.result.mutationsApplied,
           started_at: input.result.startedAt,

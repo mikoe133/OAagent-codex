@@ -292,6 +292,15 @@ describe("AutomationOaClient", () => {
         generatedSummary: "完成联调。",
         aiConfidence: 90,
         aiNote: "提交完整。",
+        weeklyReportSyncs: [{
+          reportId: 88,
+          weeklyNum: 202631,
+          ownerId: 7,
+          githubId: "alice",
+          authorName: "Alice",
+          content: "完成联调。",
+          appended: true,
+        }],
         warnings: [],
         mutationsApplied: true,
         startedAt: "2026-07-30T12:00:00Z",
@@ -394,6 +403,16 @@ describe("AutomationOaClient", () => {
     const auditBody = mutationBodies[1]!;
     assert.deepEqual(auditBody.request_payload_sanitized, { commit_count: 2 });
     assert.doesNotMatch(JSON.stringify(auditBody), /commit subject/);
+    const projectBody = mutationBodies[0]!;
+    assert.deepEqual(projectBody.weekly_report_syncs, [{
+      report_id: 88,
+      weekly_num: 202631,
+      owner_id: 7,
+      github_id: "alice",
+      author_name: "Alice",
+      content: "完成联调。",
+      appended: true,
+    }]);
     const pendingBody = mutationBodies[2]!;
     assert.equal((pendingBody.items as Array<Record<string, unknown>>)[0]?.reason_code, "project_not_found");
     const traceBody = mutationBodies[3]!;
