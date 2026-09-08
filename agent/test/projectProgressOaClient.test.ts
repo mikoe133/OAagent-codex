@@ -14,6 +14,24 @@ import { OaRequestScheduler } from "../src/infrastructure/oa/oaRequestScheduler.
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 
 describe("ProjectProgressOaClient", () => {
+  it("reads author-specific style context using service authentication and rejects mismatched authors", async () => {
+    let author = "Alice";
+    const client = new ProjectProgressOaClient({ baseUrl: "https://oa.example.test", alias: "production", token: "test-token", tokenHeader: "Authorization", tokenPrefix: "Bearer" }, async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/internal/project-sync/weekly-reports/style-context");
+      assert.equal(url.searchParams.get("summary_date"), "2026-01-01");
+      assert.equal(url.searchParams.get("github_id"), "alice");
+      assert.equal(init?.method, "GET");
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-token");
+      return Response.json({ success: true, data: { report_id: 42, weekly_num: 202601, owner_id: 7, github_id: author, previous_report: { report_id: 41, weekly_num: 202552, content: "## 工作\n- 已完成内容" } } });
+    });
+    const context = await client.getWeeklyReportStyleContext({ summaryDate: "2026-01-01", githubId: "alice" });
+    assert.equal(context.previousReport?.weeklyNum, 202552);
+    assert.equal(context.previousReport?.reportId, 41);
+    author = "bob";
+    await assert.rejects(client.getWeeklyReportStyleContext({ summaryDate: "2026-01-01", githubId: "alice" }), /作者不匹配/);
+  });
+
   it("decodes every page from the OA project envelope", async () => {
     const requestedPages: string[] = [];
     const client = new ProjectProgressOaClient(

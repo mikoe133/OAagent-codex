@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { WEEKLY_REPORT_STYLE_PROMPT, WEEKLY_REPORT_STYLE_PROMPT_VERSION } from "../../domain/weeklyReportStyle.js";
 import type {
   PoolConnection,
   ResultSetHeader,
@@ -2071,8 +2072,13 @@ export class AutomationService implements AutomationOperations {
     const input = automationAiInteractionCreateSchema.parse(body);
     return this.withWorkerTransaction(async (connection, now) => {
       const run = await loadWorkerRun(connection, runId, input, now);
+      const isWeeklyStyleAudit = run.job_type_snapshot === "github_project_progress_sync" &&
+        input.request_payload_sanitized?.purpose === "weekly_report_style" &&
+        input.interaction_key.startsWith("weekly-report-style:") &&
+        input.prompt_version === WEEKLY_REPORT_STYLE_PROMPT_VERSION &&
+        input.system_prompt_snapshot === WEEKLY_REPORT_STYLE_PROMPT;
       if (
-        run.prompt_version_snapshot !== null &&
+        !isWeeklyStyleAudit && run.prompt_version_snapshot !== null &&
         (input.prompt_version !== run.prompt_version_snapshot ||
           input.system_prompt_snapshot !== run.system_prompt_snapshot)
       ) {

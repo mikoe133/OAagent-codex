@@ -59,6 +59,21 @@ export type WeeklyReportAppendResult = {
   appended: boolean;
 };
 
+export type WeeklyReportStyleContext = {
+  reportId: number;
+  weeklyNum: number;
+  ownerId: number;
+  githubId: string;
+  previousReport: { reportId: number; weeklyNum: number; content: string } | null;
+};
+
+export interface WeeklyReportStyleReader {
+  getWeeklyReportStyleContext(
+    input: { summaryDate: string; githubId: string },
+    signal?: AbortSignal,
+  ): Promise<WeeklyReportStyleContext>;
+}
+
 export type OaCommitSummary = {
   id: number;
   projectId: number;
@@ -251,6 +266,42 @@ export class ProjectProgressOaClient implements
       },
     );
     return decodeWeeklyReportAppendResult(decodeEnvelope(payload).data);
+  }
+
+  async getWeeklyReportStyleContext(
+    input: { summaryDate: string; githubId: string },
+    signal?: AbortSignal,
+  ): Promise<WeeklyReportStyleContext> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.summaryDate) || !input.githubId.trim()) {
+      throw new OaContractError("OA 周报风格查询参数无效。");
+    }
+    const payload = await this.request(
+      PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportStyleContext,
+      "/internal/project-sync/weekly-reports/style-context",
+      { summary_date: input.summaryDate, github_id: input.githubId },
+      { signal },
+    );
+    const data = decodeEnvelope(payload).data;
+    if (!isRecord(data)) throw new OaContractError("OA 周报风格响应无效。");
+    const target = decodeWeeklyReportAppendResult({ ...data, appended: false });
+    if (target.githubId.toLowerCase() !== input.githubId.trim().toLowerCase()) {
+      throw new OaContractError("OA 周报风格响应作者不匹配。");
+    }
+    const previous = data.previous_report;
+    if (previous !== null && (!isRecord(previous) ||
+      !Number.isInteger(previous.report_id) || (previous.report_id as number) < 1 ||
+      !Number.isInteger(previous.weekly_num) || typeof previous.content !== "string")) {
+      throw new OaContractError("OA 上周周报响应无效。");
+    }
+    return {
+      reportId: target.reportId, weeklyNum: target.weeklyNum,
+      ownerId: target.ownerId, githubId: target.githubId,
+      previousReport: previous === null ? null : {
+        reportId: previous.report_id as number,
+        weeklyNum: previous.weekly_num as number,
+        content: previous.content as string,
+      },
+    };
   }
 
   async updateProjectStatus(

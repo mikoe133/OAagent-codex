@@ -86,6 +86,7 @@ export type WeeklyReportAgentRunInput = {
   developerInstructions: string;
   prompt: string;
   signal?: AbortSignal;
+  outputSchema?: Record<string, unknown>;
 };
 
 export type WeeklyReportAgentRunResult = {
@@ -241,7 +242,7 @@ function isRetryableError(error: unknown): boolean {
   ].some((pattern) => pattern.test(error.message));
 }
 
-async function runWeeklyReportAgent(
+export async function runWeeklyReportAgent(
   input: WeeklyReportAgentRunInput,
 ): Promise<WeeklyReportAgentRunResult> {
   const relay = await startProjectProgressModelRelay(input.model);
@@ -303,7 +304,7 @@ async function runWeeklyReportAgent(
       webSearchMode: "disabled",
     });
     const turn = await thread.run(input.prompt, {
-      outputSchema: weeklyReportOutputSchema(
+      outputSchema: input.outputSchema ?? weeklyReportOutputSchema(
         extractPromptSegmentKeys(input.prompt),
       ),
       signal: input.signal

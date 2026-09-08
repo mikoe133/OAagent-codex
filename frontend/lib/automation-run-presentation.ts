@@ -109,6 +109,10 @@ export function automationInteractionRepositoryFullName(
     return "未记录仓库"
   }
   const repositoryFullName = (payload as Record<string, unknown>).repository_full_name
+  if ((payload as Record<string, unknown>).purpose === "weekly_report_style") {
+    const githubId = (payload as Record<string, unknown>).github_id
+    return typeof githubId === "string" ? `周报风格 · ${githubId}` : "周报风格"
+  }
   return typeof repositoryFullName === "string" && repositoryFullName.trim()
     ? repositoryFullName.trim()
     : "未记录仓库"

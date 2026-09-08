@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { CodexWeeklyReportStyleSummarizer } from "../src/application/weeklyReportStyleSummarizer.js";
 import { describe, it } from "node:test";
 import {
   projectProgressExecutionPolicy,
@@ -1891,6 +1892,78 @@ describe("syncProjectProgress", () => {
         scenario === "partial failure" ? 2 : scenario === "already exists" ? 1 : 3);
       if (scenario === "partial failure") {
         assert.match(result.projects[0]?.warnings.join(" ") ?? "", /weekly_report_write_failed/);
+      }
+    });
+  }
+
+  for (const scenario of ["matched", "no_previous", "model_failure", "context_failure"] as const) {
+    it(`prepares author-specific weekly report content before append: ${scenario}`, async () => {
+      const projects = [51, 52].map((id) => ({ id, projectName: `Project ${id}`, status: "updating" as const, githubUrls: ["https://github.com/alpha/api"] }));
+      const calls: string[] = [];
+      const contents: string[] = [];
+      let contextReads = 0;
+      const report = await syncProjectProgress({
+        observedAt: new Date("2026-08-27T12:00:00Z"), writeMode: "production",
+        oaClient: {
+          listProjects: async () => projects, getProject: async () => projects[0],
+          updateProjectStatus: async () => undefined,
+          listCommitSummaries: async () => [],
+          createCommitSummary: async (input: object) => ({ id: 901, ...input }),
+          updateCommitSummary: async () => { throw new Error("unexpected update"); },
+          getWeeklyReportStyleContext: async ({ githubId }: { githubId: string }) => {
+            contextReads += 1;
+            calls.push(`read:${githubId}`);
+            if (scenario === "context_failure") throw new Error("github_identity_not_found");
+            return { reportId: 45, weeklyNum: 100, ownerId: githubId === "alice" ? 7 : 8, githubId,
+              previousReport: scenario === "no_previous" ? null : { reportId: githubId === "alice" ? 41 : 42, weeklyNum: 99, content: `${githubId} 的上周风格` } };
+          },
+          appendWeeklyReportContent: async (input: { githubId: string; content: string }) => {
+            calls.push(`append:${input.githubId}`); contents.push(input.content);
+            return { reportId: 45, weeklyNum: 100, ownerId: input.githubId === "alice" ? 7 : 8, githubId: input.githubId, appended: true };
+          },
+        } as never,
+        githubReader: { readRepository: async (repository) => ({ repositoryId: 1, fullName: repository.fullName, canonicalUrl: repository.canonicalUrl, complete: true, lastActivityAt: "2026-08-27T02:00:00Z", commits: [
+          commit(1, repository.fullName, "a", "2026-08-27T01:00:00Z", { authorLogin: "alice" }),
+          commit(1, repository.fullName, "b", "2026-08-27T02:00:00Z", { authorLogin: "bob" }),
+        ] }) },
+        summarizer: { summarize: async () => ({ summary: "完成更新。", limitations: [] }) },
+        weeklyReportStyleSummarizer: new CodexWeeklyReportStyleSummarizer({ model: { provider: "nexttoken", apiBaseUrl: "https://model.example.test", apiKey: "test", model: "test", parameters: {} }, workingDirectory: "/tmp" }, async (input) => {
+          const prompt = JSON.parse(input.prompt);
+          calls.push(`style:${prompt.previous_report}`);
+          if (scenario === "model_failure") throw new Error("unavailable");
+          return { finalResponse: JSON.stringify({ content: `## ${prompt.project_name}\n- 完成更新。` }), usage: null, upstreamRequestId: "style-test", prohibitedToolUseCount: 0 };
+        }),
+        store: createWritableStore(),
+      });
+      assert.equal(contextReads, scenario === "context_failure" ? 1 : 2);
+      assert.ok(report.projects.every((p) => p.summaries[0]?.summary === "完成更新。"));
+      if (scenario === "context_failure") {
+        assert.deepEqual(contents, []);
+        assert.match(report.projects[0]!.warnings.join(" "), /weekly_report_write_failed/);
+      } else {
+        assert.equal(contents.length, 4);
+        for (const [index, content] of contents.entries()) {
+          // The existing hidden marker prevents duplicate appends; visible content is project work only.
+          const body = content.replace(/^<!-- oaagent-project-progress:[^\n]+ -->\n/u, "");
+          const projectName = index < 2 ? "Project 51" : "Project 52";
+          assert.equal(body, scenario === "matched"
+            ? `## ${projectName}\n- 完成更新。`
+            : `### ${projectName}\n完成更新。`);
+        }
+        assert.ok(calls.indexOf("read:alice") < calls.indexOf("append:alice"));
+        assert.ok(calls.indexOf("read:bob") < calls.indexOf("append:bob"));
+        assert.equal(report.projects[0]?.weeklyReportSyncs?.[0]?.styleStatus,
+          scenario === "matched" ? "matched" : scenario === "no_previous" ? "no_previous_report" : "fallback");
+        if (scenario === "matched") {
+          assert.match(contents[0]!, /## Project 51\n- 完成更新。/);
+          assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.referenceReportId, 42);
+          assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.referenceWeeklyNum, 99);
+          assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.weeklyNum, 100);
+          assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.reportId, 45);
+          assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.githubId, "bob");
+          assert.equal(report.projects[0]?.summaries[0]?.weeklyReportInteractions?.length, 2);
+        }
+        if (scenario === "no_previous") assert.equal(calls.some((call) => call.startsWith("style:")), false);
       }
     });
   }

@@ -12,6 +12,31 @@ import {
 import { ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
 
 describe("runProjectProgressAutomation", () => {
+  it("uploads weekly style AI audits with their own prompt and stable author key", async () => {
+    const auditKeys: string[] = [];
+    const resultReport = report({ withProject: true });
+    resultReport.projects[0]!.summaries[0]!.weeklyReportInteractions = [{ githubId: "Alice", interaction: {
+      ...interaction("style-request"), promptVersion: "weekly-report-style-v1", systemPromptSnapshot: "Style-only system prompt",
+      requestPayloadSanitized: { purpose: "weekly_report_style", github_id: "Alice" },
+    } }];
+    const result = await runProjectProgressAutomation({
+      automationClient: fakeClient({ upsertAiInteraction: async ({ interaction }) => {
+        auditKeys.push(interaction.interactionKey);
+        if (interaction.interactionKey.startsWith("weekly-report-style:")) {
+          assert.equal(interaction.promptVersion, "weekly-report-style-v1");
+          assert.equal(interaction.systemPromptSnapshot, "Style-only system prompt");
+          assert.equal(interaction.requestPayloadSanitized.purpose, "weekly_report_style");
+        }
+        return 1;
+      } }),
+      workerInstance: "worker-01", leaseSeconds: 300, heartbeatSeconds: 60,
+      resolveExecution: async () => async () => resultReport,
+    });
+    assert.equal(result.status, "succeeded");
+    assert.ok(auditKeys.includes("weekly-report-style:51:2026-07-30:alice"));
+    assert.equal(auditKeys.length, 2);
+  });
+
   it("clears a persisted claim identity after an idle response", async () => {
     const cleared: string[] = [];
     const client = fakeClient({

@@ -300,6 +300,9 @@ describe("AutomationOaClient", () => {
           authorName: "Alice",
           content: "完成联调。",
           appended: true,
+        styleStatus: "matched",
+        referenceReportId: 41,
+        referenceWeeklyNum: 202630,
         }],
         warnings: [],
         mutationsApplied: true,
@@ -412,6 +415,9 @@ describe("AutomationOaClient", () => {
       author_name: "Alice",
       content: "完成联调。",
       appended: true,
+      style_status: "matched",
+      reference_report_id: 41,
+      reference_weekly_num: 202630,
     }]);
     const pendingBody = mutationBodies[2]!;
     assert.equal((pendingBody.items as Array<Record<string, unknown>>)[0]?.reason_code, "project_not_found");

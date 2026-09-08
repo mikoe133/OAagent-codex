@@ -24,6 +24,10 @@ test("formats OA business weekly numbers for project sync details", () => {
   assert.equal(formatAutomationWeeklyNum(35), "第 35 周")
 })
 
+test("labels weekly report style audits by the target author", () => {
+  assert.equal(automationInteractionRepositoryFullName(interaction({ request_payload_sanitized: { purpose: "weekly_report_style", github_id: "alice" } })), "周报风格 · alice")
+})
+
 test("reads the repository full name used by an AI interaction", () => {
   assert.equal(
     automationInteractionRepositoryFullName(interaction({

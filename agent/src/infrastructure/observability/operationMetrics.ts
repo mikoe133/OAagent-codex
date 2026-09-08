@@ -24,6 +24,7 @@ export const PROJECT_PROGRESS_ENDPOINTS = {
   oaWeeklyReportReportGet: "oa.weekly-report.report.get",
   oaWeeklyReportReportUpsert: "oa.weekly-report.report.upsert",
   oaWeeklyReportAppend: "oa.weekly-report.append",
+  oaWeeklyReportStyleContext: "oa.weekly-report.style-context",
   githubRepositoryGet: "github.repository.get",
   githubAppInstallationsList: "github.app.installations.list",
   githubAppInstallationTokenCreate: "github.app.installation-token.create",

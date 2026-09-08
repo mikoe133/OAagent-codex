@@ -268,6 +268,15 @@ export function AutomationRunDetailDialog({
                                 <div className="min-w-0 space-y-1">
                                   <Detail label="内容" value={sync.content} preserveWhitespace />
                                   <p className="text-xs text-muted-foreground">{sync.appended ? "本次已追加" : "周报中已存在"}</p>
+                                  {sync.style_status ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      {sync.style_status === "matched"
+                                        ? `已参考周报 #${sync.reference_report_id}${sync.reference_weekly_num ? `（${formatAutomationWeeklyNum(sync.reference_weekly_num)}）` : ""}的风格`
+                                        : sync.style_status === "no_previous_report"
+                                          ? "上周及上上周均无有效周报内容，使用原项目总结"
+                                          : "风格改写失败，使用原项目总结"}
+                                    </p>
+                                  ) : null}
                                 </div>
                               </div>
                             ))}
@@ -280,6 +289,9 @@ export function AutomationRunDetailDialog({
                     {project.ai_note ? <p className="mt-2 text-xs text-muted-foreground">AI 备注：{project.ai_note}</p> : null}
                     {project.outcome === "incomplete" && project.warnings.length > 0 ? (
                       <ProjectWarnings warnings={project.warnings} />
+                    ) : null}
+                    {project.outcome !== "incomplete" && project.warnings.some((warning) => String(warning.code).startsWith("weekly_report_")) ? (
+                      <ProjectWarnings warnings={project.warnings.filter((warning) => String(warning.code).startsWith("weekly_report_"))} />
                     ) : null}
                   </article>
                 )) : null}
@@ -793,6 +805,9 @@ function formatProjectWarning(warning: Record<string, unknown>): string {
     status_write_failed: "写入项目状态失败",
     summary_write_failed: "写入项目总结失败",
     cancel_requested: "任务收到取消请求",
+    weekly_report_write_failed: "周报同步失败",
+    weekly_report_style_fallback: "周报风格改写失败，已使用原总结",
+    weekly_report_skipped_no_github_identity: "提交缺少 GitHub 账号，已跳过周报同步",
   }
   return detail ? `${labels[prefix] ?? "处理警告"}：${detail}` : labels[prefix] ?? code
 }

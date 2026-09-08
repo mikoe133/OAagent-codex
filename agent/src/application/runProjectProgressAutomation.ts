@@ -199,23 +199,30 @@ export async function runProjectProgressAutomation(input: {
         result: projectResult,
       });
       for (const summary of project.summaries) {
-        const interactions = summary.repositoryInteractions?.length
+        const repositoryInteractions = summary.repositoryInteractions?.length
           ? summary.repositoryInteractions
           : summary.interaction
             ? [{ repositoryKey: null, interaction: summary.interaction }]
             : [];
+        const interactions = [
+          ...repositoryInteractions.map((item) => ({ ...item, auditKey: null as string | null })),
+          ...(summary.weeklyReportInteractions ?? []).map((item) => ({
+            repositoryKey: null, interaction: item.interaction,
+            auditKey: `weekly-report-style:${project.projectId}:${summary.summaryDate}:${item.githubId.toLowerCase()}`,
+          })),
+        ];
         for (const repositoryInteraction of interactions) {
           const interaction = repositoryInteraction.interaction;
-          const promptVersion = claim.promptProfile?.promptVersion ??
+          const promptVersion = repositoryInteraction.auditKey ? interaction.promptVersion : claim.promptProfile?.promptVersion ??
             interaction.promptVersion;
-          const systemPromptSnapshot = claim.promptProfile?.systemPrompt ??
+          const systemPromptSnapshot = repositoryInteraction.auditKey ? interaction.systemPromptSnapshot : claim.promptProfile?.systemPrompt ??
             interaction.systemPromptSnapshot;
           await input.automationClient.upsertAiInteraction({
             claim,
             workerInstance: input.workerInstance,
             interaction: {
               runProjectId,
-              interactionKey: interactionKey(
+              interactionKey: repositoryInteraction.auditKey ?? interactionKey(
                 project.projectId,
                 summary,
                 repositoryInteraction.repositoryKey,

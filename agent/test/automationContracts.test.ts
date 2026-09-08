@@ -206,6 +206,9 @@ test("accepts weekly report audit details including idempotent syncs", () => {
     author_name: "Alice",
     content: "完成项目更新。\n补充回归验证。",
     appended: false,
+    style_status: "matched",
+    reference_report_id: 41,
+    reference_weekly_num: 202634,
   };
   const input = {
     worker_instance: "worker-01",

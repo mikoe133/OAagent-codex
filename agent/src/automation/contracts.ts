@@ -34,6 +34,9 @@ const weeklyReportSyncAudit = z
     author_name: z.string().trim().min(1).max(255),
     content: z.string().trim().min(1).max(100_000),
     appended: z.boolean(),
+    style_status: z.enum(["matched", "no_previous_report", "fallback"]).optional(),
+    reference_report_id: z.number().int().positive().optional(),
+    reference_weekly_num: z.number().int().positive().optional(),
   })
   .strict();
 const uniquePositiveIds = z

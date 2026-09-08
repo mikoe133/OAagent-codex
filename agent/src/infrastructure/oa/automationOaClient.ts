@@ -109,6 +109,9 @@ export type AutomationRunProjectInput = {
     authorName: string;
     content: string;
     appended: boolean;
+    styleStatus?: "matched" | "no_previous_report" | "fallback";
+    referenceReportId?: number;
+    referenceWeeklyNum?: number;
   }>;
   warnings: Array<Record<string, unknown>>;
   mutationsApplied: boolean;
@@ -357,6 +360,9 @@ export class AutomationOaClient {
             author_name: sync.authorName,
             content: sync.content,
             appended: sync.appended,
+            ...(sync.styleStatus ? { style_status: sync.styleStatus } : {}),
+            ...(sync.referenceReportId ? { reference_report_id: sync.referenceReportId } : {}),
+            ...(sync.referenceWeeklyNum ? { reference_weekly_num: sync.referenceWeeklyNum } : {}),
           })),
           warnings: input.result.warnings,
           mutations_applied: input.result.mutationsApplied,

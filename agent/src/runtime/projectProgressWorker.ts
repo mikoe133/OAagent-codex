@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { runProjectProgressAutomation } from "../application/runProjectProgressAutomation.js";
 import { syncWeeklyReportProjectSummaries } from "../application/weeklyReportProjectSummarySync.js";
 import { CodexWeeklyReportProjectSummaryAgent } from "../application/weeklyReportAgentSummarizer.js";
+import { CodexWeeklyReportStyleSummarizer } from "../application/weeklyReportStyleSummarizer.js";
 import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
 import {
   resolveProjectProgressAutomationParameters,
@@ -285,6 +286,7 @@ async function main(): Promise<void> {
                     : "lookback",
                 },
               ),
+              weeklyReportStyleSummarizer: new CodexWeeklyReportStyleSummarizer({ model: config.model, workingDirectory: repoRoot }),
               summarizer: new CodexProjectProgressSummarizer({
                 model: config.model,
                 githubAuth,

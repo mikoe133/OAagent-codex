@@ -55,6 +55,12 @@ GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Wor
 
 每日总结任务会在成功读取 GitHub 时持久化当天 Commit 的作者身份。某个仓库后续因 GitHub App 未授权而返回 `401` 时，如果本地仍有同日项目总结和对应 Commit 作者证据，任务会跳过 AI 重算；优先使用本地总结草稿，没有本地草稿时读取 OA 已有的同日项目总结，然后继续执行周报增量追加。没有作者证据或已有总结时不会猜测人员或内容，也不会写入周报，Trace 会记录 `weekly_report_skipped_no_commit_authors`。周报写入使用 OA 的 `POST /internal/project-sync/weekly-reports/append`，Agent 传提交所属的 `summary_date`，由 OA 通过 `weekly_report_days` 解析真实 `weekly_num`，再按 `user_profile.github_id` 定位提交者、锁定该用户的周报行，并用 marker 保证重试幂等。该接口必须和 OAagent 使用同一 `OA_PROJECT_SYNC_TOKEN`，部署 OA 端后才会生效。
 
+GitHub 总结写入周报前，Worker 通过 `GET /internal/project-sync/weekly-reports/style-context?github_id=...&summary_date=...` 优先读取目标作者上一业务周的周报，无有效内容时再读取上上周周报，使用本次任务配置的模型改写当前项目总结。历史周报内容只参考标题、列表/表格、语气和详略；当前项目总结是唯一事实来源。风格来源单独保存在同步元数据和审计记录中，生成并写入 OA 的周报正文不包含来源周次、报告编号或仿写说明。仍按作者、项目、日期和 Commit digest 使用原有 marker 增量追加，不覆盖整份周报或已存在 marker 的内容。同一运行按作者与总结日期缓存只读上下文。
+
+上一周由 OA 根据目标业务周期的开始日期前一天定位，支持跨年，不对 `weekly_num` 做减一。上周周期不存在、该作者无周报或内容为空白时，再查上上周；找到上周周期时按其开始日期前一天定位上上周，缺失周期时将查询日期再回退 7 天。最多查询这两周，两周均无有效内容才使用原项目总结。模型失败或输出无效时也回退原总结，并记录 `weekly_report_style_fallback`；身份/权限/目标周报不存在或读取接口失败时不追加，记录 `weekly_report_write_failed`。运行 Trace 展示读取及改写阶段，周报明细包含 `style_status`、`reference_report_id`、`reference_weekly_num`；AI 审计使用 `purpose=weekly_report_style`，不保存历史周报原文，只记录引用编号和摘要哈希。
+
+启用此流程需先部署 OAbackend 的新只读接口，再更新 OAagent 服务端、Worker 和前端。风格来源字段保存在既有 JSON 审计列中，不新增数据库列。缺少该接口的 OA 版本会导致风格读取失败并跳过本次周报追加。
+
 GitHub 同步任务的运行详情在项目总结下展示“周报同步内容”：包括 OA 返回的周次、周报编号、提交作者姓名及 GitHub 账号、同步的项目内容，并区分本次追加与幂等命中（周报中已存在）。人数按 OA 用户去重，条数按同步记录统计；多人同步中途失败仍保留之前成功的明细。这里展示的是该项目同步到周报的内容片段，不是整份个人周报；作者姓名来自 Commit，周报归属由 OA 返回的 `owner_id` 确认。
 
 这些明细通过项目运行审计的 `weekly_report_syncs` 字段持久化。部署时需执行 `008_automation_project_weekly_report_syncs.up.sql`（或启用服务启动自动迁移），并更新服务端、Worker 和前端。旧运行没有保存明细，迁移后为空列表，页面明确提示未记录；不会推测或自动补写历史明细。后续任务运行使用已有总结同步时也会记录明细。

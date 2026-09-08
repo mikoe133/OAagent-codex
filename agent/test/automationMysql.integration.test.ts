@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { WEEKLY_REPORT_STYLE_PROMPT, WEEKLY_REPORT_STYLE_PROMPT_VERSION } from "../src/domain/weeklyReportStyle.js";
 
 import { AutomationService } from "../src/automation/application/automationService.js";
 import { AutomationHttpError } from "../src/automation/http/automationHttpApplication.js";
@@ -178,6 +179,20 @@ test(
         latency_ms: 10,
         status: "succeeded",
       });
+      const styleAudit = {
+        ...lease,
+        run_project_id: project.run_project_id,
+        interaction_key: "weekly-report-style:99:2026-01-01:alice",
+        provider: "nexttoken", model: "gpt-5.6-terra",
+        prompt_version: WEEKLY_REPORT_STYLE_PROMPT_VERSION,
+        system_prompt_snapshot: WEEKLY_REPORT_STYLE_PROMPT,
+        request_payload_sanitized: { purpose: "weekly_report_style", github_id: "alice" },
+        response_payload_sanitized: {}, status: "succeeded",
+      };
+      await service.createAiInteraction(triggered.run_id, styleAudit);
+      await assert.rejects(service.createAiInteraction(triggered.run_id, {
+        ...styleAudit, system_prompt_snapshot: "Unrecognized style prompt",
+      }), (error: unknown) => error instanceof AutomationHttpError && error.code === "automation_prompt_snapshot_mismatch");
       await service.upsertTraceEvent(triggered.run_id, {
         ...lease,
         event_key: "project-99",
@@ -225,7 +240,7 @@ test(
       assert.equal(detail.status, "succeeded");
       assert.equal(detail.projects_total, 1);
       assert.equal(detail.projects_succeeded, 1);
-      assert.equal(detail.ai_interaction_count, 1);
+      assert.equal(detail.ai_interaction_count, 2);
       assert.equal(detail.projects[0]?.run_id, triggered.run_id);
       assert.equal(detail.projects[0]?.outcome, "no_commits");
       assert.equal(detail.projects[0]?.source_digest, null);
@@ -250,7 +265,7 @@ test(
         new URLSearchParams(),
         42,
       )) as { ai_interaction_count: number };
-      assert.equal(detailWithoutIncludes.ai_interaction_count, 1);
+      assert.equal(detailWithoutIncludes.ai_interaction_count, 2);
 
       await service.patchJob(
         job.id,

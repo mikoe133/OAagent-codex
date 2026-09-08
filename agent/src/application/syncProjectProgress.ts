@@ -26,6 +26,8 @@ import type {
   ProjectProgressOaReader,
   ProjectProgressOaWriter,
   WeeklyReportContentOaWriter,
+  WeeklyReportStyleContext,
+  WeeklyReportStyleReader,
 } from "../infrastructure/oa/projectProgressOaClient.js";
 import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
 import {
@@ -38,6 +40,7 @@ import type {
   ProjectProgressAiInteraction,
   ProjectProgressSummarizer,
 } from "./projectProgressSummarizer.js";
+import type { WeeklyReportStyleSummarizer } from "./weeklyReportStyleSummarizer.js";
 import {
   DeterministicProjectProgressSummarizer,
   isInvalidProjectProgressSummary,
@@ -80,6 +83,9 @@ export type ProjectProgressWeeklyReportSync = {
   authorName: string;
   content: string;
   appended: boolean;
+  styleStatus?: "matched" | "no_previous_report" | "fallback";
+  referenceReportId?: number;
+  referenceWeeklyNum?: number;
 };
 
 export type ProjectProgressSummaryProposal = {
@@ -91,6 +97,7 @@ export type ProjectProgressSummaryProposal = {
   aiNote: string;
   interaction?: ProjectProgressAiInteraction;
   repositoryInteractions?: ProjectProgressRepositoryInteraction[];
+  weeklyReportInteractions?: Array<{ githubId: string; interaction: ProjectProgressAiInteraction }>;
 };
 
 export type ProjectProgressProjectReport = {
@@ -267,6 +274,7 @@ export type ProjectProgressSyncInput = {
   oaClient: ProjectProgressOaReader;
   githubReader: ProjectProgressGitHubReader;
   summarizer: ProjectProgressSummarizer;
+  weeklyReportStyleSummarizer?: WeeklyReportStyleSummarizer;
   store?: ProjectProgressStateSink;
   projectId?: number;
   writeMode?: "dry-run" | "unsafe-test" | "production";
@@ -386,6 +394,7 @@ async function executeProjectProgressSync(
   const entries: ProjectEntry[] = [];
   const repositoriesByKey = new Map<string, GitHubRepositoryIdentity>();
   const reports: ProjectProgressProjectReport[] = [];
+  const weeklyStyleContexts = new Map<string, Promise<WeeklyReportStyleContext>>();
   let mutationsApplied = 0;
   let cancelled = false;
 
@@ -1015,6 +1024,58 @@ async function executeProjectProgressSync(
             weeklyReportSyncs.push(sync);
             if (sync.appended) appended += 1;
           },
+          ...(input.weeklyReportStyleSummarizer ? {
+            prepareContent: async (githubId: string) => {
+              const styleReader = input.oaClient as Partial<WeeklyReportStyleReader>;
+              if (!styleReader.getWeeklyReportStyleContext) {
+                throw new Error("OA client does not support weekly report style context");
+              }
+              const event = {
+                eventKey: `weekly_report_style:${project.id}:${proposal.summaryDate}:${githubId.toLowerCase()}`,
+                sequence: 590, phase: "weekly_report_style", projectId: project.id,
+                title: "参考作者历史周报生成同步内容",
+              };
+              await emitTrace(input.trace, { ...event, status: "running" });
+              const key = `${proposal.summaryDate}:${githubId.toLowerCase()}`;
+              let pending = weeklyStyleContexts.get(key);
+              if (!pending) {
+                pending = styleReader.getWeeklyReportStyleContext(
+                  { summaryDate: proposal.summaryDate, githubId }, input.cancellationSignal,
+                );
+                weeklyStyleContexts.set(key, pending);
+              }
+              try {
+                const context = await pending;
+                if (!context.previousReport?.content.trim()) {
+                  await emitTrace(input.trace, { ...event, status: "fallback", message: "作者上周及上上周均无有效周报内容，使用原项目总结" });
+                  return { content: `### ${project.projectName}\n${proposal.summary.trim()}`, styleStatus: "no_previous_report" as const };
+                }
+                const styled = await agentLimiter.run(() => input.weeklyReportStyleSummarizer!.summarize({
+                  projectName: project.projectName, summaryDate: proposal.summaryDate,
+                  summary: proposal.summary, githubId, previousReport: context.previousReport!,
+                  signal: input.cancellationSignal,
+                }), input.cancellationSignal);
+                (proposal.weeklyReportInteractions ??= []).push({ githubId, interaction: styled.interaction });
+                if (styled.interaction.fallbackUsed) {
+                  evaluation.warnings.push(`weekly_report_style_fallback:${proposal.summaryDate}:${githubId}`);
+                }
+                await emitTrace(input.trace, {
+                  ...event, status: styled.interaction.fallbackUsed ? "fallback" : "succeeded",
+                  message: styled.interaction.fallbackUsed ? "风格改写失败，使用原项目总结" : "已参考历史周报风格生成内容",
+                  metadataSanitized: { github_id: githubId, reference_report_id: context.previousReport.reportId, reference_weekly_num: context.previousReport.weeklyNum },
+                });
+                return {
+                  content: styled.content,
+                  styleStatus: styled.interaction.fallbackUsed ? "fallback" as const : "matched" as const,
+                  referenceReportId: context.previousReport.reportId,
+                  referenceWeeklyNum: context.previousReport.weeklyNum,
+                };
+              } catch (error) {
+                await emitTrace(input.trace, { ...event, status: "failed", message: "读取作者历史周报或生成内容失败，未追加周报" });
+                throw error;
+              }
+            },
+          } : {}),
         });
         if (result.skipped > 0) {
           evaluation.warnings.push(
@@ -1468,6 +1529,7 @@ async function appendProjectWeeklyReportContent(input: {
   writeLimiter: AsyncSemaphore;
   cancellationSignal?: AbortSignal;
   onSynced: (sync: ProjectProgressWeeklyReportSync) => void;
+  prepareContent?: (githubId: string) => Promise<Pick<ProjectProgressWeeklyReportSync, "content" | "styleStatus" | "referenceReportId" | "referenceWeeklyNum">>;
 }): Promise<{
   appended: number;
   skipped: number;
@@ -1482,7 +1544,9 @@ async function appendProjectWeeklyReportContent(input: {
   }
   let appended = 0;
   for (const group of authorGroups.groups) {
-    const block = buildWeeklyReportAppendBlock({
+    input.cancellationSignal?.throwIfAborted();
+    const styled = await input.prepareContent?.(group.githubId);
+    const block = styled ? `${buildWeeklyReportMarker(input.project.id, input.proposal.summaryDate, group.authorKey, input.proposal.sourceDigest)}\n${styled.content}` : buildWeeklyReportAppendBlock({
       projectName: input.project.projectName,
       marker: buildWeeklyReportMarker(
         input.project.id,
@@ -1517,6 +1581,7 @@ async function appendProjectWeeklyReportContent(input: {
       authorName: group.authorLabel,
       content: input.proposal.summary,
       appended: result.appended,
+      ...styled,
     });
   }
   return { appended, skipped: authorGroups.skipped };

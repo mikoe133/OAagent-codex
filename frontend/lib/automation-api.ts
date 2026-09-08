@@ -250,6 +250,9 @@ export type AutomationWeeklyReportSync = {
   author_name: string
   content: string
   appended: boolean
+  style_status?: "matched" | "no_previous_report" | "fallback"
+  reference_report_id?: number
+  reference_weekly_num?: number
 }
 
 export type AutomationWeeklyReportPendingItem = {
