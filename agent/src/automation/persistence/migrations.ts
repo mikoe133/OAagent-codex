@@ -192,7 +192,7 @@ export async function runAutomationMigrations(
     }
 
     const [projectWeeklyReportSyncColumnRows] = await connection.query<RowDataPacket[]>(
-      `SELECT column_name, column_default
+      `SELECT column_name, column_default AS default_value
          FROM information_schema.columns
         WHERE table_schema = ?
           AND table_name = 'automation_job_run_projects'
@@ -210,7 +210,7 @@ export async function runAutomationMigrations(
       );
       await connection.query(projectWeeklyReportSyncsMigration);
       projectWeeklyReportSyncsApplied = true;
-    } else if (projectWeeklyReportSyncColumnRows[0]?.column_default == null) {
+    } else if (projectWeeklyReportSyncColumnRows[0]?.default_value == null) {
       const defaultMigration = await readFile(
         path.join(sqlDirectory, "009_automation_weekly_report_syncs_default.up.sql"),
         "utf8",

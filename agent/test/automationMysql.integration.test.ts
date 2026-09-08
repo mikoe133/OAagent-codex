@@ -27,6 +27,25 @@ test(
     assert.equal(repeatedMigration.weeklySummaryBindingsApplied, false);
     assert.equal(repeatedMigration.projectWeeklyReportSyncsApplied, false);
     const database = createAutomationDatabase(url);
+    // Simulate an installation that already ran 008 before it had a default.
+    try {
+      await database.pool.promise().query(
+        "ALTER TABLE automation_job_run_projects ALTER COLUMN weekly_report_syncs DROP DEFAULT",
+      );
+      const repairedMigration = await runAutomationMigrations(
+        url,
+        new URL("../..", import.meta.url).pathname,
+      );
+      assert.equal(repairedMigration.projectWeeklyReportSyncsApplied, true);
+      const afterRepair = await runAutomationMigrations(
+        url,
+        new URL("../..", import.meta.url).pathname,
+      );
+      assert.equal(afterRepair.projectWeeklyReportSyncsApplied, false);
+    } catch (error) {
+      await database.close();
+      throw error;
+    }
     await database.db
       .updateTable("automation_job_runs")
       .set({
