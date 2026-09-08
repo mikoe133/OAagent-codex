@@ -126,8 +126,20 @@ test("project run audit stores weekly report sync details with a reversible migr
     "utf8",
   )
 
-  assert.match(baseline, /weekly_report_syncs JSON NOT NULL/)
+  assert.match(baseline, /weekly_report_syncs JSON NOT NULL DEFAULT \(JSON_ARRAY\(\)\)/)
   assert.match(up, /ADD COLUMN weekly_report_syncs JSON NULL/)
   assert.match(up, /SET weekly_report_syncs = JSON_ARRAY\(\)/)
+  assert.match(up, /NOT NULL DEFAULT \(JSON_ARRAY\(\)\)/)
   assert.match(down, /DROP COLUMN weekly_report_syncs/)
+})
+
+test("upgrades existing weekly report audit columns with a default for older writers", async () => {
+  const up = await readFile(path.join(sqlDir, "009_automation_weekly_report_syncs_default.up.sql"), "utf8")
+  const down = await readFile(path.join(sqlDir, "009_automation_weekly_report_syncs_default.down.sql"), "utf8")
+  const migration = await readFile(path.join(repoRoot, "agent/src/automation/persistence/migrations.ts"), "utf8")
+  assert.match(up, /ALTER COLUMN weekly_report_syncs SET DEFAULT \(JSON_ARRAY\(\)\)/)
+  assert.match(down, /ALTER COLUMN weekly_report_syncs DROP DEFAULT/)
+  assert.match(migration, /SELECT column_name, column_default/)
+  assert.match(migration, /projectWeeklyReportSyncColumnRows\[0\]\?\.column_default == null/)
+  assert.match(migration, /009_automation_weekly_report_syncs_default\.up\.sql/)
 })

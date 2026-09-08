@@ -178,7 +178,7 @@ CREATE TABLE automation_job_run_projects (
     generated_summary LONGTEXT NULL,
     ai_confidence INT NULL,
     ai_note TEXT NULL,
-    weekly_report_syncs JSON NOT NULL,
+    weekly_report_syncs JSON NOT NULL DEFAULT (JSON_ARRAY()),
     warnings JSON NOT NULL,
     mutations_applied TINYINT(1) NOT NULL DEFAULT 0,
     started_at DATETIME(6) NULL,

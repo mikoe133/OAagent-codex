@@ -59,6 +59,8 @@ GitHub 同步任务的运行详情在项目总结下展示“周报同步内容�
 
 这些明细通过项目运行审计的 `weekly_report_syncs` 字段持久化。部署时需执行 `008_automation_project_weekly_report_syncs.up.sql`（或启用服务启动自动迁移），并更新服务端、Worker 和前端。旧运行没有保存明细，迁移后为空列表，页面明确提示未记录；不会推测或自动补写历史明细。后续任务运行使用已有总结同步时也会记录明细。
 
+`weekly_report_syncs` 使用 `DEFAULT (JSON_ARRAY())`，避免滚动更新期间旧服务端未传该字段导致 MySQL `ER_NO_DEFAULT_FOR_FIELD` / HTTP 500。已执行旧版 008 且字段没有默认值的库，补执行 `009_automation_weekly_report_syncs_default.up.sql`；自动迁移器也会检测并补齐。JSON 表达式默认值要求 MySQL 8.0.13 或更高版本。此升级只设置默认值，不更改已有周报同步记录。
+
 AI interaction 的 `response_payload_sanitized` 会记录 `prefetched_detail_calls`、`detail_calls`、`github_detail_requests`、`files_returned`、`patch_chars_returned` 和 `quality_retries`。判断模型是否真的看过代码证据，应以这些审计字段为准，不能依据模型生成的备注推断。详情失败或发生文件/Patch 裁剪时，Worker 会由代码追加对应 limitation。
 
 一个 Worker 内只有 2 个 Codex Thread 同时运行。GitHub 仓库扫描和所有 Thread 的 Commit 详情请求共享同一个 GitHub App 执行器：全局并发 6、单仓库并发最多 6；同一分支的 Commit 分页仍保持串行。执行器统一处理 429/受限 403/5xx 瞬态重试、`Retry-After` 暂停和 run/仓库请求预算。分支、Commit 页数或请求预算耗尽时仓库会标记为 `incomplete`，不会生成部分总结。周报项目总结写入使用独立的项目 OA 调度器，最多同时写入配置数量个不同项目；同一项目同一周次仍只有一个写入任务。运行 claim、heartbeat、Trace、项目审计和终态更新使用独立控制面调度器，不会被项目写入并发放大。容器建议至少分配 `2 CPU / 3GB`。
