@@ -9,14 +9,14 @@ const OPENAPI_METHODS = [
   "trace",
 ] as const;
 
-export function filterChatOpenApiDocument(document: unknown): unknown {
+export function filterChatOpenApiDocument(document: unknown, allowAdmin = false): unknown {
   if (!isRecord(document) || !isRecord(document.paths)) {
     return document;
   }
 
   const filteredPaths: Record<string, unknown> = {};
   for (const [operationPath, rawPathItem] of Object.entries(document.paths)) {
-    if (pathContainsRestrictedSegment(operationPath)) {
+    if (pathContainsRestrictedSegment(operationPath, allowAdmin)) {
       continue;
     }
     if (!isRecord(rawPathItem)) {
@@ -35,7 +35,7 @@ export function filterChatOpenApiDocument(document: unknown): unknown {
       const operation = rawPathItem[method];
       if (
         !isRecord(operation) ||
-        !isChatOpenApiOperationAllowed(operationPath, operation)
+        !isChatOpenApiOperationAllowed(operationPath, operation, allowAdmin)
       ) {
         delete filteredPathItem[method];
         continue;
@@ -57,32 +57,33 @@ export function filterChatOpenApiDocument(document: unknown): unknown {
 export function isChatOpenApiOperationAllowed(
   operationPath: string,
   operation: Record<string, unknown>,
+  allowAdmin = false,
 ): boolean {
-  if (pathContainsRestrictedSegment(operationPath)) {
+  if (pathContainsRestrictedSegment(operationPath, allowAdmin)) {
     return false;
   }
   if (
     Array.isArray(operation.tags) &&
     operation.tags.some(
-      (tag) => typeof tag === "string" && containsRestrictedToken(tag),
+      (tag) => typeof tag === "string" && containsRestrictedToken(tag, allowAdmin),
     )
   ) {
     return false;
   }
-  return !containsRestrictedToken(operation.operationId);
+  return !containsRestrictedToken(operation.operationId, allowAdmin);
 }
 
-function pathContainsRestrictedSegment(operationPath: string): boolean {
+function pathContainsRestrictedSegment(operationPath: string, allowAdmin: boolean): boolean {
   return operationPath.split("/").some((segment) => {
     try {
-      return containsRestrictedToken(decodeURIComponent(segment));
+      return containsRestrictedToken(decodeURIComponent(segment), allowAdmin);
     } catch {
-      return containsRestrictedToken(segment);
+      return containsRestrictedToken(segment, allowAdmin);
     }
   });
 }
 
-function containsRestrictedToken(value: unknown): boolean {
+function containsRestrictedToken(value: unknown, allowAdmin: boolean): boolean {
   if (typeof value !== "string") {
     return false;
   }
@@ -91,7 +92,7 @@ function containsRestrictedToken(value: unknown): boolean {
     .split(/[^A-Za-z0-9]+/)
     .some((token) => {
       const normalized = token.toLowerCase();
-      return normalized === "admin" || normalized === "internal";
+      return (!allowAdmin && normalized === "admin") || normalized === "internal";
     });
 }
 

@@ -23,6 +23,7 @@ import type {
   AgentSession,
   SessionStore,
 } from "../infrastructure/persistence/sessionStore.js";
+import { prepareOaChatAccess, hasOaAdminAccess, finishOaChatAccessTurn } from "../infrastructure/oa/oaChatAccess.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
 import {
   routeOpenApiRequestWithFallback,
@@ -272,6 +273,8 @@ export class AgentService {
       undefined,
       input.latency,
       input.routerModel,
+      undefined,
+      hasOaAdminAccess(input.sessionId, this.sessions.getOaToken(input.sessionId) ?? ""),
     );
     finishRouting?.();
     input.latency?.mark("routing_completed");
@@ -307,6 +310,7 @@ export class AgentService {
         return await thread.run(prompt);
       } finally {
         finishOaTurn(input.sessionId);
+        finishOaChatAccessTurn(input.sessionId);
         knowledgeSources = finishKnowledgeBaseSourceTurn(input.sessionId);
       }
     })();
@@ -382,6 +386,7 @@ export class AgentService {
           input.latency,
           input.routerModel,
           stageProgress,
+          hasOaAdminAccess(input.sessionId, this.sessions.getOaToken(input.sessionId) ?? ""),
         );
         return { session, resolvedRun };
       },
@@ -483,6 +488,7 @@ export class AgentService {
       }
     } finally {
       finishOaTurn(input.sessionId);
+      finishOaChatAccessTurn(input.sessionId);
       knowledgeSources = finishKnowledgeBaseSourceTurn(input.sessionId);
     }
 
@@ -840,6 +846,7 @@ export class AgentService {
         input.oaUserId,
       );
     }
+    await prepareOaChatAccess(this.config, input.sessionId, this.sessions.getOaToken(input.sessionId), input.message);
     return session;
   }
 
@@ -944,6 +951,7 @@ async function resolveRunConfig(
   latency?: ChatLatencyTrace,
   routerModel?: RouterModelId | null,
   stageProgress?: LatencyStageProgress,
+  allowAdmin = false,
 ) {
   const modelProvider = resolveRequestedProvider(requestedProvider, config.modelProvider);
   const fallbackModel =
@@ -953,7 +961,7 @@ async function resolveRunConfig(
     latency,
     "contracts",
     () => Promise.all([
-      resolveOpenApiContract(config),
+      resolveOpenApiContract(config, fetch, Date.now(), allowAdmin),
       resolveKnowledgeBaseContracts(config),
     ]),
     stageProgress,
@@ -980,7 +988,7 @@ async function resolveRunConfig(
     () => routeOpenApiRequestWithFallback(
       primaryRouterConfig,
       routingIndex,
-      { task, conversationMemory, signal },
+      { task, conversationMemory, signal, allowAdmin },
       createOpenApiSemanticRouter(primaryRouterConfig),
       fallbackRouter,
     ),

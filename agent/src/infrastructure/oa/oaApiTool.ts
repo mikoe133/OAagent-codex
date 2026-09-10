@@ -1,5 +1,7 @@
 import type { AppConfig } from "../../config/config.js";
 import { normalizeJsonLineSeparators } from "../codex/jsonLineSafety.js";
+import { authorizeAdminWrite, hasOaAdminAccess, readOaAdminPermission } from "./oaChatAccess.js";
+import { isChatOpenApiOperationAllowed } from "./openApiChatPolicy.js";
 import { resolveOpenApiContract } from "./openApiContract.js";
 import {
   cacheOaApiResult,
@@ -94,7 +96,8 @@ export async function callOaApiTool(
     return navigateStoredResponse(sessionId, responseId, input);
   }
 
-  const { document: openapi } = await resolveOpenApiContract(config);
+  const allowAdmin = hasOaAdminAccess(sessionId, sessionOaApiToken);
+  const { document: openapi } = await resolveOpenApiContract(config, fetch, Date.now(), allowAdmin);
   const operation = resolveOperation(openapi, input);
   if (isToolResult(operation)) {
     return operation;
@@ -115,7 +118,8 @@ export async function callOaApiTool(
     return validationError;
   }
 
-  if (isSensitiveOperation(operation) && input.confirmed !== true) {
+  const adminOperation = !isChatOpenApiOperationAllowed(operation.pathTemplate, operation.operation);
+  if (!adminOperation && isSensitiveOperation(operation) && input.confirmed !== true) {
     return toolError(
       "confirmation_required",
       "该接口可能产生敏感影响,调用前必须获得用户确认,并在工具参数中传入 confirmed=true。",
@@ -140,6 +144,22 @@ export async function callOaApiTool(
     normalizedQuery.value,
     input.body,
   );
+  if (adminOperation) {
+    if (!allowAdmin || !sessionId || !await readOaAdminPermission(config, sessionOaApiToken)) {
+      return toolError("admin_permission_required", "当前登录者未通过管理员权限校验，未执行操作。");
+    }
+    if (!["get", "head", "options"].includes(operation.method)) {
+      const confirmation = authorizeAdminWrite(sessionId, sessionOaApiToken, {
+        method: operation.method, path: path.value, query: normalizedQuery.value, body: input.body,
+      });
+      if (!confirmation.allowed) {
+        return toolError("confirmation_required",
+          "管理员写入尚未执行。请向用户展示操作、目标及具体修改参数，并请用户单独回复 confirmationReply；收到用户回复前必须结束本轮，不能自行设置 confirmed=true 绕过确认。",
+          { operationId: operation.operationId, method: operation.method.toUpperCase(), path: path.value,
+            query: normalizedQuery.value, body: input.body, confirmationReply: confirmation.confirmationReply });
+      }
+    }
+  }
   const cachedResult = getCachedOaApiResult(sessionId, requestKey);
   if (cachedResult !== undefined) {
     return (await cachedResult) as OaApiToolResult;

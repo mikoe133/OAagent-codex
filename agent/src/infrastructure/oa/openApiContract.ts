@@ -35,8 +35,10 @@ export async function resolveOpenApiContract(
   config: AppConfig,
   fetchImpl: OpenApiFetch = fetch,
   now = Date.now(),
+  allowAdmin = false,
 ): Promise<ResolvedOpenApiContract> {
   const cacheKey = [
+    allowAdmin ? "admin" : "user",
     config.projectRoot,
     config.openapiUrl,
     config.openapiPath,
@@ -49,7 +51,7 @@ export async function resolveOpenApiContract(
     resolvedContractCache.delete(cacheKey);
   }
 
-  const promise = resolveOpenApiContractUncached(config, fetchImpl);
+  const promise = resolveOpenApiContractUncached(config, fetchImpl, allowAdmin);
   const entry: OpenApiContractCacheEntry = {
     expiresAt: now + OPENAPI_CONTRACT_CACHE_TTL_MS,
     promise,
@@ -66,10 +68,12 @@ export async function resolveOpenApiContract(
 async function resolveOpenApiContractUncached(
   config: AppConfig,
   fetchImpl: OpenApiFetch,
+  allowAdmin: boolean,
 ): Promise<ResolvedOpenApiContract> {
   try {
     const document = filterChatOpenApiDocument(
       await fetchRemoteContract(config.openapiUrl, fetchImpl),
+      allowAdmin,
     );
     const [contractPath, index] = await Promise.all([
       materializeContract(config.projectRoot, document),
@@ -87,6 +91,7 @@ async function resolveOpenApiContractUncached(
         await readFile(config.openapiPath, "utf8"),
         `本地 OpenAPI 文件 ${config.openapiPath}`,
       ),
+      allowAdmin,
     );
     const [contractPath, index] = await Promise.all([
       materializeContract(config.projectRoot, document),

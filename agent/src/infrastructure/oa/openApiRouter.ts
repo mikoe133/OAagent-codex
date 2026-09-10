@@ -48,6 +48,7 @@ type SemanticRoute = {
 };
 
 type RouteInput = {
+  allowAdmin?: boolean;
   task: string;
   conversationMemory?: string | null;
   signal?: AbortSignal;
@@ -221,7 +222,7 @@ export async function routeOpenApiRequest(
   input: RouteInput,
   semanticRouter: OpenApiSemanticRouter = createOpenApiSemanticRouter(config),
 ): Promise<OpenApiRouteResult> {
-  const safeIndex = filterSafeOperations(index);
+  const safeIndex = filterSafeOperations(index, input.allowAdmin === true);
   const fallbackCatalogs = getFallbackCatalogs(safeIndex);
   const fallback = (error: unknown): OpenApiRouteResult => ({
     catalogs: prioritizeRwkvKnowledgeCatalog(input.task, fallbackCatalogs),
@@ -347,14 +348,14 @@ function withRaceSignal(input: RouteInput, raceSignal: AbortSignal): RouteInput 
   };
 }
 
-function filterSafeOperations(index: OpenApiOperationIndex): OpenApiOperationIndex {
+function filterSafeOperations(index: OpenApiOperationIndex, allowAdmin: boolean): OpenApiOperationIndex {
   return {
     ...index,
     operations: index.operations.filter((operation) =>
       isChatOpenApiOperationAllowed(operation.path, {
         operationId: operation.operationId,
         tags: operation.tags,
-      }),
+      }, allowAdmin),
     ),
   };
 }
