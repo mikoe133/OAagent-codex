@@ -329,3 +329,26 @@ function createSummaryBindingStore(): WeeklyReportSummaryBindingStore {
     },
   };
 }
+
+test("business weekly number 121 writes the supplied period end and includes the full period", async () => {
+  const writes: Array<{ summaryDate: string; aiNote: string }> = [];
+  const result = await syncWeeklyReportProjectSummaries({
+    report: {
+      id: "3818", weeklyNum: 121, startDate: "2026-09-06", endDate: "2026-09-11",
+      content: "项目 1：完成联调", version: "1789028263279859500",
+      updatedAt: "2026-09-20T08:17:43Z",
+    },
+    projects: [{ id: 1, projectName: "平台", status: "updating" }],
+    oaClient: {
+      async listCommitSummaries() { return []; },
+      async createCommitSummary(input: { summaryDate: string; aiNote: string }) {
+        writes.push(input);
+        return { id: 1, ...input };
+      },
+    } as never,
+    summaryBindingStore: createSummaryBindingStore(),
+  });
+  assert.equal(result.mutationsApplied, 1);
+  assert.equal(writes[0].summaryDate, "2026-09-11");
+  assert.match(writes[0].aiNote, /期间：2026-09-06->2026-09-11/);
+});

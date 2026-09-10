@@ -1,3 +1,4 @@
+import { weeklyReportPeriod } from "../domain/weeklyReportPeriod.js";
 import { isWeeklyReportVersion, normalizeWeeklyReportVersion } from "../domain/weeklyReportVersion.js";
 import { z } from "zod";
 import { createHash } from "node:crypto";
@@ -261,6 +262,8 @@ export const automationEventCreateSchema = z
     data: z
       .object({
         weekly_num: z.number().int().positive(),
+        start_date: z.string().optional(),
+        end_date: z.string().optional(),
         content: z.string().min(1).max(900_000).optional(),
         content_hash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
         updated_at: z.string().datetime({ offset: true }).optional(),
@@ -269,6 +272,11 @@ export const automationEventCreateSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    try {
+      weeklyReportPeriod(value.data.start_date, value.data.end_date);
+    } catch (error) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: (error as Error).message, path: ["data", "start_date"] });
+    }
     if (value.data.content && value.data.content_hash) {
       const digest = `sha256:${createHash("sha256").update(value.data.content, "utf8").digest("hex")}`;
       if (digest !== value.data.content_hash) {

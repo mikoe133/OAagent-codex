@@ -1,3 +1,4 @@
+import { weeklyReportPeriod } from "../../domain/weeklyReportPeriod.js";
 import { isWeeklyReportVersion, normalizeWeeklyReportVersion } from "../../domain/weeklyReportVersion.js";
 import type { ProjectStatus } from "../../domain/projectProgress.js";
 import {
@@ -225,6 +226,7 @@ export class ProjectProgressOaClient implements
     return {
       id: data.id,
       weeklyNum,
+      ...(weeklyReportPeriod(data.start_date, data.end_date) ?? {}),
       ownerId: typeof data.owner_id === "number" ? data.owner_id : null,
       content: data.content,
       version,

@@ -27,7 +27,9 @@ Content-Type: application/json
   "actor_id": 42,
   "scope": { "user_id": 42 },
   "data": {
-    "weekly_num": 202635,
+    "weekly_num": 121,
+    "start_date": "2026-09-06",
+    "end_date": "2026-09-11",
     "content": "项目 51：完成联调\n项目 72：修复登录问题",
     "content_hash": "sha256:<content 的 SHA-256>",
     "updated_at": "2026-08-27T09:29:58Z"
@@ -41,7 +43,8 @@ Content-Type: application/json
 - `event_type`：`weekly_report.created` 或 `weekly_report.updated`。
 - `aggregate_id`：周报稳定 ID。
 - `aggregate_version`：周报版本号，必须递增。支持正整数或十进制整数字符串，最大为 `9223372036854775807`。超过 JavaScript 安全整数范围（`9007199254740991`）时，OA 必须发送字符串，例如 `"1789023613519811600"`，避免 JSON 数字解析丢失精度。已有纳秒版本号不能直接改成更小的毫秒版本号。
-- `weekly_num`：周报业务编号。
+- `weekly_num`：周报业务编号，例如 `121`，不要求是年周格式。
+- `start_date`、`end_date`：周报业务期间，字符串 `YYYY-MM-DD`，成对提供且开始日期不晚于结束日期。业务编号周报必须提供；仅为兼容旧事件允许两者都省略，此时仍按旧的年周格式解析 `weekly_num`。
 - `content`：建议传完整周报内容；不传时 OAagent 需要能够按 ID 回读。
 - `content_hash`：传入时必须与 `content` 匹配。
 
@@ -57,7 +60,9 @@ Content-Type: application/json
 | `occurred_at` | 是 | OA 产生事件的时间，使用带时区的 ISO 8601 格式。 |
 | `actor_id` | 否 | 执行保存操作的 OA 用户 ID，用于审计；没有操作者时可不传。 |
 | `scope.user_id` | 否 | 周报所属用户 ID，用于权限和任务范围匹配；建议传入。 |
-| `data.weekly_num` | 是 | 周报业务编号，用于计算写入项目总结的 `summary_date`。 |
+| `data.weekly_num` | 是 | OA 周报业务编号。 |
+| `data.start_date` | 成对提供 | 业务期间开始日期，字符串 `YYYY-MM-DD`。 |
+| `data.end_date` | 成对提供 | 业务期间结束日期，字符串 `YYYY-MM-DD`；作为项目总结的 `summary_date`。 |
 | `data.content` | 否 | 周报完整内容。建议传入，Worker 可直接使用本次内容。 |
 | `data.content_hash` | 否 | 周报内容 SHA-256，格式为 `sha256:<64 位 hex>`，用于校验内容未被篡改。 |
 | `data.updated_at` | 否 | 周报最后更新时间。用于补充来源时间；不替代 `aggregate_version`。 |
@@ -101,7 +106,7 @@ Content-Type: application/json
 - 任务范围固定为全部项目，包含归档项目；匹配到归档项目时与普通项目一样调用项目总结写入接口，历史配置中的归档开关不会禁止写入。
 - 项目匹配不确定时不写入，记录为待复核结果。
 - 达到置信度阈值的不同项目会并发调用项目总结接口；并发上限由 `PROJECT_PROGRESS_OA_WRITE_CONCURRENCY` 控制，默认 4，同一项目同一周次只保留一个增量写入任务。
-- `summary_date` 使用周报业务日期；`ai_note` 写入带时间的周报来源内容。
+- 有期间字段时，`summary_date` 使用 `end_date`，与保存时间无关；`ai_note` 包含 `期间：2026-09-06->2026-09-11` 及带时间的周报来源内容。现有 OA 项目总结接口的 `summary_date` 仅支持单日，不能传入期间字符串。若要日期栏支持期间，需另行升级 OA 的接口、存储及展示。
 
 ## 常见错误
 

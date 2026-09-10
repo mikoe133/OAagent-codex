@@ -1,3 +1,4 @@
+import { weeklyReportPeriod } from "../domain/weeklyReportPeriod.js";
 import { compareWeeklyReportVersions, type WeeklyReportVersion } from "../domain/weeklyReportVersion.js";
 import { createHash } from "node:crypto";
 
@@ -24,6 +25,8 @@ import {
 export type WeeklyReportSnapshot = {
   id: string;
   weeklyNum: number;
+  startDate?: string;
+  endDate?: string;
   ownerId?: number | null;
   content: string;
   version: WeeklyReportVersion;
@@ -184,7 +187,8 @@ export async function syncWeeklyReportProjectSummaries(
   input: WeeklyReportSyncInput,
 ): Promise<ProjectProgressSyncReport> {
   const observedAt = new Date(input.report.updatedAt);
-  const summaryDate = weeklyReportSummaryDate(input.report.weeklyNum);
+  const period = weeklyReportPeriod(input.report.startDate, input.report.endDate);
+  const summaryDate = period?.endDate ?? weeklyReportSummaryDate(input.report.weeklyNum);
   const segments = buildWeeklyReportSegments(input.report.content);
   const availableProjects = input.projects;
   await emitWeeklyTrace(input.trace, {
@@ -746,7 +750,9 @@ function includesName(content: string, name: string): boolean {
 
 function formatWeeklyReportNote(report: WeeklyReportSnapshot, projectContent: string): string {
   const marker = weeklyReportSourceMarker(report.id);
-  const prefix = `${report.weeklyNum} 周报（${report.updatedAt}）：`;
+  const period = weeklyReportPeriod(report.startDate, report.endDate);
+  const periodNote = period ? `期间：${period.startDate}->${period.endDate}\n` : "";
+  const prefix = `${periodNote}${report.weeklyNum} 周报（${report.updatedAt}）：`;
   return `${marker}\n${prefix}${report.content}\n项目拆分片段：${projectContent}`.slice(0, 10_000);
 }
 

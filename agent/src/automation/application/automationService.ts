@@ -795,6 +795,7 @@ export class AutomationService implements AutomationOperations {
         scope: input.scope,
         data: {
           weekly_num: input.data.weekly_num,
+          ...(input.data.start_date ? { start_date: input.data.start_date, end_date: input.data.end_date } : {}),
           ...(input.data.content !== undefined ? { content: input.data.content } : {}),
           ...(input.data.content_hash !== undefined
             ? { content_hash: input.data.content_hash }
@@ -941,6 +942,7 @@ export class AutomationService implements AutomationOperations {
         source_report_id: input.aggregate_id,
         source_version: input.aggregate_version,
         weekly_num: input.data.weekly_num,
+        ...(input.data.start_date ? { start_date: input.data.start_date, end_date: input.data.end_date } : {}),
         content: input.data.content ?? null,
         content_hash: input.data.content_hash ?? null,
         updated_at: input.data.updated_at ?? input.occurred_at,
@@ -3048,6 +3050,8 @@ function serializeSourceSnapshot(value: unknown): Record<string, unknown> | null
     ...(typeof source.source_report_id === "string" ? { source_report_id: source.source_report_id } : {}),
     ...(isWeeklyReportVersion(source.source_version) ? { source_version: normalizeWeeklyReportVersion(source.source_version) } : {}),
     ...(typeof source.weekly_num === "number" ? { weekly_num: source.weekly_num } : {}),
+    ...(typeof source.start_date === "string" ? { start_date: source.start_date } : {}),
+    ...(typeof source.end_date === "string" ? { end_date: source.end_date } : {}),
     ...(typeof source.content_hash === "string" ? { content_hash: source.content_hash } : {}),
     ...(typeof source.updated_at === "string" ? { updated_at: source.updated_at } : {}),
     ...(source.scope && typeof source.scope === "object" && !Array.isArray(source.scope)
