@@ -1,3 +1,4 @@
+import { compareWeeklyReportVersions, type WeeklyReportVersion } from "../domain/weeklyReportVersion.js";
 import { createHash } from "node:crypto";
 
 import { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
@@ -25,7 +26,7 @@ export type WeeklyReportSnapshot = {
   weeklyNum: number;
   ownerId?: number | null;
   content: string;
-  version: number;
+  version: WeeklyReportVersion;
   updatedAt: string;
   deleted?: boolean;
 };
@@ -65,7 +66,7 @@ export type WeeklyReportSyncInput = {
 
 export type WeeklyReportSummaryBinding = {
   commitSummaryId: number;
-  sourceVersion: number;
+  sourceVersion: WeeklyReportVersion;
 };
 
 export type WeeklyReportSummaryBindingStore = {
@@ -76,7 +77,7 @@ export type WeeklyReportSummaryBindingStore = {
   }): Promise<WeeklyReportSummaryBinding | null>;
   saveBinding(input: {
     sourceReportId: string;
-    sourceVersion: number;
+    sourceVersion: WeeklyReportVersion;
     projectId: number;
     summaryDate: string;
     commitSummaryId: number;
@@ -665,7 +666,7 @@ async function writeProjectSummary(input: {
       projectId: project.id,
       summaryDate,
     });
-    if (binding && binding.sourceVersion > input.input.report.version) {
+    if (binding && compareWeeklyReportVersions(binding.sourceVersion, input.input.report.version) > 0) {
       throw new Error(
         `周报总结绑定已推进到版本 ${binding.sourceVersion}`,
       );

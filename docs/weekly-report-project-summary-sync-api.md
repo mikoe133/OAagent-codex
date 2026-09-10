@@ -40,7 +40,7 @@ Content-Type: application/json
 - `event_id`：UUID，重试时保持不变。
 - `event_type`：`weekly_report.created` 或 `weekly_report.updated`。
 - `aggregate_id`：周报稳定 ID。
-- `aggregate_version`：周报版本号，必须递增。
+- `aggregate_version`：周报版本号，必须递增。支持正整数或十进制整数字符串，最大为 `9223372036854775807`。超过 JavaScript 安全整数范围（`9007199254740991`）时，OA 必须发送字符串，例如 `"1789023613519811600"`，避免 JSON 数字解析丢失精度。已有纳秒版本号不能直接改成更小的毫秒版本号。
 - `weekly_num`：周报业务编号。
 - `content`：建议传完整周报内容；不传时 OAagent 需要能够按 ID 回读。
 - `content_hash`：传入时必须与 `content` 匹配。

@@ -206,7 +206,7 @@ export type AutomationDatabaseSchema = {
     event_type: string;
     aggregate_type: string;
     aggregate_id: string;
-    aggregate_version: number;
+    aggregate_version: number | string;
     event_hash: string;
     payload: JsonValue;
     job_id: number | null;
@@ -220,7 +220,7 @@ export type AutomationDatabaseSchema = {
     run_id: string;
     trigger_event_id: string;
     source_report_id: string;
-    source_version: number;
+    source_version: number | string;
     weekly_num: number;
     owner_user_id: number | null;
     segment_key: string;
@@ -254,7 +254,7 @@ export type AutomationDatabaseSchema = {
     project_id: number;
     summary_date: Timestamp;
     commit_summary_id: number;
-    source_version: number;
+    source_version: number | string;
     created_run_id: string;
     last_run_id: string;
     created_at: Timestamp;

@@ -1,3 +1,4 @@
+import { isWeeklyReportVersion, normalizeWeeklyReportVersion, type WeeklyReportVersion } from "../../domain/weeklyReportVersion.js";
 import {
   buildFencedMutationBody,
   isDefinitiveLeaseLossErrorCode,
@@ -164,7 +165,7 @@ export type AutomationWeeklyReportPendingItemInput = {
 
 export type AutomationWeeklyReportSummaryBinding = {
   commitSummaryId: number;
-  sourceVersion: number;
+  sourceVersion: WeeklyReportVersion;
 };
 
 export type AutomationTraceEventInput = {
@@ -706,7 +707,7 @@ function decodeWeeklyReportSummaryBinding(
   if (
     !isRecord(value) ||
     !isPositiveInteger(value.commit_summary_id) ||
-    !isPositiveInteger(value.source_version)
+    !isWeeklyReportVersion(value.source_version)
   ) {
     throw new AutomationOaContractError(
       "OA 周报总结绑定响应字段无效。",
@@ -714,7 +715,7 @@ function decodeWeeklyReportSummaryBinding(
   }
   return {
     commitSummaryId: value.commit_summary_id,
-    sourceVersion: value.source_version,
+    sourceVersion: normalizeWeeklyReportVersion(value.source_version),
   };
 }
 

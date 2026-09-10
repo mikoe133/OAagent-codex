@@ -1,3 +1,4 @@
+import { isWeeklyReportVersion, normalizeWeeklyReportVersion } from "../../domain/weeklyReportVersion.js";
 import type { ProjectStatus } from "../../domain/projectProgress.js";
 import {
   buildFencedMutationBody,
@@ -216,11 +217,11 @@ export class ProjectProgressOaClient implements
     const data = decodeEnvelope(payload).data;
     if (!isRecord(data) || typeof data.id !== "string" ||
       !Number.isInteger(data.weekly_num) || typeof data.content !== "string" ||
-      !Number.isInteger(data.version) || typeof data.updated_at !== "string") {
+      !isWeeklyReportVersion(data.version) || typeof data.updated_at !== "string") {
       throw new OaContractError("OA 周报响应字段无效。");
     }
     const weeklyNum = data.weekly_num as number;
-    const version = data.version as number;
+    const version = normalizeWeeklyReportVersion(data.version);
     return {
       id: data.id,
       weeklyNum,

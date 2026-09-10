@@ -1,3 +1,4 @@
+import { isWeeklyReportVersion, normalizeWeeklyReportVersion, compareWeeklyReportVersions, type WeeklyReportVersion } from "../../domain/weeklyReportVersion.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WEEKLY_REPORT_STYLE_PROMPT, WEEKLY_REPORT_STYLE_PROMPT_VERSION } from "../../domain/weeklyReportStyle.js";
 import type {
@@ -829,7 +830,7 @@ export class AutomationService implements AutomationOperations {
         .where("event_type", "in", ["weekly_report.created", "weekly_report.updated"])
         .executeTakeFirst();
       if (latest?.max_version !== null && latest?.max_version !== undefined &&
-        Number(latest.max_version) > input.aggregate_version) {
+        compareWeeklyReportVersions(latest.max_version, input.aggregate_version) > 0) {
         const now = new Date();
         await tx
           .insertInto("automation_trigger_events")
@@ -2184,8 +2185,7 @@ export class AutomationService implements AutomationOperations {
       if (
         !triggerEventId ||
         typeof sourceReportId !== "string" ||
-        !Number.isSafeInteger(sourceVersion) ||
-        Number(sourceVersion) < 1 ||
+        !isWeeklyReportVersion(sourceVersion) ||
         !Number.isSafeInteger(weeklyNum) ||
         Number(weeklyNum) < 1
       ) {
@@ -2229,7 +2229,7 @@ export class AutomationService implements AutomationOperations {
             runId,
             triggerEventId,
             sourceReportId,
-            Number(sourceVersion),
+            normalizeWeeklyReportVersion(sourceVersion),
             Number(weeklyNum),
             ownerUserId,
             item.segment_key,
@@ -2290,7 +2290,7 @@ export class AutomationService implements AutomationOperations {
       return row
         ? {
             commit_summary_id: Number(row.commit_summary_id),
-            source_version: Number(row.source_version),
+            source_version: normalizeWeeklyReportVersion(row.source_version),
           }
         : null;
     });
@@ -2320,7 +2320,7 @@ export class AutomationService implements AutomationOperations {
             "该周报项目已绑定其他总结记录",
           );
         }
-        if (Number(existing.source_version) > source.sourceVersion) {
+        if (compareWeeklyReportVersions(existing.source_version, source.sourceVersion) > 0) {
           throw conflict(
             "weekly_report_summary_binding_stale_version",
             "周报总结绑定已推进到更新版本",
@@ -2835,7 +2835,7 @@ function stableJson(value: unknown): string {
 
 function weeklyReportRunSource(run: RunRow): {
   sourceReportId: string;
-  sourceVersion: number;
+  sourceVersion: WeeklyReportVersion;
 } {
   if (run.job_type_snapshot !== "weekly_report_project_summary_sync") {
     throw new AutomationHttpError(
@@ -2855,8 +2855,7 @@ function weeklyReportRunSource(run: RunRow): {
   const snapshot = source as Record<string, unknown>;
   if (
     typeof snapshot.source_report_id !== "string" ||
-    !Number.isSafeInteger(snapshot.source_version) ||
-    Number(snapshot.source_version) < 1
+    !isWeeklyReportVersion(snapshot.source_version)
   ) {
     throw new AutomationHttpError(
       422,
@@ -2866,7 +2865,7 @@ function weeklyReportRunSource(run: RunRow): {
   }
   return {
     sourceReportId: snapshot.source_report_id,
-    sourceVersion: Number(snapshot.source_version),
+    sourceVersion: normalizeWeeklyReportVersion(snapshot.source_version),
   };
 }
 
@@ -3047,7 +3046,7 @@ function serializeSourceSnapshot(value: unknown): Record<string, unknown> | null
   return {
     ...(typeof source.event_id === "string" ? { event_id: source.event_id } : {}),
     ...(typeof source.source_report_id === "string" ? { source_report_id: source.source_report_id } : {}),
-    ...(typeof source.source_version === "number" ? { source_version: source.source_version } : {}),
+    ...(isWeeklyReportVersion(source.source_version) ? { source_version: normalizeWeeklyReportVersion(source.source_version) } : {}),
     ...(typeof source.weekly_num === "number" ? { weekly_num: source.weekly_num } : {}),
     ...(typeof source.content_hash === "string" ? { content_hash: source.content_hash } : {}),
     ...(typeof source.updated_at === "string" ? { updated_at: source.updated_at } : {}),

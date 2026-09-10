@@ -1,3 +1,4 @@
+import { isWeeklyReportVersion, normalizeWeeklyReportVersion } from "../domain/weeklyReportVersion.js";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { MODEL_REASONING_EFFORTS } from "../config/modelCatalog.js";
@@ -253,7 +254,7 @@ export const automationEventCreateSchema = z
     event_type: z.enum(["weekly_report.created", "weekly_report.updated"]),
     aggregate_type: z.literal("weekly_report"),
     aggregate_id: z.string().trim().min(1).max(255),
-    aggregate_version: z.number().int().positive(),
+    aggregate_version: z.union([z.number(), z.string()]).refine(isWeeklyReportVersion).transform(normalizeWeeklyReportVersion),
     occurred_at: z.string().datetime({ offset: true }),
     actor_id: z.number().int().positive().nullable().optional(),
     scope: z.object({ user_id: z.number().int().positive().optional() }).strict().default({}),

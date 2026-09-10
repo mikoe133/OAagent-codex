@@ -1,3 +1,4 @@
+import { resolveWeeklyReportSource } from "../application/weeklyReportSource.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
@@ -140,34 +141,10 @@ async function main(): Promise<void> {
               });
               const source = await (async () => {
                 try {
-                  const snapshot = claim.sourceSnapshot;
-                  const source = snapshot && typeof snapshot.source_report_id === "string" &&
-                    typeof snapshot.source_version === "number" &&
-                    typeof snapshot.weekly_num === "number" &&
-                    typeof snapshot.updated_at === "string" &&
-                    typeof snapshot.content === "string"
-                    ? {
-                        id: snapshot.source_report_id,
-                        weeklyNum: snapshot.weekly_num,
-                        content: snapshot.content,
-                        version: snapshot.source_version,
-                        updatedAt: snapshot.updated_at,
-                        ownerId: null,
-                      }
-                    : snapshot && typeof snapshot.source_report_id === "string"
-                      ? await projectOaClient.getWeeklyReport(snapshot.source_report_id).then((current) => {
-                          if (current.version !== snapshot.source_version) {
-                            throw new Error(
-                              `周报源版本已推进:${snapshot.source_version}->${current.version}`,
-                            );
-                          }
-                          return current;
-                        })
-                      : null;
-                  if (!source) {
-                    throw new Error("事件缺少可读取的周报源快照。");
-                  }
-                  return source;
+                  return await resolveWeeklyReportSource(
+                    claim.sourceSnapshot,
+                    (id) => projectOaClient.getWeeklyReport(id),
+                  );
                 } catch (error) {
                   await trace?.({
                     eventKey: "weekly_report_source",
