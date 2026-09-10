@@ -39,6 +39,11 @@ SSO code 默认在 Agent 进程内存中保存 60 秒并只能消费一次，单
 
 后台服务不包含业务直连分支。所有消息都会进入 Codex agent,由语义路由先区分结构化 OA 数据和知识库文档内容,再基于对应 OpenAPI 契约分析接口能力。配置 `OA_API_BASE_URL` 后可通过受控 `callOaApi` 工具调用 OA;配置 `OA_KNOWLEDGE_BASE_API_KEY` 后可通过受控知识库工具查询或按确认执行写操作。仅在调用知识库统一读写契约时,服务端组装 `Authorization: Bearer <OA_KNOWLEDGE_BASE_API_KEY>` 和当前已验证登录用户的 `X-OA-User-Id`,并为写请求生成 `Idempotency-Key`;Agent 不能填写或覆盖任何 Header。知识库写操作始终要求确认,且不会改走 OA。
 
+AI 对话在每轮路由前使用当前登录态请求 `GET /admin/permissions`。该接口受 OA 管理员权限校验保护，只有成功响应才开放管理员接口；权限不足、超时或响应异常时保持普通用户接口范围。管理员与普通用户的 OpenAPI 契约缓存隔离，`internal` 接口始终不向对话开放。
+
+调用 `/admin` 等管理接口的写操作时，服务端先返回待确认的接口、目标、修改参数和专属确认文本（如 `确认操作 a1b2c3d4e5f6`），AI 展示后等待用户单独回复。确认仅对当前会话、登录态和完全相同的请求有效，10 分钟过期且只可使用一次；取消、发送其他请求、修改参数或切换登录态需要重新确认，模型传入 `confirmed=true` 不能绕过。每次管理接口调用也会重新校验权限。确认状态仅保存在进程内，服务重启后需重新确认。
+
+
 ```bash
 # 创建 session。不传 sessionId 时服务自动生成。
 curl -s -X POST http://127.0.0.1:3000/v1/sessions \
