@@ -1,6 +1,6 @@
 /** Legacy numeric versions remain accepted; large versions should travel as decimal strings. */
 export type WeeklyReportVersion = number | string;
-const MAX_VERSION = 9223372036854775807n;
+const MAX_VERSION = BigInt("9223372036854775807");
 export function isWeeklyReportVersion(value: unknown): value is WeeklyReportVersion {
   if (typeof value === "number") {
     return Number.isInteger(value) && value > 0 && BigInt(String(value)) <= MAX_VERSION;
