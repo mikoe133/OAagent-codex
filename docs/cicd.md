@@ -74,8 +74,6 @@ Environment Variables:
 | 两者可选 | `PROJECT_SYNC_API_BASE_URL` | 原 OA 项目同步服务地址；未配置时继承 `OA_DOCKER_API_BASE_URL` |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),必须是正整数 |
 | `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),必须是正整数 |
-| `test` | `AGENT_BIND_ADDRESS` | 填服务器 `docker0` 地址 `192.168.251.1`,供同机 OA 后端容器访问 Agent |
-| `production` 可选 | `AGENT_BIND_ADDRESS` | 默认 `127.0.0.1`;仅在生产 OA 后端也需跨容器访问时填写其可达的宿主机地址 |
 | 两者可选 | `OA_AUTH_ALIAS` | OA 数据源 alias,默认 `default` |
 | 两者可选 | `NEXTTOKEN_API_BASE_URL` | Nexttoken API 地址,默认 `https://next-token.cc` |
 | 两者可选 | `OPENROUTER_API_BASE_URL` | OpenRouter API 地址,默认 `https://openrouter.ai/api/v1` |
@@ -104,8 +102,8 @@ Workflow 会额外校验 `DATABASE_URL` 的库名：`test` 只能连接 `oagent_
 
 | 环境 | 部署目录 | Compose 项目 | Agent 监听 | Web 监听 | 公网域名 |
 | --- | --- | --- | --- | --- | --- |
-| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `192.168.251.1:3003` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
-| 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `127.0.0.1:3011` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
+| 测试 | `/opt/rwkv/apps/oa-agent-test` | `oa-agent-test` | `192.168.251.1:3003` | `192.168.251.1:3001` | `test.oa-agent.rwkvos.com` |
+| 生产 | `/opt/rwkv/apps/oa-agent-prod` | `oa-agent-prod` | `192.168.251.1:3011` | `192.168.251.1:3010` | `oa-agent.rwkvos.com` |
 
 测试服务器的 `3002` 端口由 Alphachain/OA Node 服务使用，不得分配给 OA Agent 容器。
 
@@ -128,3 +126,5 @@ docker compose --env-file .env --env-file .deploy.env -f compose.yml \
 ```
 
 首次部署没有 previous 文件。不要执行 `docker compose down -v`,否则会删除 session 和 Codex thread 数据卷。
+
+测试和生产的 `AGENT_BIND_ADDRESS`、`WEB_BIND_ADDRESS` 均由 workflow 固定为 `192.168.251.1`，无需配置 GitHub Variables。测试端口为 Agent `3003`、Web `3001`；生产端口为 Agent `3011`、Web `3010`。CI/CD 会重新生成服务器 `.env`，保留上述固定值。OA 的 `OA_AGENT_BASE_URL` 应分别使用 `http://192.168.251.1:3001` 和 `http://192.168.251.1:3010`，以访问 Web 提供的 `/api/automation/*` 路由。

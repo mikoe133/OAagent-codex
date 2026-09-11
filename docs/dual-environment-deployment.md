@@ -4,8 +4,8 @@
 
 | 环境 | 容器 | 服务器目录 | Web 端口 | 公网域名 |
 | --- | --- | --- | --- | --- |
-| 测试 | `web` + `agent` + `project-progress-worker` | `/opt/rwkv/apps/oa-agent-test` | `127.0.0.1:3001` | `test.oa-agent.rwkvos.com` |
-| 生产 | `web` + `agent` + `project-progress-worker` | `/opt/rwkv/apps/oa-agent-prod` | `127.0.0.1:3010` | `oa-agent.rwkvos.com` |
+| 测试 | `web` + `agent` + `project-progress-worker` | `/opt/rwkv/apps/oa-agent-test` | `192.168.251.1:3001` | `test.oa-agent.rwkvos.com` |
+| 生产 | `web` + `agent` + `project-progress-worker` | `/opt/rwkv/apps/oa-agent-prod` | `192.168.251.1:3010` | `oa-agent.rwkvos.com` |
 
 代码已经自动完成:
 
@@ -144,8 +144,6 @@ GitHub 仓库 -> Settings -> Environments
 | `test` / `production` | `PROJECT_SYNC_API_BASE_URL` | 原 OA 项目同步服务地址；未填时继承 `OA_DOCKER_API_BASE_URL` |
 | `test` | `OA_AGENT_SSO_TTL_SECONDS` | 测试环境 SSO 凭证有效期(秒),例如 `300` |
 | `production` | `OA_AGENT_SSO_TTL_SECONDS` | 生产环境 SSO 凭证有效期(秒),例如 `300` |
-| `test` | `AGENT_BIND_ADDRESS` | `192.168.251.1` |
-| `production` | `AGENT_BIND_ADDRESS` | 可选；默认 `127.0.0.1` |
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_HEADER` | 通常为 `Authorization`；session 测试可填 `Cookie` |
 | `test` / `production` | `OA_PROJECT_SYNC_TOKEN_PREFIX` | 通常为 `Bearer`；session 测试可填 `sessionid=` |
 | `test` / `production` | `PROJECT_PROGRESS_HEARTBEAT_SECONDS` | 填 `10`，使取消请求及时传给 Worker |
@@ -200,7 +198,7 @@ Nginx 分别反向代理:
 ```nginx
 # 测试域名
 location / {
-    proxy_pass http://127.0.0.1:3001;
+    proxy_pass http://192.168.251.1:3001;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -210,7 +208,7 @@ location / {
 
 # 生产域名
 location / {
-    proxy_pass http://127.0.0.1:3010;
+    proxy_pass http://192.168.251.1:3010;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -267,3 +265,5 @@ docker compose --env-file .env --env-file .deploy.env -f compose.yml \
 ```
 
 不要执行 `docker compose down -v`,它会删除 Agent session 和 Codex thread 数据卷。
+
+测试和生产的 `AGENT_BIND_ADDRESS`、`WEB_BIND_ADDRESS` 均由 workflow 固定为 `192.168.251.1`，无需配置 GitHub Variables。测试端口为 Agent `3003`、Web `3001`；生产端口为 Agent `3011`、Web `3010`。CI/CD 会重新生成服务器 `.env`，保留上述固定值。OA 的 `OA_AGENT_BASE_URL` 应分别使用 `http://192.168.251.1:3001` 和 `http://192.168.251.1:3010`，以访问 Web 提供的 `/api/automation/*` 路由。
