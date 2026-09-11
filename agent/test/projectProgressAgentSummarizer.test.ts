@@ -565,6 +565,37 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.equal(result.interaction?.responsePayloadSanitized.agent_attempts, 1);
   });
 
+  it("corrects a rejected final summary locally and preserves a redacted audit", async () => {
+    let attempts = 0;
+    const summarizer = new CodexProjectProgressSummarizer(config, async (runInput) => {
+      attempts += 1;
+      if (attempts === 2) assert.match(runInput.prompt, /上次输出被拒绝：Agent 输出的内容不是最终项目总结/);
+      return {
+        finalResponse: JSON.stringify({
+          summary: attempts === 1
+            ? "我将查看提交再总结。Bearer abc-secret model-secret token=private-token"
+            : "修复登录授权流程。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "local-retry",
+        prohibitedToolUseCount: 0,
+      };
+    });
+    const result = await summarizer.summarize(input);
+    assert.equal(attempts, 2);
+    assert.equal(result.summary, "修复登录授权流程。");
+    assert.equal(result.interaction?.fallbackUsed, false);
+    const audit = result.interaction?.responsePayloadSanitized;
+    assert.equal(audit?.quality_retries, 1);
+    const rejected = audit?.rejected_outputs as Array<{ attempt: number; reason: string; response: string }>;
+    assert.equal(rejected.length, 1);
+    assert.equal(rejected[0]?.attempt, 1);
+    assert.match(rejected[0]!.reason, /不是最终项目总结/);
+    assert.match(rejected[0]!.response, /我将查看提交再总结/);
+    assert.doesNotMatch(rejected[0]!.response, /abc-secret|model-secret|private-token/);
+  });
+
   it("falls back when Agent returns a process step as the project summary", async () => {
     const runner: ProjectProgressAgentRunner = async () => ({
       finalResponse: JSON.stringify({
@@ -579,6 +610,10 @@ describe("CodexProjectProgressSummarizer", () => {
 
     const result = await summarizer.summarize(input);
 
+    assert.equal(result.interaction?.responsePayloadSanitized.agent_attempts, 2);
+    assert.equal(result.interaction?.responsePayloadSanitized.quality_retries, 1);
+    const rejected = result.interaction?.responsePayloadSanitized.rejected_outputs as unknown[];
+    assert.equal(rejected.length, 2);
     assert.match(result.summary, /fix login authorization flow/);
     assert.deepEqual(result.limitations, ["Agent 总结失败，已使用确定性兜底"]);
     assert.equal(result.interaction?.fallbackUsed, true);

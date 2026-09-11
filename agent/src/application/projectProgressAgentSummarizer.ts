@@ -181,6 +181,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
     let agentRun: ProjectProgressAgentRunResult | null = null;
     let agentAttempts = 0;
     let qualityRetries = 0;
+    const rejectedOutputs: Array<{ attempt: number; reason: string; response: string }> = [];
     let prefetchedDetailCalls = 0;
     try {
       mcpServer = await startProjectProgressGitHubMcpServer({
@@ -230,42 +231,51 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       if (agentRun.prohibitedToolUseCount > 0) {
         throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
       }
-      let output = decodeAgentOutput(agentRun.finalResponse);
-      if (
-        qualityRetries < MAX_QUALITY_RETRIES &&
-        hasUsableCommitDetails(requiredCommitDetails) &&
-        needsEvidenceQualityRetry(output.summary)
-      ) {
-        const firstRun = agentRun;
-        qualityRetries += 1;
-        const retryRun = await runAgentWithTransientRetry(
-          async () => {
-            agentAttempts += 1;
-            return this.runner({
-              ...runInput,
-              prompt: buildProjectProgressAgentPrompt(
-                evidenceEnvelope.evidence,
-                requiredCommitDetails,
-                true,
-              ),
-            });
-          },
-          input.signal,
-        );
-        agentRun = mergeAgentRuns(firstRun, retryRun);
-        if (retryRun.prohibitedToolUseCount > 0) {
-          throw new Error("Agent 质量重试尝试使用未授权工具，已拒绝本次输出。");
+      let output: ProjectProgressSummaryOutput;
+      while (true) {
+        try {
+          output = decodeAgentOutput(agentRun.finalResponse);
+          if (isInvalidProjectProgressSummary(output.summary)) {
+            throw new Error("Agent 输出的内容不是最终项目总结。");
+          }
+          if (
+            hasUsableCommitDetails(requiredCommitDetails) &&
+            needsEvidenceQualityRetry(output.summary)
+          ) {
+            throw new Error("Agent 输出未依据 Commit 详情形成具体工程总结。");
+          }
+          break;
+        } catch (error) {
+          const reason = error instanceof SyntaxError
+            ? "Agent 输出不是有效 JSON。"
+            : sanitizeError(error);
+          rejectedOutputs.push({
+            attempt: qualityRetries + 1,
+            reason,
+            response: sanitizeRejectedResponse(agentRun.finalResponse, this.config.model.apiKey),
+          });
+          if (qualityRetries >= MAX_QUALITY_RETRIES) throw new Error(reason);
+          qualityRetries += 1;
+          const firstRun = agentRun;
+          const retryRun = await runAgentWithTransientRetry(
+            async () => {
+              agentAttempts += 1;
+              return this.runner({
+                ...runInput,
+                prompt: buildProjectProgressAgentPrompt(
+                  evidenceEnvelope.evidence,
+                  requiredCommitDetails,
+                  true,
+                ) + `\n上次输出被拒绝：${reason} 请直接返回符合结构的最终项目总结，不要输出计划或下一步动作。`,
+              });
+            },
+            input.signal,
+          );
+          agentRun = mergeAgentRuns(firstRun, retryRun);
+          if (retryRun.prohibitedToolUseCount > 0) {
+            throw new Error("Agent 质量重试尝试使用未授权工具，已拒绝本次输出。");
+          }
         }
-        output = decodeAgentOutput(retryRun.finalResponse);
-      }
-      if (isInvalidProjectProgressSummary(output.summary)) {
-        throw new Error("Agent 输出的内容不是最终项目总结。");
-      }
-      if (
-        hasUsableCommitDetails(requiredCommitDetails) &&
-        needsEvidenceQualityRetry(output.summary)
-      ) {
-        throw new Error("Agent 输出未依据 Commit 详情形成具体工程总结。");
       }
       const metrics = mcpServer.tool.getMetrics();
       const limitations = mergeLimitations(
@@ -298,6 +308,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           fallbackUsed: false,
           cacheHit: false,
           qualityRetries,
+          rejectedOutputs,
           prefetchedDetailCalls,
         }),
       };
@@ -325,6 +336,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           fallbackUsed: true,
           cacheHit: false,
           qualityRetries,
+          rejectedOutputs,
           prefetchedDetailCalls,
           error,
         }),
@@ -716,6 +728,7 @@ function buildAgentInteraction(input: {
   fallbackUsed: boolean;
   cacheHit: boolean;
   qualityRetries?: number;
+  rejectedOutputs?: Array<{ attempt: number; reason: string; response: string }>;
   prefetchedDetailCalls?: number;
   error?: unknown;
 }): ProjectProgressAiInteraction {
@@ -759,6 +772,7 @@ function buildAgentInteraction(input: {
       prohibited_tool_use_count: input.run?.prohibitedToolUseCount ?? 0,
       agent_attempts: input.agentAttempts,
       quality_retries: input.qualityRetries ?? 0,
+      rejected_outputs: input.rejectedOutputs ?? [],
       prefetched_detail_calls: input.prefetchedDetailCalls ?? 0,
     },
     finalSummary: input.output.summary,
@@ -850,6 +864,15 @@ function sanitizeModelText(value: string, maxLength: number): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
+}
+
+function sanitizeRejectedResponse(value: string, apiKey: string): string {
+  const redacted = apiKey ? value.split(apiKey).join("[REDACTED]") : value;
+  return redacted
+    .replace(/Bearer\s+[^\s"\\]+/gi, "Bearer [REDACTED]")
+    .replace(/((?:api[_-]?key|token|password|secret|sessionid)["']?\s*[:=]\s*["']?)[^\s"',;\\}]+/gi, "$1[REDACTED]")
+    .replace(/https?:\/\/[^\s"\\]+/gi, "[URL REDACTED]")
+    .slice(0, 4_000);
 }
 
 function sanitizeError(error: unknown): string {

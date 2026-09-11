@@ -518,7 +518,7 @@ function traceStatusPresentation(status: AutomationRunTraceEvent["status"]): {
 } {
   if (status === "running") return { label: "进行中", color: "text-sky-600", icon: Circle }
   if (status === "succeeded") return { label: "已完成", color: "text-emerald-600", icon: CircleCheckBig }
-  if (status === "fallback") return { label: "已兜底", color: "text-amber-600", icon: TriangleAlert }
+  if (status === "fallback") return { label: "使用兜底", color: "text-amber-600", icon: TriangleAlert }
   if (status === "failed") return { label: "失败", color: "text-red-600", icon: CircleX }
   if (status === "cancelled") return { label: "已取消", color: "text-stone-500", icon: Ban }
   return { label: "等待中", color: "text-stone-400", icon: Circle }

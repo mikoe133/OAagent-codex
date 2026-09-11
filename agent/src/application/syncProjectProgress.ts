@@ -952,6 +952,12 @@ async function executeProjectProgressSync(
     }));
   }
 
+  const fallbackRepositoryTasks = [...repositoryResults.values()].filter(
+    (result) => result.status === "fallback",
+  ).length;
+  const succeededRepositoryTasks = [...repositoryResults.values()].filter(
+    (result) => result.status === "succeeded",
+  ).length;
   const failedRepositoryTasks = [...repositoryResults.values()].filter(
     (result) => result.status === "failed",
   ).length;
@@ -961,16 +967,22 @@ async function executeProjectProgressSync(
     phase: "summarize_repositories",
     status: cancelled
       ? "cancelled"
-      : failedRepositoryTasks > 0
+      : failedRepositoryTasks > 0 || fallbackRepositoryTasks > 0
         ? "fallback"
         : "succeeded",
     title: "并发生成仓库 Commit 总结",
-    message: failedRepositoryTasks > 0
-      ? `${failedRepositoryTasks} 个仓库总结失败`
-      : `已完成 ${completedRepositoryTasks}/${repositoryTasks.size} 个仓库`,
+    message: fallbackRepositoryTasks > 0
+      ? `使用兜底：已完成 ${completedRepositoryTasks}/${repositoryTasks.size} 个仓库，正常总结 ${succeededRepositoryTasks}，兜底 ${fallbackRepositoryTasks}，失败 ${failedRepositoryTasks}`
+      : failedRepositoryTasks > 0
+        ? `${failedRepositoryTasks} 个仓库总结失败`
+        : `已完成 ${completedRepositoryTasks}/${repositoryTasks.size} 个仓库`,
     progressCurrent: completedRepositoryTasks,
     progressTotal: repositoryTasks.size,
-    metadataSanitized: { repository_tasks_failed: failedRepositoryTasks },
+    metadataSanitized: {
+      repository_tasks_succeeded: succeededRepositoryTasks,
+      repository_tasks_fallback: fallbackRepositoryTasks,
+      repository_tasks_failed: failedRepositoryTasks,
+    },
   });
 
   await emitTrace(input.trace, {
