@@ -16,6 +16,7 @@ import type { ProjectProgressCommit } from "../src/domain/projectProgress.js";
 
 describe("syncProjectProgress", () => {
   it("records model request outcomes and semaphore queue wait", async () => {
+    const traceEvents: ProjectProgressTraceEvent[] = [];
     const metrics = new OperationMetricsRecorder();
     const projects = [1, 2, 3].map((id) => ({
       id,
@@ -26,6 +27,7 @@ describe("syncProjectProgress", () => {
     const report = await syncProjectProgress({
       observedAt: new Date("2026-07-24T12:00:00.000Z"),
       operationMetrics: metrics,
+      trace: (event) => { traceEvents.push(event); },
       concurrency: { github: 3, agent: 1, oaWrite: 1 },
       oaClient: {
         listProjects: async () => projects,
@@ -70,6 +72,14 @@ describe("syncProjectProgress", () => {
       successes: 2,
       failures: 1,
       queueSamples: 3,
+    });
+    const summaryTrace = traceEvents.findLast((event) => event.eventKey === "summarize_repositories");
+    assert.equal(summaryTrace?.status, "fallback");
+    assert.equal(summaryTrace?.message, "使用兜底：已完成 3/3 个仓库，正常总结 2，兜底 1，失败 0");
+    assert.deepEqual(summaryTrace?.metadataSanitized, {
+      repository_tasks_succeeded: 2,
+      repository_tasks_fallback: 1,
+      repository_tasks_failed: 0,
     });
     assert.equal(report.retryRecommended, true);
     assert.match(
