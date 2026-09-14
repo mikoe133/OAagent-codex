@@ -4,7 +4,7 @@ import type { ProjectProgressConfig } from "../config/projectProgressConfig.js";
 import type { ProjectProgressAiInteraction } from "./projectProgressSummarizer.js";
 import { runWeeklyReportAgent, type WeeklyReportAgentRunner } from "./weeklyReportAgentSummarizer.js";
 
-import { WEEKLY_REPORT_STYLE_PROMPT, WEEKLY_REPORT_STYLE_PROMPT_VERSION } from "../domain/weeklyReportStyle.js";
+import { normalizeWeeklyReportContent, WEEKLY_REPORT_STYLE_PROMPT, WEEKLY_REPORT_STYLE_PROMPT_VERSION } from "../domain/weeklyReportStyle.js";
 export { WEEKLY_REPORT_STYLE_PROMPT } from "../domain/weeklyReportStyle.js";
 
 export type WeeklyReportStyleInput = {
@@ -33,7 +33,7 @@ export class CodexWeeklyReportStyleSummarizer implements WeeklyReportStyleSummar
     const startedAt = Date.now();
     input.signal?.throwIfAborted();
     const previousContent = input.previousReport.content.slice(0, 16_000);
-    let content = `### ${input.projectName}\n${input.summary.trim()}`;
+    let content = normalizeWeeklyReportContent(`${input.projectName}\n${input.summary.trim()}`);
     let run: Awaited<ReturnType<WeeklyReportAgentRunner>> | null = null;
     let failed = false;
     try {
@@ -64,7 +64,7 @@ export class CodexWeeklyReportStyleSummarizer implements WeeklyReportStyleSummar
         !value.content.includes(input.projectName)) {
         throw new Error("Invalid weekly style output");
       }
-      content = value.content.trim();
+      content = normalizeWeeklyReportContent(value.content);
     } catch {
       input.signal?.throwIfAborted();
       failed = true;

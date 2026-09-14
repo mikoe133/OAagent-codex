@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
 import {
@@ -14,6 +12,8 @@ import {
 
 type ChatRequestBody = {
   messages?: unknown
+  recordId?: unknown
+  requestId?: unknown
   sessionId?: unknown
   provider?: unknown
   model?: unknown
@@ -38,8 +38,6 @@ type AgentStreamEvent = {
   }
 }
 
-const DEFAULT_AGENT_API_BASE_URL = "http://127.0.0.1:3000"
-const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
 
 export const runtime = "nodejs"
 
@@ -62,7 +60,10 @@ export async function POST(req: Request) {
       return jsonResponse({ error: "No valid user message to process" }, 400)
     }
 
-    const sessionId = resolveAgentSessionId(body.sessionId)
+    const sessionId = String(body.recordId ?? body.sessionId ?? "")
+    if (!/^[1-9]\d*$/.test(sessionId)) return jsonResponse({ error: "OA recordId required" }, 400)
+    const requestId = body.requestId
+    if (typeof requestId !== "string" || !/^[A-Za-z0-9_.:-]{1,120}$/.test(requestId)) return jsonResponse({ error: "requestId required" }, 400)
     const provider = resolveRequestedProvider(body.provider)
     if (!provider) {
       return jsonResponse({ error: "Invalid provider" }, 400)
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
     }
     const agentResponse = await fetch(buildAgentStreamUrl(sessionId), {
       method: "POST",
-      headers: buildAgentHeaders(sessionToken),
+      headers: new Headers({ ...Object.fromEntries(buildAgentHeaders(sessionToken)), "Idempotency-Key": requestId }),
       body: JSON.stringify({
         message,
         provider,
@@ -154,15 +155,6 @@ function resolveLatestUserMessage(messages: ChatMessage[]): string | null {
   }
 
   return content
-}
-
-function resolveAgentSessionId(input: unknown): string {
-  const sessionId = typeof input === "string" ? input.trim() : ""
-  if (AGENT_SESSION_ID_PATTERN.test(sessionId)) {
-    return sessionId
-  }
-
-  return `web-${randomUUID()}`
 }
 
 function resolveRequestedProvider(input: unknown): ModelProvider | null {
@@ -328,63 +320,6 @@ function jsonResponse(payload: { error: string }, status: number): Response {
       "Cache-Control": "no-store",
     },
   })
-}
-
-function getAgentApiBaseUrl(): string {
-  return (
-    readEnvValue("AGENT_API_BASE_URL") ||
-    readEnvValue("AGENT_BASE_URL") ||
-    readEnvValue("NEXT_PUBLIC_AGENT_API_BASE_URL") ||
-    DEFAULT_AGENT_API_BASE_URL
-  )
-}
-
-function readEnvValue(key: string): string | null {
-  return process.env[key]?.trim() || readSharedEnvValue(key)
-}
-
-function readSharedEnvValue(key: string): string | null {
-  const cwd = process.cwd()
-  const candidates = [
-    resolve(cwd, ".env.local"),
-    resolve(cwd, ".env"),
-    resolve(cwd, "..", ".env.local"),
-    resolve(cwd, "..", ".env"),
-  ]
-
-  for (const filePath of candidates) {
-    if (!existsSync(filePath)) {
-      continue
-    }
-
-    const value = readEnvFileValue(filePath, key)
-    if (value) {
-      return value
-    }
-  }
-
-  return null
-}
-
-function readEnvFileValue(filePath: string, key: string): string | null {
-  const content = readFileSync(filePath, "utf8")
-
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue
-    }
-
-    const normalized = trimmed.startsWith("export ") ? trimmed.slice(7).trimStart() : trimmed
-    if (!normalized.startsWith(`${key}=`)) {
-      continue
-    }
-
-    const rawValue = normalized.slice(key.length + 1).trim()
-    return rawValue.replace(/^['"]|['"]$/g, "").trim() || null
-  }
-
-  return null
 }
 
 function readCookie(cookieHeader: string | null, name: string): string | null {

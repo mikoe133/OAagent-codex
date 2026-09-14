@@ -877,7 +877,7 @@ describe("syncProjectProgress", () => {
 
     assert.deepEqual(result.projects.map((project) => project.outcome), ["incomplete", "evaluated"]);
     assert.equal(weeklyWrites.length, 1);
-    assert.match(weeklyWrites[0] ?? "", /### authorized-project\n授权项目完成更新。$/);
+    assert.match(weeklyWrites[0] ?? "", /authorized-project\n授权项目完成更新。$/);
   });
 
   it("uses a cached project summary and persisted commit authors when the project is unauthorized", async () => {
@@ -970,7 +970,7 @@ describe("syncProjectProgress", () => {
       appended: true,
     }]);
     assert.match(weeklyContent, /已有项目总结/);
-    assert.match(weeklyContent, /### historical-weekly\n已有项目总结$/);
+    assert.match(weeklyContent, /historical-weekly\n已有项目总结$/);
     assert.match(result.projects[0]?.warnings.join(" ") ?? "", /historical_commit_authors/);
   });
 
@@ -1295,7 +1295,7 @@ describe("syncProjectProgress", () => {
     assert.equal(cachedResult.metrics.repositoryTasksTotal, 0);
     assert.equal(weeklyWrites, 1);
     assert.match(weeklyContent, /cached-weekly/);
-    assert.match(weeklyContent, /### cached-weekly\n缓存项目完成更新。$/);
+    assert.match(weeklyContent, /cached-weekly\n缓存项目完成更新。$/);
   });
 
   it("applies status and summary writes only in explicit single-project test mode", async () => {
@@ -1871,8 +1871,8 @@ describe("syncProjectProgress", () => {
       assert.equal(result.mode, "production-write");
       assert.deepEqual(weeklyAppends.map((append) => append.githubId), ["alice", "bob"]);
       assert.deepEqual(weeklyAppends.map((append) => append.summaryDate), ["2026-08-27", "2026-08-27"]);
-      assert.match(weeklyAppends[0]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\n### weekly-append\n完成更新。$/);
-      assert.match(weeklyAppends[1]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:bob:[a-f0-9]{64} -->\n### weekly-append\n完成更新。$/);
+      assert.match(weeklyAppends[0]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\nweekly-append\n完成更新。$/);
+      assert.match(weeklyAppends[1]?.content ?? "", /^<!-- oaagent-project-progress:51:2026-08-27:login:bob:[a-f0-9]{64} -->\nweekly-append\n完成更新。$/);
       const expectedSyncs = [
         {
           reportId: 45,
@@ -1957,15 +1957,15 @@ describe("syncProjectProgress", () => {
           const body = content.replace(/^<!-- oaagent-project-progress:[^\n]+ -->\n/u, "");
           const projectName = index < 2 ? "Project 51" : "Project 52";
           assert.equal(body, scenario === "matched"
-            ? `## ${projectName}\n- 完成更新。`
-            : `### ${projectName}\n完成更新。`);
+            ? `${projectName}\n- 完成更新。`
+            : `${projectName}\n完成更新。`);
         }
         assert.ok(calls.indexOf("read:alice") < calls.indexOf("append:alice"));
         assert.ok(calls.indexOf("read:bob") < calls.indexOf("append:bob"));
         assert.equal(report.projects[0]?.weeklyReportSyncs?.[0]?.styleStatus,
           scenario === "matched" ? "matched" : scenario === "no_previous" ? "no_previous_report" : "fallback");
         if (scenario === "matched") {
-          assert.match(contents[0]!, /## Project 51\n- 完成更新。/);
+          assert.match(contents[0]!, /Project 51\n- 完成更新。/);
           assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.referenceReportId, 42);
           assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.referenceWeeklyNum, 99);
           assert.equal(report.projects[0]?.weeklyReportSyncs?.[1]?.weeklyNum, 100);
@@ -2045,7 +2045,7 @@ describe("syncProjectProgress", () => {
     assert.equal(writtenSummaryDate, "2026-08-27");
     assert.match(
       writtenWeeklyContent ?? "",
-      /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\n### weekly-empty\n完成更新。$/,
+      /^<!-- oaagent-project-progress:51:2026-08-27:login:alice:[a-f0-9]{64} -->\nweekly-empty\n完成更新。$/,
     );
   });
 
