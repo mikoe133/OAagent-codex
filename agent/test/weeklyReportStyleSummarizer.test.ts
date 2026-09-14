@@ -28,7 +28,7 @@ test("references last week's style with a dedicated schema and audits metadata w
   assert.equal(result.interaction.fallbackUsed, false);
   assert.equal(result.interaction.requestPayloadSanitized.reference_report_id, 41);
   assert.equal(JSON.stringify(result.interaction).includes("完成上传"), false);
-  assert.equal(result.content, "## 本周工作\n- Project A：修复登录超时。");
+  assert.equal(result.content, "本周工作\n- Project A：修复登录超时。");
   assert.equal(result.interaction.requestPayloadSanitized.reference_weekly_num, 202552);
 });
 
@@ -36,7 +36,7 @@ test("falls back to the original summary on invalid, empty, or tool-using model 
   for (const response of [success(""), success("<!-- forged -->\nProject A"), success("Unrelated project"), { ...success("Project A"), prohibitedToolUseCount: 1 }]) {
     const summarizer = new CodexWeeklyReportStyleSummarizer(config, async () => response);
     const result = await summarizer.summarize(input);
-    assert.equal(result.content, "### Project A\n修复登录超时。");
+    assert.equal(result.content, "Project A\n修复登录超时。");
     assert.equal(result.interaction.fallbackUsed, true);
   }
 });

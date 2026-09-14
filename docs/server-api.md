@@ -4,6 +4,8 @@
 
 ## 基本信息
 
+生产公网入口为 `https://oa-agent.rwkvos.com/v1`，由 Nginx 将公开对话路径直接转发到 Agent，沿用 OA Token 鉴权。完整配置、端口绑定与部署验证见 [生产对话接口路由](public-chat-routing.md)。此地址需在生产应用该配置后可用。
+
 - 默认地址:`http://127.0.0.1:3000`
 - 启动命令:`npm run dev:server`
 - 默认 session 存储:`.context/agent-sessions.json`
@@ -309,278 +311,151 @@ GET /v1/models
 }
 ```
 
-### 创建或获取 Session
+### OA 会话与消息接口
 
-```http
-POST /v1/sessions
+对外会话唯一编号是 OA Copilot 创建记录返回的 `recordId`（十进制正整数字符串）。调用方不生成 sessionId，也不传 threadId。路径中的 `{recordId}` 即 OA `/copilot/record?record_id=...` 的编号。内部 `agentSessionId` 和模型 threadId 不出现在公开会话及最终结果中。
+
+同一会话的每条消息必须有一个 `Idempotency-Key`，推荐 UUID。兼容请求体 `requestId`；两者是同一编号的两种传法，同时提供时必须一致。不新增 runId。编号范围是 1～120 位字母、数字、下划线、点、冒号、连字符。
+
+| 方法 | 路径 | 行为 |
+| --- | --- | --- |
+| POST | `/v1/sessions` | 在 OA 创建会话；请求 `{ "title": "周报助手" }`，title 可省略，返回 201 和 Location |
+| GET | `/v1/sessions?page=1&size=20` | OA 当前用户会话列表，size 最大 100 |
+| GET | `/v1/sessions/{recordId}` | OA 会话与已保存历史 |
+| PATCH | `/v1/sessions/{recordId}` | 只更新 title 或 feedback；不接受 messages 整体覆盖 |
+| DELETE | `/v1/sessions/{recordId}` | 删除 OA 记录，有活动/排队任务时返回 409 |
+| GET | `/v1/sessions/{recordId}/messages?limit=20&cursor=0` | 分页历史，limit 最大 100；返回 messages 和 nextCursor（null 表示结束） |
+| POST | `/v1/sessions/{recordId}/messages` | 提交消息，等待执行结果；必须携带请求编号 |
+| POST | `/v1/sessions/{recordId}/messages/stream` | 提交消息并通过 SSE 接收进度，必须携带请求编号 |
+| GET | `/v1/sessions/{recordId}/requests/{requestId}` | 查询原请求状态、结果及历史同步情况 |
+| POST | `/v1/sessions/{recordId}/requests/{requestId}/cancel` | 显式请求停止排队/执行；返回 202，不回滚已发生的 OA 操作 |
+| POST | `/v1/sessions/{recordId}/requests/{requestId}/sync` | 将成功结果补存到 OA 历史；不调用模型，可重复调用 |
+
+每一个读写接口，包括幂等重放、查询和取消，都重新验证 OA Token，并向 OA 读取对应记录，校验记录 user_id 与当前验证的用户 ID 一致。OA 不可用时不返回缓存结果绕过授权。内部幂等索引包含 OA 地址、alias、当前用户、recordId 和 requestId。
+
+创建示例：
+
+```bash
+curl -sS https://oa-agent.rwkvos.com/v1/sessions \
+  -H "Authorization: Bearer $OA_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"title":"周报助手"}'
 ```
-
-用途:创建一个服务侧 session,或按指定 `sessionId` 获取已有 session。不传 `sessionId` 时服务自动生成 UUID。
-
-鉴权:必须携带并通过 OA 验证的用户 token。
-
-请求体:
 
 ```json
 {
-  "sessionId": "demo"
-}
-```
-
-字段说明:
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `sessionId` | `string` | 否 | 自定义 session ID。不传或传空字符串时自动生成 |
-
-响应示例:
-
-```json
-{
-  "sessionId": "demo",
-  "threadId": null,
+  "recordId": "123",
+  "schema": "oa-agent-chat/v1",
+  "title": "周报助手",
   "summary": null,
-  "createdAt": "2026-07-07T12:00:00.000Z",
-  "updatedAt": "2026-07-07T12:00:00.000Z"
+  "messages": [],
+  "createdAt": 1780000000,
+  "updatedAt": 1780000000
 }
 ```
 
-状态码:
+时间字段沿用 OA record.createdAt / created_at / updated_at，可能是 Unix 秒或 ISO 字符串；Web 适配层会归一化。创建会话本身不做消息幂等，网络结果未知时不要自动重复创建。
 
-| 状态码 | 说明 |
-| --- | --- |
-| `201` | 创建成功,或指定 `sessionId` 已存在并返回现有 session |
-| `401` | 鉴权失败 |
-| `500` | 非法 JSON、非法 `sessionId`、请求体过大或其他服务端错误 |
+### 普通与流式发送消息
 
-调用示例:
-
-```bash
-curl -s -X POST http://127.0.0.1:3000/v1/sessions \
-  -H 'content-type: application/json' \
-  -H "Cookie: sessionid=$OA_USER_TOKEN" \
-  -d '{"sessionId":"demo"}'
-```
-
-### 查询 Session 列表
-
-```http
-GET /v1/sessions
-```
-
-用途:查询当前 OA 用户拥有的 session,按 `createdAt` 倒序返回,即最新创建的会话排在最前。
-
-鉴权:必须携带并通过 OA 验证的用户 token。
-
-响应示例:
+请求 JSON：
 
 ```json
 {
-  "sessions": [
-    {
-      "sessionId": "demo",
-      "threadId": "thread_...",
-      "summary": "用户: ...\n助手: ...",
-      "createdAt": "2026-07-07T12:00:00.000Z",
-      "updatedAt": "2026-07-07T12:05:00.000Z"
-    }
-  ]
-}
-```
-
-状态码:
-
-| 状态码 | 说明 |
-| --- | --- |
-| `200` | 查询成功 |
-| `401` | 鉴权失败 |
-| `500` | 读取 session 存储文件失败或其他服务端错误 |
-
-调用示例:
-
-```bash
-curl -s http://127.0.0.1:3000/v1/sessions \
-  -H "Authorization: Bearer $OA_USER_TOKEN"
-```
-
-### 删除 Session
-
-```http
-DELETE /v1/sessions/{sessionId}
-```
-
-用途:删除当前 OA 用户拥有的指定 session 的持久化元数据和进程内 OA token 绑定。接口具有幂等性;session 不存在或不属于当前用户时仍返回 `200`,但 `deleted` 为 `false`。
-
-鉴权:必须携带并通过 OA 验证的用户 token。
-
-响应示例:
-
-```json
-{
-  "deleted": true,
-  "sessionId": "demo"
-}
-```
-
-状态码:
-
-| 状态码 | 说明 |
-| --- | --- |
-| `200` | 删除请求已处理 |
-| `401` | 鉴权失败 |
-| `500` | 非法 `sessionId`、写入 session 存储文件失败或其他服务端错误 |
-
-调用示例:
-
-```bash
-curl -s -X DELETE http://127.0.0.1:3000/v1/sessions/demo \
-  -H "Authorization: Bearer $OA_USER_TOKEN"
-```
-
-### 发送消息
-
-```http
-POST /v1/sessions/{sessionId}/messages
-```
-
-用途:向指定 session 发送用户消息。服务会调用 Codex agent,由 agent 基于远程优先、本地兜底选中的 OpenAPI 契约回答 OA 接口问题;首次进入 Codex agent 时会创建或初始化 Codex thread,后续请求会复用同一个 `threadId` 并带上服务端摘要继续对话。
-
-服务端不包含按关键词硬编码的 OA 直连分支。配置 `OA_API_BASE_URL` 后,agent 可以通过受控 `callOaApi` 工具调用所选 OpenAPI 契约中声明的 OA 接口;OA 登录态来自当前请求验证并绑定到 session 的用户 token。
-
-鉴权:必须携带并通过 OA 验证的用户 token。
-
-路径参数:
-
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `sessionId` | `string` | 是 | 需要 URL 编码。解码后必须满足 session ID 规则 |
-
-请求体:
-
-```json
-{
-  "message": "我想查一下周报列表,应该调用哪个接口?",
+  "message": "查询我本周的周报",
   "provider": "nexttoken",
   "model": "gpt-5.6-terra"
 }
 ```
 
-字段说明:
+message 去掉首尾空白后必须非空。provider/model 可省略，按服务端默认值解析并验证白名单；可选 developerMode（boolean）及 routerModel（路由模型白名单）。建议外部集成显式指定 provider/model，避免默认模型升级影响重试的参数摘要。
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `message` | `string` | 是 | 用户输入。去掉首尾空白后不能为空 |
-| `provider` | `string` | 否 | 本轮 provider,可选 `nexttoken` 或 `openrouter`;省略时使用 `CODEX_MODEL_PROVIDER` |
-| `model` | `string` | 否 | 本轮模型。省略时使用该 provider 的默认模型;传入时必须属于对应 provider 白名单 |
+```bash
+curl -N "https://oa-agent.rwkvos.com/v1/sessions/$RECORD_ID/messages/stream" \
+  -H "Authorization: Bearer $OA_TOKEN" \
+  -H "Idempotency-Key: $REQUEST_ID" \
+  -H 'Content-Type: application/json' \
+  --data '{"message":"查询我本周的周报","provider":"nexttoken","model":"gpt-5.6-terra"}'
+```
 
-响应示例:
+响应头包含原 Idempotency-Key、Idempotency-Replayed（true/false）和指向查询接口的 Location。SSE 事件含 recordId 和 requestId，不含对外 sessionId/runId；进度事件保留 itemId 用于组合流式消息/工具步骤。
+
+```text
+event: run.queued
+data: {"type":"run.queued","recordId":"123","requestId":"req-1"}
+
+event: message.delta
+data: {"type":"message.delta","recordId":"123","requestId":"req-1","itemId":"m","delta":"查询结果","text":"查询结果"}
+
+event: run.completed
+data: {"type":"run.completed","recordId":"123","requestId":"req-1","historySync":"synced","result":{"recordId":"123","requestId":"req-1","finalResponse":"查询结果……","provider":"nexttoken","model":"gpt-5.6-terra","knowledgeSources":[]}}
+```
+
+其他执行进度包括 run.started、turn.started、progress、tool.started、tool.updated、tool.completed；底层 thread.started 不转发。SSE 开始后失败返回 run.failed，HTTP 200 不代表任务成功。
+
+普通消息响应与查询响应采用同一个运行记录格式：
 
 ```json
 {
-  "sessionId": "demo",
-  "threadId": "thread_...",
-  "provider": "nexttoken",
-  "model": "gpt-5.6-terra",
-  "finalResponse": "建议使用 `weekly_report_list_weekly_report_report_list_get` ...",
-  "executedCommands": [
-    "python3 ..."
-  ],
-  "summary": "用户: 我想查一下周报列表,应该调用哪个接口?\n助手: 建议使用 ..."
-}
-```
-
-状态码:
-
-| 状态码 | 说明 |
-| --- | --- |
-| `200` | agent 运行成功 |
-| `400` | `message` 缺失/为空,或 `provider`/`model` 类型错误、组合不在白名单 |
-| `401` | 鉴权失败 |
-| `500` | 非法 JSON、非法 `sessionId`、请求体过大、agent 未返回最终回答、模型调用失败或其他服务端错误 |
-
-调用示例:
-
-```bash
-curl -s -X POST http://127.0.0.1:3000/v1/sessions/demo/messages \
-  -H 'content-type: application/json' \
-  -H "Cookie: sessionid=$OA_USER_TOKEN" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","provider":"nexttoken","model":"gpt-5.6-terra"}'
-```
-
-### 流式发送消息
-
-```http
-POST /v1/sessions/{sessionId}/messages/stream
-```
-
-用途:向指定 session 发送用户消息,并在执行过程中通过 SSE 实时返回进展、部分输出和工具调用。会话复用、鉴权、路径参数、请求体和错误规则与非流式“发送消息”接口一致。
-
-响应事件示例:
-
-```text
-: connected
-
-event: run.queued
-data: {"type":"run.queued","sessionId":"demo"}
-
-event: tool.started
-data: {"type":"tool.started","sessionId":"demo","itemId":"...","toolType":"command_execution","name":"python3 ...","status":"in_progress"}
-
-event: message.delta
-data: {"type":"message.delta","sessionId":"demo","itemId":"...","delta":"建议使用","text":"建议使用"}
-
-event: run.completed
-data: {"type":"run.completed","sessionId":"demo","result":{"sessionId":"demo","threadId":"thread_...","provider":"nexttoken","model":"gpt-5.6-terra","finalResponse":"建议使用 ...","executedCommands":["python3 ..."],"summary":"用户: ..."},"usage":{"input_tokens":123,"cached_input_tokens":0,"output_tokens":45,"reasoning_output_tokens":0}}
-
-: keep-alive
-```
-
-调用示例:
-
-```bash
-curl -N -X POST http://127.0.0.1:3000/v1/sessions/demo/messages/stream \
-  -H 'content-type: application/json' \
-  -H "Cookie: sessionid=$OA_USER_TOKEN" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?","provider":"nexttoken","model":"gpt-5.6-terra"}'
-```
-
-浏览器示例:
-
-```js
-const response = await fetch("/v1/sessions/demo/messages/stream", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({
-    message: "我想查一下周报列表,应该调用哪个接口?",
-    provider: "nexttoken",
-    model: "gpt-5.6-terra",
-  }),
-});
-
-const reader = response.body
-  .pipeThrough(new TextDecoderStream())
-  .getReader();
-
-let buffer = "";
-for (;;) {
-  const { value, done } = await reader.read();
-  if (done) break;
-  buffer += value;
-  const chunks = buffer.split("\n\n");
-  buffer = chunks.pop() || "";
-  for (const chunk of chunks) {
-    const dataLine = chunk.split("\n").find((line) => line.startsWith("data: "));
-    if (!dataLine) continue;
-    const event = JSON.parse(dataLine.slice(6));
-    if (event.type === "message.delta") {
-      process.stdout.write(event.delta);
-    }
-    if (event.type === "tool.started") {
-      console.error("tool:", event.toolType, event.name);
-    }
+  "recordId": "123",
+  "requestId": "req-1",
+  "message": "查询我本周的周报",
+  "state": "completed",
+  "createdAt": "2026-09-14T08:00:00.000Z",
+  "updatedAt": "2026-09-14T08:00:08.000Z",
+  "historySync": "synced",
+  "result": {
+    "recordId": "123",
+    "requestId": "req-1",
+    "finalResponse": "查询结果……",
+    "provider": "nexttoken",
+    "model": "gpt-5.6-terra",
+    "knowledgeSources": []
   }
 }
 ```
+
+### 幂等、查询与断线恢复
+
+首次发送前保存 requestId；断线后用 GET 查询，或使用相同编号和相同参数重新 POST。普通/SSE 共用一条请求记录，不重复排队或调用模型。相同会话、相同编号、不同消息或模型参数返回 409 idempotency_conflict。不同会话可以独立使用相同请求编号。
+
+| state | 含义 |
+| --- | --- |
+| queued | 已受理，等待执行名额 |
+| running | Agent 正在执行 |
+| completed | 结果已持久化，可查询/重放 |
+| failed | 执行失败或超时，errorCode 说明原因；不能自动换编号重新执行 |
+| cancelled | 显式取消已处理；不表示 OA 操作被撤销 |
+| unknown | 持久记录未完成，但当前进程没有该运行；通常是重启/崩溃后结果待核对 |
+
+已受理任务不因 HTTP/SSE 连接关闭而取消。使用 cancel 接口明确停止。客户端慢读导致输出缓冲超过 1 MiB 时断开该连接，后台继续，调用方可查询结果。重复请求执行中返回 409 idempotency_pending 和 Retry-After: 3；已完成 SSE 重放只提供最终事件，不提供历史 delta、usage 或断点续传。
+
+historySync=pending 且 state=completed 表示模型已完成，但 OA 历史尚未确认保存。使用 sync 接口补存，不重新运行模型。历史写入采用当前 OA 文档的 PATCH 整体覆盖协议，在同一会话执行槽内读取最新记录并追加，消息标识由 requestId + role 派生，重复补存不会重复添加。禁止浏览器整体覆盖 messages。失败/取消的执行详情保留在请求查询记录，成功消息对同步到 OA。
+
+### 限流、并发与失败处理
+
+请求在鉴权、参数检查和幂等查询后才进入容量检查。重放和结果查询不算新对话，不占模型名额。容量不足拒绝时删除未受理占位，调用方可按 Retry-After 使用原编号重试。首次有效请求已受理后，即使失败或重启也保留编号，绝不自动重新执行。
+
+| 环境变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| CHAT_MAX_CONCURRENCY | 2 | Agent 同时执行的对话数 |
+| CHAT_USER_CONCURRENCY | 1 | 单个 OA 用户同时执行数 |
+| CHAT_MAX_QUEUE | 20 | 全局等待数 |
+| CHAT_USER_QUEUE | 5 | 单用户等待数 |
+| CHAT_USER_REQUESTS_PER_MINUTE | 20 | 单用户每分钟受理的新请求数 |
+| CHAT_QUEUE_TIMEOUT_MS | 120000 | 最长排队时间 |
+| CHAT_EXECUTION_TIMEOUT_MS | 600000 | 发出执行取消信号的时限 |
+
+同一会话串行；不同用户轮流获得可用名额。超时只是取消信号，名额在实际任务退出后才释放，避免旧执行未停止又继续超额接入。用户限额返回 429；全局队列满返回 503；两者有 Retry-After。排队超时 errorCode=queue_timeout，尚未运行模型；执行超时为 execution_timeout，可能已发生业务操作。接口错误采用 `{ "code": "...", "error": "..." }`。非法 JSON/参数为 400，请求体超 128 KiB 为 413；OA 故障/本地持久化故障不会降级执行。
+
+### 持久化与迁移边界
+
+聊天历史的主要存储仍是 OA Copilot。Agent 仅保存内部模型上下文映射和请求运行记录，后者位于 `${AGENT_SESSION_STORE}.public-requests`，与 Compose 的 /app/.context 持久卷一起备份。记录包含用户输入和结果等业务数据，不包含鉴权头；目录 0700、文件 0600。占位独占创建，结果使用同步落盘和原子替换。没有自动过期，不要在调用方仍可能重试时清理。
+
+本版依赖单 Agent 进程及持久磁盘；不支持把多个进程各自接到公网分流来共享会话调度。重启后未确认请求返回 unknown，需人工核对，不恢复执行。OA PATCH 没有版本条件，本版通过唯一 Agent 写入者和会话串行避免本项目内竞争；其他系统直接覆盖同一 Copilot record 时仍需 OA 增加版本/CAS 支持。
+
+这是公网会话契约变更，Web 和 Agent 必须配套部署。已有 OA recordId 不变；Agent 在确认本地旧会话属于当前用户后，复用 record.agentSessionId 对应的上下文。旧浏览器本地自定义会话编号需要从会话列表重新打开，列表提供同一个 OA ID；本地没有 OA 记录的草稿不自动冒充 OA 会话。旧 `${AGENT_SESSION_STORE}.requests` 幂等文件保留在磁盘，但属于旧 sessionId 协议，不会自动映射为新请求：切换前应排空旧任务，核对结果，不能用新接口重发结果未知的旧请求。
+
 
 ### 受控 OA API 调用工具
 
@@ -677,7 +552,7 @@ CLI 参数:
 
 ## 会话与上下文行为
 
-- 本服务把 `sessionId -> threadId` 和 `summary` 保存到 `AGENT_SESSION_STORE` 指定的 JSON 文件。
+- 本服务内部把 `sessionId -> threadId` 和 `summary` 保存到 `AGENT_SESSION_STORE` 指定的 JSON 文件。
 - `threadId` 是 Codex SDK 返回的 thread 标识,用于后续消息继续同一个 agent thread。
 - `summary` 是本服务本地生成的紧凑摘要,最多约 3000 字符,每轮会追加当前用户输入和 agent 最终回答的压缩版本。
 - 同一个 `sessionId` 的并发消息会排队串行执行,避免多个请求同时改写同一个 session。

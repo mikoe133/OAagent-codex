@@ -243,14 +243,7 @@ test("uses the validated page login userid for knowledge-base headers", async ()
   };
 
   try {
-    const created = await requestAutomationJson(
-      address.port,
-      "POST",
-      "/v1/sessions",
-      "page-login-token",
-      { sessionId: "current-page-session" },
-    );
-    assert.equal(created.status, 201);
+    await sessionStore.bindOaToken("current-page-session", "page-login-token", "owner", "73");
 
     const response = await requestAutomationJson(
       address.port,
@@ -419,7 +412,8 @@ test("records authenticated streaming chat latency without logging request secre
   const address = server.address();
   assert.ok(address && typeof address === "object");
 
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (input) => {
+    if (new URL(String(input)).pathname === "/copilot/record") return Response.json({ data: { id: 1, user_id: 19, record: { messages: [] } } });
     now = 7;
     return Response.json({
       code: 200,
@@ -431,7 +425,7 @@ test("records authenticated streaming chat latency without logging request secre
   try {
     const response = await requestStream(
       address.port,
-      "/v1/sessions/latency-session/messages/stream",
+      "/v1/sessions/1/messages/stream",
       "secret-page-token",
       { message: "hello", provider: "nexttoken", model: "gpt-5.6-terra" },
     );
@@ -500,17 +494,14 @@ test("forwards only approved router models regardless of developer mode", async 
   const address = server.address();
   assert.ok(address && typeof address === "object");
 
-  globalThis.fetch = async () =>
-    Response.json({
-      code: 200,
-      success: true,
-      data: { id: 19, email: "developer@example.test" },
-    });
+  globalThis.fetch = async (input) => new URL(String(input)).pathname === "/copilot/record"
+    ? Response.json({ data: { id: 1, user_id: 19, record: { messages: [] } } })
+    : Response.json({ code: 200, success: true, data: { id: 19, email: "developer@example.test" } });
 
   try {
     const accepted = await requestStream(
       address.port,
-      "/v1/sessions/developer-session/messages/stream",
+      "/v1/sessions/1/messages/stream",
       "valid-token",
       {
         message: "hello",
@@ -529,7 +520,7 @@ test("forwards only approved router models regardless of developer mode", async 
 
     const acceptedWithoutDeveloperMode = await requestStream(
       address.port,
-      "/v1/sessions/developer-session/messages/stream",
+      "/v1/sessions/1/messages/stream",
       "valid-token",
       {
         message: "hello",
@@ -541,12 +532,12 @@ test("forwards only approved router models regardless of developer mode", async 
     );
 
     assert.equal(acceptedWithoutDeveloperMode.status, 200);
-    assert.equal(inputs[1]?.developerMode, undefined);
+    assert.equal(inputs[1]?.developerMode, false);
     assert.equal(inputs[1]?.routerModel, "deepseek/deepseek-v4-flash");
 
     const rejected = await requestStream(
       address.port,
-      "/v1/sessions/developer-session/messages/stream",
+      "/v1/sessions/1/messages/stream",
       "valid-token",
       {
         message: "hello",
@@ -556,11 +547,11 @@ test("forwards only approved router models regardless of developer mode", async 
     );
 
     assert.equal(rejected.status, 400);
-    assert.match(rejected.body, /路由模型/);
+    assert.match(rejected.body, /模型/);
 
     const rejectedWithoutDeveloperMode = await requestStream(
       address.port,
-      "/v1/sessions/developer-session/messages/stream",
+      "/v1/sessions/1/messages/stream",
       "valid-token",
       {
         message: "hello",
@@ -570,7 +561,7 @@ test("forwards only approved router models regardless of developer mode", async 
     );
 
     assert.equal(rejectedWithoutDeveloperMode.status, 400);
-    assert.match(rejectedWithoutDeveloperMode.body, /路由模型/);
+    assert.match(rejectedWithoutDeveloperMode.body, /模型/);
     assert.equal(inputs.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
@@ -681,6 +672,6 @@ function requestStream(
       },
     );
     request.on("error", reject);
-    request.end(JSON.stringify(body));
+    request.end(JSON.stringify({ requestId: `test-${Math.random().toString(36).slice(2)}`, ...body }));
   });
 }

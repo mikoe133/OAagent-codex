@@ -441,6 +441,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [selectedModel, setSelectedModel] = useState<AIModel>(() => getDefaultModel(DEFAULT_MODEL_PROVIDER))
   const [developerMode, setDeveloperMode] = useState(false)
   const [selectedRouterModel, setSelectedRouterModel] = useState<RouterModel>(DEFAULT_ROUTER_MODEL)
+  const preparingSessionRef = useRef(false)
   const [agentSessionId, setAgentSessionId] = useState("")
   const [activeRecordId, setActiveRecordId] = useState<string | number | null>(null)
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
@@ -788,10 +789,34 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
   // Send a message to the AI
   const sendMessage = useCallback(
-    async (content: string, imageData?: string) => {
+    async (content: string, imageData?: string, retryRequestId?: string) => {
       if (!content.trim() && !imageData) return
 
-      const currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
+      if (preparingSessionRef.current) return
+      let currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
+      if (!/^[1-9]\d*$/.test(currentAgentSessionId)) {
+        if (messagesRef.current.length) {
+          setError("请从左侧会话列表重新打开已有会话，以关联 OA 会话记录。")
+          return
+        }
+        preparingSessionRef.current = true
+        try {
+          const session = await createChatSession(currentAgentSessionId)
+          if (!session?.recordId) throw new Error("创建 OA 会话失败")
+          if (activeSessionIdRef.current && activeSessionIdRef.current !== currentAgentSessionId) {
+            setSessionListRefreshKey((value) => value + 1)
+            return
+          }
+          currentAgentSessionId = String(session.recordId)
+          activeSessionIdRef.current = currentAgentSessionId
+          setAgentSessionId(currentAgentSessionId)
+          setActiveRecordId(currentAgentSessionId)
+          persistAgentSessionId(currentAgentSessionId)
+        } catch (error) {
+          setError(error instanceof Error ? error.message : "创建 OA 会话失败")
+          return
+        } finally { preparingSessionRef.current = false }
+      }
       if (activeSessionRunsRef.current.has(currentAgentSessionId)) {
         return
       }
@@ -800,8 +825,9 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       const responseStartedAt = performance.now()
       const conversationMessages = messagesRef.current
 
+      const requestId = retryRequestId || generateId()
       const userMessage: Message = {
-        id: generateId(),
+        id: `${requestId}:user`,
         role: "user",
         content: content.trim() || "Describe this image",
         createdAt: new Date(),
@@ -809,7 +835,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
 
       const assistantMessage: Message = {
-        id: generateId(),
+        id: `${requestId}:assistant`,
         role: "assistant",
         content: "",
         createdAt: new Date(),
@@ -821,7 +847,6 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         setAgentSessionId(currentAgentSessionId)
       }
 
-      const requestId = generateId()
       const controller = new AbortController()
       activeSessionRunsRef.current.set(currentAgentSessionId, { requestId, controller })
       setRunningSessionIds((current) => new Set(current).add(currentAgentSessionId))
@@ -833,7 +858,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       messagesRef.current = newMessages
       sessionMessagesRef.current.set(currentAgentSessionId, newMessages)
       setMessages(newMessages)
-      void persistMessages(currentAgentSessionId, activeRecordId, newMessages)
+      // Agent persists generated messages to OA; no browser history write.
 
       let cancelPendingTypewriter = () => {}
       let dismissPendingRoutingTrace = () => {}
@@ -868,7 +893,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            sessionId: currentAgentSessionId,
+            recordId: currentAgentSessionId,
+            requestId,
             messages: [...conversationMessages, userMessage].map((m) => ({
               role: m.role,
               content: m.content,
@@ -1149,7 +1175,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
         publishSessionMessages(completedMessages)
 
-        void persistMessages(currentAgentSessionId, activeRecordId, completedMessages)
+        setSessionListRefreshKey((value) => value + 1)
       } catch (e) {
         cancelPendingTypewriter()
 
@@ -1183,7 +1209,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           setError(errorMessage)
         }
 
-        void persistMessages(currentAgentSessionId, activeRecordId, terminalMessages)
+        setSessionListRefreshKey((value) => value + 1)
       } finally {
         dismissPendingRoutingTrace()
         if (activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId) {
@@ -1215,6 +1241,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     if (messages.length === 0) return
     const lastUserMessage = [...messages].reverse().find((m) => m.role === "user")
     if (lastUserMessage) {
+      const originalRequestId = lastUserMessage.id.endsWith(":user") ? lastUserMessage.id.slice(0, -5) : null
+      if (!originalRequestId) {
+        setError("旧消息没有请求编号，请先核对 OA 结果，再手动发送新消息。")
+        return
+      }
       const index = messages.findIndex((m) => m.id === lastUserMessage.id)
       const retryMessages = messages.slice(0, index)
       messagesRef.current = retryMessages
@@ -1223,12 +1254,19 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
       setMessages(retryMessages)
       setError(null)
-      setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.imageData), 100)
+      setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.imageData, originalRequestId), 100)
     }
   }, [agentSessionId, messages, sendMessage])
 
   const stopStreaming = useCallback(() => {
-    activeSessionRunsRef.current.get(agentSessionId)?.controller.abort()
+    const run = activeSessionRunsRef.current.get(agentSessionId)
+    if (!run) return
+    void fetch(`/api/chat/requests?recordId=${encodeURIComponent(agentSessionId)}&requestId=${encodeURIComponent(run.requestId)}&action=cancel`, {
+      method: "POST", credentials: "same-origin",
+    }).then(async response => {
+      if (!response.ok) throw new Error("取消请求失败")
+      run.controller.abort()
+    }).catch(error => setError(error instanceof Error ? error.message : "取消请求失败"))
   }, [agentSessionId])
 
   const handleMessageFeedback = useCallback(
@@ -1270,18 +1308,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     persistAgentSessionId(nextAgentSessionId)
     setSessionListRefreshKey((value) => value + 1)
 
-    void createChatSession(nextAgentSessionId)
-      .then((session) => {
-        if (session?.recordId && activeSessionIdRef.current === nextAgentSessionId) {
-          setActiveRecordId(session.recordId)
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to create chat session:", error)
-      })
-      .finally(() => {
-        setSessionListRefreshKey((value) => value + 1)
-      })
+    // OA assigns the record ID when the first message is submitted.
+
   }, [isStreaming])
 
   const handleDeleteSession = useCallback(

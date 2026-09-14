@@ -5,24 +5,15 @@ import {
   type ServerResponse,
 } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import type {
-  AgentService,
-  AgentStreamEvent,
-  SendMessageInput,
-} from "../application/agentService.js";
+import type { AgentService } from "../application/agentService.js";
 import type { AppConfig } from "../config/config.js";
 import {
   MODEL_CATALOG,
   MODEL_CATALOG_VERSION,
-  ROUTER_MODEL_CATALOG,
   getDefaultModel,
   getModelDisplayName,
   resolveAutomationModelSelection,
-  resolveRequestedModel,
-  resolveRequestedProvider,
-  resolveRequestedRouterModel,
   type ModelProviderId,
-  type RouterModelId,
 } from "../config/modelCatalog.js";
 import { callOaApiTool } from "../infrastructure/oa/oaApiTool.js";
 import { callKnowledgeBaseApiTool } from "../infrastructure/knowledgebase/knowledgeBaseApiTool.js";
@@ -34,6 +25,9 @@ import {
   chatLatencyMetrics,
   type ChatLatencyMetricsRecorder,
 } from "../infrastructure/observability/chatLatency.js";
+
+import type { ChatScheduler } from "../chat/chatScheduler.js";
+import { PublicChatApi } from "../chat/publicChatApi.js";
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -77,7 +71,9 @@ export function createAgentHttpServer(
   sessionStore: SessionStore,
   automationHttp?: AutomationHttpApplication,
   latencyMetrics: ChatLatencyMetricsRecorder = chatLatencyMetrics,
+  chatScheduler?: ChatScheduler,
 ) {
+  const publicChat = new PublicChatApi(config, agentService, sessionStore, chatScheduler);
   return createServer(async (request, response) => {
     try {
       await routeRequest(
@@ -88,6 +84,7 @@ export function createAgentHttpServer(
         response,
         automationHttp,
         latencyMetrics,
+        publicChat,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -104,6 +101,7 @@ async function routeRequest(
   response: ServerResponse,
   automationHttp?: AutomationHttpApplication,
   latencyMetrics: ChatLatencyMetricsRecorder = chatLatencyMetrics,
+  publicChat?: PublicChatApi,
 ): Promise<void> {
   const method = request.method || "GET";
   const url = new URL(request.url || "/", "http://localhost");
@@ -243,136 +241,7 @@ async function routeRequest(
     return;
   }
 
-  if (method === "POST" && url.pathname === "/v1/sessions") {
-    const body = await readJsonBody(request);
-    const sessionId = stringField(body, "sessionId") || randomUUID();
-    validateSessionId(sessionId);
-    if (
-      !(await sessionStore.bindOaToken(
-        sessionId,
-        oaApiToken,
-        tokenValidation.principalId,
-        tokenValidation.oaUserId,
-      ))
-    ) {
-      writeJson(response, 403, { error: "forbidden" });
-      return;
-    }
-    const session = await sessionStore.getOrCreate(sessionId);
-    writeJson(response, 201, session);
-    return;
-  }
-
-  if (method === "GET" && url.pathname === "/v1/sessions") {
-    writeJson(response, 200, {
-      sessions: await sessionStore.listForOwner(tokenValidation.principalId),
-    });
-    return;
-  }
-
-  const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/);
-  if (method === "DELETE" && sessionMatch) {
-    const sessionId = decodeURIComponent(sessionMatch[1] ?? "");
-    validateSessionId(sessionId);
-    writeJson(response, 200, {
-      deleted: await sessionStore.removeForOwner(
-        sessionId,
-        tokenValidation.principalId,
-      ),
-      sessionId,
-    });
-    return;
-  }
-
-  const messageMatch = url.pathname.match(
-    /^\/v1\/sessions\/([^/]+)\/messages$/,
-  );
-  if (method === "POST" && messageMatch) {
-    const sessionId = decodeURIComponent(messageMatch[1] ?? "");
-    validateSessionId(sessionId);
-    if (
-      !(await sessionStore.bindOaToken(
-        sessionId,
-        oaApiToken,
-        tokenValidation.principalId,
-        tokenValidation.oaUserId,
-      ))
-    ) {
-      writeJson(response, 403, { error: "forbidden" });
-      return;
-    }
-    const body = await readJsonBody(request);
-    const message = stringField(body, "message");
-    if (!message) {
-      writeJson(response, 400, { error: "message 必须是非空字符串" });
-      return;
-    }
-    const selection = resolveMessageSelection(config, body, response);
-    if (!selection) {
-      return;
-    }
-
-    const result = await agentService.sendMessage({
-      sessionId,
-      message,
-      provider: selection.provider,
-      model: selection.model,
-      developerMode: selection.developerMode,
-      routerModel: selection.routerModel,
-      oaApiToken,
-      oaUserId: tokenValidation.oaUserId,
-      latency,
-    });
-    latency?.finish({
-      status: "completed",
-      provider: result.provider,
-      model: result.model,
-    });
-    writeJson(response, 200, result);
-    return;
-  }
-
-  const streamMessageMatch = url.pathname.match(
-    /^\/v1\/sessions\/([^/]+)\/messages\/stream$/,
-  );
-  if (method === "POST" && streamMessageMatch) {
-    const sessionId = decodeURIComponent(streamMessageMatch[1] ?? "");
-    validateSessionId(sessionId);
-    if (
-      !(await sessionStore.bindOaToken(
-        sessionId,
-        oaApiToken,
-        tokenValidation.principalId,
-        tokenValidation.oaUserId,
-      ))
-    ) {
-      writeJson(response, 403, { error: "forbidden" });
-      return;
-    }
-    const body = await readJsonBody(request);
-    const message = stringField(body, "message");
-    if (!message) {
-      writeJson(response, 400, { error: "message 必须是非空字符串" });
-      return;
-    }
-    const selection = resolveMessageSelection(config, body, response);
-    if (!selection) {
-      return;
-    }
-
-    await streamAgentMessage(agentService, request, response, {
-      sessionId,
-      message,
-      provider: selection.provider,
-      model: selection.model,
-      developerMode: selection.developerMode,
-      routerModel: selection.routerModel,
-      oaApiToken,
-      oaUserId: tokenValidation.oaUserId,
-      latency,
-    });
-    return;
-  }
+  if (publicChat && await publicChat.handle(request, response, url, oaApiToken, tokenValidation, latency)) return;
 
   writeJson(response, 404, { error: "not found" });
 }
@@ -663,157 +532,13 @@ function stringField(body: JsonObject, field: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveMessageSelection(
-  config: AppConfig,
-  body: JsonObject,
-  response: ServerResponse,
-): {
-  provider: ModelProviderId;
-  model: string;
-  developerMode?: boolean;
-  routerModel?: RouterModelId;
-} | null {
-  const rawProvider = body.provider;
-  if (rawProvider !== undefined && typeof rawProvider !== "string") {
-    writeJson(response, 400, { error: "provider 必须是字符串" });
-    return null;
-  }
-  const rawModel = body.model;
-  if (rawModel !== undefined && typeof rawModel !== "string") {
-    writeJson(response, 400, { error: "model 必须是字符串" });
-    return null;
-  }
-  const rawDeveloperMode = body.developerMode;
-  if (
-    rawDeveloperMode !== undefined &&
-    typeof rawDeveloperMode !== "boolean"
-  ) {
-    writeJson(response, 400, { error: "developerMode 必须是布尔值" });
-    return null;
-  }
-  const rawRouterModel = body.routerModel;
-  if (
-    rawRouterModel !== undefined &&
-    typeof rawRouterModel !== "string"
-  ) {
-    writeJson(response, 400, { error: "routerModel 必须是字符串" });
-    return null;
-  }
-  const requestedRouterModel =
-    typeof rawRouterModel === "string"
-      ? rawRouterModel
-      : rawDeveloperMode === true
-        ? ROUTER_MODEL_CATALOG[0]
-        : undefined;
-
-  try {
-    const provider = resolveRequestedProvider(rawProvider, config.modelProvider);
-    const fallbackModel =
-      provider === config.modelProvider ? config.model : getDefaultModel(provider);
-    return {
-      provider,
-      model: resolveRequestedModel(provider, rawModel, fallbackModel),
-      ...(rawDeveloperMode === true ? { developerMode: true } : {}),
-      ...(requestedRouterModel === undefined
-        ? {}
-        : { routerModel: resolveRequestedRouterModel(requestedRouterModel) }),
-    };
-  } catch (error) {
-    writeJson(response, 400, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-}
-
-function validateSessionId(sessionId: string): void {
-  if (!isValidSessionId(sessionId)) {
-    throw new Error(
-      "sessionId 只能包含字母、数字、下划线、点、冒号和连字符,长度 1-120。",
-    );
-  }
-}
-
 function isValidSessionId(sessionId: string): boolean {
   return /^[A-Za-z0-9_.:-]{1,120}$/.test(sessionId);
-}
-
-async function streamAgentMessage(
-  agentService: AgentService,
-  request: IncomingMessage,
-  response: ServerResponse,
-  input: SendMessageInput,
-): Promise<void> {
-  const abortController = new AbortController();
-  let closed = false;
-  response.socket?.setNoDelay(true);
-  const heartbeat = setInterval(() => {
-    if (!response.writableEnded) {
-      response.write(": keep-alive\n\n");
-    }
-  }, 15_000);
-
-  response.on("close", () => {
-    closed = true;
-    abortController.abort();
-  });
-
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store, no-transform",
-    connection: "keep-alive",
-    "x-accel-buffering": "no",
-  });
-  response.flushHeaders();
-  response.write(": connected\n\n");
-  input.latency?.mark("stream_connected");
-
-  try {
-    await agentService.streamMessage(
-      input,
-      async (event) => writeSseEvent(response, event),
-      abortController.signal,
-    );
-    input.latency?.finish({
-      status: "completed",
-      provider: input.provider ?? undefined,
-      model: input.model ?? undefined,
-    });
-  } catch (error) {
-    input.latency?.finish({
-      status: abortController.signal.aborted ? "aborted" : "failed",
-      provider: input.provider ?? undefined,
-      model: input.model ?? undefined,
-      errorCode: abortController.signal.aborted
-        ? "client_disconnected"
-        : "agent_failed",
-    });
-    if (!closed && !response.writableEnded) {
-      const message = error instanceof Error ? error.message : String(error);
-      writeSseEvent(response, {
-        type: "run.failed",
-        sessionId: input.sessionId,
-        error: message,
-      });
-    }
-  } finally {
-    clearInterval(heartbeat);
-    if (!closed && !response.writableEnded) {
-      response.end();
-    }
-  }
 }
 
 function isChatMessagePath(method: string, pathname: string): boolean {
   return method === "POST" &&
     /^\/v1\/sessions\/[^/]+\/messages(?:\/stream)?$/.test(pathname);
-}
-
-function writeSseEvent(
-  response: ServerResponse,
-  event: AgentStreamEvent,
-): void {
-  response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
 }
 
 function writeJson(

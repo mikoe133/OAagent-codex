@@ -193,7 +193,7 @@ test.oa-agent.rwkvos.com -> 47.115.88.183
 oa-agent.rwkvos.com      -> 47.115.88.183
 ```
 
-Nginx 分别反向代理:
+Nginx 分别反向代理。下面仅展示 Web 页面转发；生产开放对话 API 时，使用 [生产对话接口路由](public-chat-routing.md) 和 `deploy/nginx/oa-agent.rwkvos.com.conf` 中的完整配置替换现有站点配置，将公开 `/v1` 对话路径转发到 Agent 3011 端口。
 
 ```nginx
 # 测试域名
