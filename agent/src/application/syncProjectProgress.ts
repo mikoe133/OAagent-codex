@@ -1,3 +1,4 @@
+import { normalizeWeeklyReportContent } from "../domain/weeklyReportStyle.js";
 import { createHash } from "node:crypto";
 import {
   buildProjectDailyCommitGroups,
@@ -1060,7 +1061,7 @@ async function executeProjectProgressSync(
                 const context = await pending;
                 if (!context.previousReport?.content.trim()) {
                   await emitTrace(input.trace, { ...event, status: "fallback", message: "作者上周及上上周均无有效周报内容，使用原项目总结" });
-                  return { content: `### ${project.projectName}\n${proposal.summary.trim()}`, styleStatus: "no_previous_report" as const };
+                  return { content: normalizeWeeklyReportContent(`${project.projectName}\n${proposal.summary.trim()}`), styleStatus: "no_previous_report" as const };
                 }
                 const styled = await agentLimiter.run(() => input.weeklyReportStyleSummarizer!.summarize({
                   projectName: project.projectName, summaryDate: proposal.summaryDate,
@@ -1558,7 +1559,7 @@ async function appendProjectWeeklyReportContent(input: {
   for (const group of authorGroups.groups) {
     input.cancellationSignal?.throwIfAborted();
     const styled = await input.prepareContent?.(group.githubId);
-    const block = styled ? `${buildWeeklyReportMarker(input.project.id, input.proposal.summaryDate, group.authorKey, input.proposal.sourceDigest)}\n${styled.content}` : buildWeeklyReportAppendBlock({
+    const block = styled ? `${buildWeeklyReportMarker(input.project.id, input.proposal.summaryDate, group.authorKey, input.proposal.sourceDigest)}\n${normalizeWeeklyReportContent(styled.content)}` : buildWeeklyReportAppendBlock({
       projectName: input.project.projectName,
       marker: buildWeeklyReportMarker(
         input.project.id,
@@ -1667,8 +1668,8 @@ function buildWeeklyReportAppendBlock(input: {
 }): string {
   const lines = [
     input.marker,
-    `### ${input.projectName}`,
-    input.summary.trim(),
+    input.projectName,
+    normalizeWeeklyReportContent(input.summary),
   ];
   return lines.join("\n").trimEnd();
 }

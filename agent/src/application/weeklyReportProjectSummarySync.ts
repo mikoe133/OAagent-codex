@@ -197,7 +197,7 @@ export async function syncWeeklyReportProjectSummaries(
     phase: "load_weekly_report",
     status: "succeeded",
     title: "读取周报快照",
-    message: `已读取周报 ${input.report.weeklyNum} 第 ${input.report.version} 版`,
+    message: `已读取周报 ${input.report.weeklyNum} 的内容快照`,
     progressCurrent: 1,
     progressTotal: 1,
   });
@@ -651,7 +651,7 @@ async function writeProjectSummary(input: {
   warning?: string;
 }): Promise<{ report: ProjectProgressProjectReport; mutationsApplied: number }> {
   const { project, match, summaryDate } = input;
-  const aiNote = formatWeeklyReportNote(input.input.report, match.content);
+  const aiNote = formatWeeklyReportNote(input.input.report);
   const sourceDigest = createHash("sha256").update(`${input.input.report.id}:${input.input.report.version}:${project.id}:${match.content}`).digest("hex");
   const summary: ProjectProgressSummaryProposal = {
     summaryDate,
@@ -694,7 +694,7 @@ async function writeProjectSummary(input: {
       existing = summaries.find((candidate) =>
         candidate.aiNote.includes(
           weeklyReportSourceMarker(input.input.report.id),
-        ),
+        ) || (candidate.aiNote === aiNote && candidate.summary === match.content),
       );
     }
     if (existing && (existing.summary !== match.content || existing.aiNote !== aiNote)) {
@@ -748,12 +748,14 @@ function includesName(content: string, name: string): boolean {
   return normalizedName.length > 0 && normalizedContent.includes(normalizedName);
 }
 
-function formatWeeklyReportNote(report: WeeklyReportSnapshot, projectContent: string): string {
-  const marker = weeklyReportSourceMarker(report.id);
+function formatWeeklyReportNote(report: WeeklyReportSnapshot): string {
   const period = weeklyReportPeriod(report.startDate, report.endDate);
-  const periodNote = period ? `期间：${period.startDate}->${period.endDate}\n` : "";
-  const prefix = `${periodNote}${report.weeklyNum} 周报（${report.updatedAt}）：`;
-  return `${marker}\n${prefix}${report.content}\n项目拆分片段：${projectContent}`.slice(0, 10_000);
+  const endDate = period?.endDate ?? weeklyReportSummaryDate(report.weeklyNum);
+  const startDate = period?.startDate ?? new Date(
+    Date.parse(`${endDate}T00:00:00Z`) - 6 * 86_400_000,
+  ).toISOString().slice(0, 10);
+  const week = period ? report.weeklyNum : report.weeklyNum % 100;
+  return `基于时间段 ${startDate} 至 ${endDate}，第${week}周周报`;
 }
 
 function weeklyReportSourceMarker(sourceReportId: string): string {

@@ -29,7 +29,7 @@ test("POST forwards the selected DeepSeek V4 Pro model to the agent service", as
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
-          sessionId: "model-switch-session",
+          recordId: "1", requestId: "request-1",
           provider: "openrouter",
           model: "deepseek/deepseek-v4-pro",
           messages: [{ role: "user", content: "hello" }],
@@ -72,7 +72,7 @@ test("POST forwards enabled developer mode and its dedicated router model", asyn
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
-          sessionId: "developer-mode-session",
+          recordId: "1", requestId: "request-1",
           provider: "openrouter",
           model: "z-ai/glm-5.3",
           developerMode: true,
@@ -116,6 +116,7 @@ test("POST keeps the selected router model when developer mode is disabled", asy
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
+          recordId: "1", requestId: "request-1",
           provider: "openrouter",
           model: "z-ai/glm-5.3",
           developerMode: false,
@@ -154,6 +155,7 @@ test("POST rejects an unsupported developer router model", async () => {
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
+          recordId: "1", requestId: "request-1",
           developerMode: true,
           routerModel: "z-ai/glm-5.3",
           messages: [{ role: "user", content: "hello" }],
@@ -185,6 +187,7 @@ test("POST rejects an unsupported router model when developer mode is disabled",
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
+          recordId: "1", requestId: "request-1",
           developerMode: false,
           routerModel: "z-ai/glm-5.3",
           messages: [{ role: "user", content: "hello" }],
@@ -216,7 +219,7 @@ test("POST rejects an unknown provider before calling the agent service", async 
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
-          sessionId: "model-switch-session",
+          recordId: "1", requestId: "request-1",
           provider: "unknown",
           model: "z-ai/glm-5.3",
           messages: [{ role: "user", content: "hello" }],
@@ -254,7 +257,7 @@ test("POST converts an upstream EOF without a terminal run event into run.failed
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
-          sessionId: "incomplete-stream-session",
+          recordId: "1", requestId: "request-1",
           messages: [{ role: "user", content: "查询知识库和项目更新" }],
         }),
       }),
@@ -293,7 +296,7 @@ test("POST streams request routing progress to the browser unchanged", async () 
           cookie: "sessionid=test-session-token",
         },
         body: JSON.stringify({
-          sessionId: "routing-session",
+          recordId: "1", requestId: "request-1",
           messages: [{ role: "user", content: "查看项目进展" }],
         }),
       }),

@@ -21,6 +21,18 @@ function reject_multiline() {
 
 readonly output_path="${1:?usage: render-runtime-env.sh OUTPUT_PATH}"
 
+: "${CHAT_MAX_CONCURRENCY:=2}"
+: "${CHAT_USER_CONCURRENCY:=1}"
+: "${CHAT_MAX_QUEUE:=20}"
+: "${CHAT_USER_QUEUE:=5}"
+: "${CHAT_USER_REQUESTS_PER_MINUTE:=20}"
+: "${CHAT_QUEUE_TIMEOUT_MS:=120000}"
+: "${CHAT_EXECUTION_TIMEOUT_MS:=600000}"
+for chat_limit_name in CHAT_MAX_CONCURRENCY CHAT_USER_CONCURRENCY CHAT_MAX_QUEUE CHAT_USER_QUEUE CHAT_USER_REQUESTS_PER_MINUTE CHAT_QUEUE_TIMEOUT_MS CHAT_EXECUTION_TIMEOUT_MS; do
+  chat_limit_value="${!chat_limit_name}"
+  [[ "$chat_limit_value" =~ ^[1-9][0-9]{0,8}$ ]] || { echo "Invalid $chat_limit_name" >&2; exit 1; }
+done
+
 for name in COMPOSE_PROJECT_NAME NEXTTOKEN_API_KEY OPENROUTER_API_KEY OA_DOCKER_API_BASE_URL OA_KNOWLEDGE_BASE_API_KEY OA_AGENT_SSO_SHARED_SECRET OA_AGENT_SSO_TTL_SECONDS OA_AGENT_AUTOMATION_TOKEN OA_PROJECT_SYNC_TOKEN PROJECT_PROGRESS_GITHUB_APP_ID DATABASE_URL OA_SESSION_SECRET AGENT_PORT WEB_PORT; do
   require_value "$name"
 done
@@ -311,6 +323,13 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'AGENT_PORT=%s\n' "$AGENT_PORT"
   printf 'WEB_BIND_ADDRESS=%s\n' "$web_bind_address"
   printf 'WEB_PORT=%s\n' "$WEB_PORT"
+  printf 'CHAT_MAX_CONCURRENCY=%s\n' "$CHAT_MAX_CONCURRENCY"
+  printf 'CHAT_USER_CONCURRENCY=%s\n' "$CHAT_USER_CONCURRENCY"
+  printf 'CHAT_MAX_QUEUE=%s\n' "$CHAT_MAX_QUEUE"
+  printf 'CHAT_USER_QUEUE=%s\n' "$CHAT_USER_QUEUE"
+  printf 'CHAT_USER_REQUESTS_PER_MINUTE=%s\n' "$CHAT_USER_REQUESTS_PER_MINUTE"
+  printf 'CHAT_QUEUE_TIMEOUT_MS=%s\n' "$CHAT_QUEUE_TIMEOUT_MS"
+  printf 'CHAT_EXECUTION_TIMEOUT_MS=%s\n' "$CHAT_EXECUTION_TIMEOUT_MS"
 } > "$temp_path"
 
 chmod 600 "$temp_path"

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -218,9 +217,6 @@ test("updates only the summary bound to the same weekly report", async () => {
 test("reuses the bound summary without another mutation when a Worker retries", async () => {
   const content = "项目 51：完成周报联调";
   const sourceReportId = "weekly-report-retry";
-  const sourceMarker = createHash("sha256")
-    .update(sourceReportId, "utf8")
-    .digest("hex");
   const binding = { commitSummaryId: 902, sourceVersion: 1 };
   let savedVersion = 0;
   const report = await syncWeeklyReportProjectSummaries({
@@ -243,7 +239,7 @@ test("reuses the bound summary without another mutation when a Worker retries", 
           summaryDate: "2026-08-30",
           summary: content,
           aiConfidence: 100,
-          aiNote: `[OAAGENT_WEEKLY_REPORT_SOURCE:${sourceMarker}]\n202635 周报（2026-08-27T09:30:00Z）：${content}\n项目拆分片段：${content}`,
+          aiNote: "基于时间段 2026-08-24 至 2026-08-30，第35周周报",
           version: 1,
         };
       },
@@ -350,5 +346,5 @@ test("business weekly number 121 writes the supplied period end and includes the
   });
   assert.equal(result.mutationsApplied, 1);
   assert.equal(writes[0].summaryDate, "2026-09-11");
-  assert.match(writes[0].aiNote, /期间：2026-09-06->2026-09-11/);
+  assert.equal(writes[0].aiNote, "基于时间段 2026-09-06 至 2026-09-11，第121周周报");
 });

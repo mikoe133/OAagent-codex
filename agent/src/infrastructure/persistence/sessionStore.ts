@@ -22,9 +22,12 @@ export class SessionStore {
   private readonly oaTokens = new Map<string, string>();
   private readonly oaUserIds = new Map<string, string>();
   private loaded = false;
+  private loadPromise: Promise<void> | undefined;
   private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly filePath: string) {}
+
+  get requestStorePath(): string { return `${this.filePath}.public-requests`; }
 
   async getOrCreate(sessionId: string): Promise<AgentSession> {
     await this.load();
@@ -136,6 +139,15 @@ export class SessionStore {
     if (this.loaded) {
       return;
     }
+
+    this.loadPromise ??= this.loadFromDisk().catch((error) => {
+      this.loadPromise = undefined;
+      throw error;
+    });
+    await this.loadPromise;
+  }
+
+  private async loadFromDisk(): Promise<void> {
 
     try {
       const raw = await readFile(this.filePath, "utf8");
