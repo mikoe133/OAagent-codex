@@ -145,3 +145,19 @@ sudo systemctl disable --now oa-agent-project-progress.timer
 ```
 
 不要执行 `docker compose down -v`，否则会删除 Worker 幂等状态所在的数据卷。
+
+### 排查历史周报风格查询失败
+
+`weekly_report_style` 步骤先调用 `GET /internal/project-sync/weekly-reports/style-context`，查询参数为 `summary_date` 和 `github_id`，没有 JSON 请求体。该查询成功后才会生成并追加周报。鉴权沿用 Worker 配置的 OA 服务 token、header 和 prefix。
+
+例如 `summary_date=2026-09-14&github_id=mikoe133` 返回 `HTTP 404:weekly_report_week_not_found` 时，应在 OA 服务端检查该错误码的返回分支、覆盖总结日期的业务周配置、日期边界，以及历史周查询逻辑。多位作者同一天失败时，优先检查公共的业务周配置。不能仅凭错误码判定缺的是目标周还是历史周；缺少参考正文的正常响应应使用 `previous_report: null`，OAagent 会回退到原项目总结。
+
+新运行的 `automation_run_trace_events.metadata_sanitized` 记录 `request_method`、`request_path`、`request_query`、`request_body`；失败时还记录 `failure_stage`、`error_message`，OA HTTP 错误额外记录 `http_status`、`error_code`。不记录鉴权头或历史周报正文。历史事件不会自动补齐这些字段。
+
+```sql
+SELECT event_key, message, metadata_sanitized
+FROM automation_run_trace_events
+WHERE run_id = '25e4b1ff-496b-490b-888e-9fd81b9d0f08'
+  AND phase = 'weekly_report_style'
+ORDER BY id;
+```

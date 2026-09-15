@@ -30,7 +30,7 @@ import type {
   WeeklyReportStyleContext,
   WeeklyReportStyleReader,
 } from "../infrastructure/oa/projectProgressOaClient.js";
-import { ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
+import { OaRequestError, ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
 import {
   OperationMetricsRecorder,
   PROJECT_PROGRESS_ENDPOINTS,
@@ -1047,6 +1047,12 @@ async function executeProjectProgressSync(
                 eventKey: `weekly_report_style:${project.id}:${proposal.summaryDate}:${githubId.toLowerCase()}`,
                 sequence: 590, phase: "weekly_report_style", projectId: project.id,
                 title: "参考作者历史周报生成同步内容",
+                metadataSanitized: {
+                  request_method: "GET",
+                  request_path: "/internal/project-sync/weekly-reports/style-context",
+                  request_query: { summary_date: proposal.summaryDate, github_id: githubId },
+                  request_body: null,
+                },
               };
               await emitTrace(input.trace, { ...event, status: "running" });
               const key = `${proposal.summaryDate}:${githubId.toLowerCase()}`;
@@ -1057,12 +1063,14 @@ async function executeProjectProgressSync(
                 );
                 weeklyStyleContexts.set(key, pending);
               }
+              let failureStage = "read_style_context";
               try {
                 const context = await pending;
                 if (!context.previousReport?.content.trim()) {
                   await emitTrace(input.trace, { ...event, status: "fallback", message: "作者上周及上上周均无有效周报内容，使用原项目总结" });
                   return { content: normalizeWeeklyReportContent(`${project.projectName}\n${proposal.summary.trim()}`), styleStatus: "no_previous_report" as const };
                 }
+                failureStage = "generate_weekly_report_style";
                 const styled = await agentLimiter.run(() => input.weeklyReportStyleSummarizer!.summarize({
                   projectName: project.projectName, summaryDate: proposal.summaryDate,
                   summary: proposal.summary, githubId, previousReport: context.previousReport!,
@@ -1075,7 +1083,7 @@ async function executeProjectProgressSync(
                 await emitTrace(input.trace, {
                   ...event, status: styled.interaction.fallbackUsed ? "fallback" : "succeeded",
                   message: styled.interaction.fallbackUsed ? "风格改写失败，使用原项目总结" : "已参考历史周报风格生成内容",
-                  metadataSanitized: { github_id: githubId, reference_report_id: context.previousReport.reportId, reference_weekly_num: context.previousReport.weeklyNum },
+                  metadataSanitized: { ...event.metadataSanitized, github_id: githubId, reference_report_id: context.previousReport.reportId, reference_weekly_num: context.previousReport.weeklyNum },
                 });
                 return {
                   content: styled.content,
@@ -1084,7 +1092,19 @@ async function executeProjectProgressSync(
                   referenceWeeklyNum: context.previousReport.weeklyNum,
                 };
               } catch (error) {
-                await emitTrace(input.trace, { ...event, status: "failed", message: "读取作者历史周报或生成内容失败，未追加周报" });
+                await emitTrace(input.trace, {
+                  ...event, status: "failed",
+                  message: `${failureStage === "read_style_context" ? "读取作者历史周报失败" : "生成周报内容失败"}，未追加周报：${traceErrorMessage(error)}`,
+                  metadataSanitized: {
+                    ...event.metadataSanitized,
+                    failure_stage: failureStage,
+                    error_message: traceErrorMessage(error),
+                    ...(error instanceof OaRequestError ? {
+                      http_status: error.status,
+                      error_code: error.errorCode,
+                    } : {}),
+                  },
+                });
                 throw error;
               }
             },

@@ -10,7 +10,7 @@ import { buildProjectDailyCommitGroups } from "../src/domain/projectProgress.js"
 import { GitHubRequestError } from "../src/infrastructure/github/githubClient.js";
 import type { GitHubRepositorySnapshot } from "../src/infrastructure/github/githubTypes.js";
 import { AutomationLeaseLostError } from "../src/infrastructure/oa/automationOaClient.js";
-import { ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
+import { OaRequestError, ProjectProgressLeaseLostError } from "../src/infrastructure/oa/projectProgressOaClient.js";
 import { OperationMetricsRecorder } from "../src/infrastructure/observability/operationMetrics.js";
 import type { ProjectProgressCommit } from "../src/domain/projectProgress.js";
 
@@ -1906,14 +1906,17 @@ describe("syncProjectProgress", () => {
     });
   }
 
-  for (const scenario of ["matched", "no_previous", "model_failure", "context_failure"] as const) {
+  for (const scenario of ["matched", "no_previous", "model_failure", "context_failure", "week_not_found"] as const) {
     it(`prepares author-specific weekly report content before append: ${scenario}`, async () => {
       const projects = [51, 52].map((id) => ({ id, projectName: `Project ${id}`, status: "updating" as const, githubUrls: ["https://github.com/alpha/api"] }));
       const calls: string[] = [];
       const contents: string[] = [];
       let contextReads = 0;
+      const events: ProjectProgressTraceEvent[] = [];
+      const contextFailed = scenario === "context_failure" || scenario === "week_not_found";
       const report = await syncProjectProgress({
         observedAt: new Date("2026-08-27T12:00:00Z"), writeMode: "production",
+        trace: async (event) => { events.push(event); },
         oaClient: {
           listProjects: async () => projects, getProject: async () => projects[0],
           updateProjectStatus: async () => undefined,
@@ -1924,6 +1927,7 @@ describe("syncProjectProgress", () => {
             contextReads += 1;
             calls.push(`read:${githubId}`);
             if (scenario === "context_failure") throw new Error("github_identity_not_found");
+            if (scenario === "week_not_found") throw new OaRequestError("OA 请求失败:HTTP 404:weekly_report_week_not_found", 404, "weekly_report_week_not_found");
             return { reportId: 45, weeklyNum: 100, ownerId: githubId === "alice" ? 7 : 8, githubId,
               previousReport: scenario === "no_previous" ? null : { reportId: githubId === "alice" ? 41 : 42, weeklyNum: 99, content: `${githubId} 的上周风格` } };
           },
@@ -1945,10 +1949,24 @@ describe("syncProjectProgress", () => {
         }),
         store: createWritableStore(),
       });
-      assert.equal(contextReads, scenario === "context_failure" ? 1 : 2);
+      assert.equal(contextReads, contextFailed ? 1 : 2);
       assert.ok(report.projects.every((p) => p.summaries[0]?.summary === "完成更新。"));
-      if (scenario === "context_failure") {
+      if (contextFailed) {
         assert.deepEqual(contents, []);
+        const failures = events.filter((event) => event.phase === "weekly_report_style" && event.status === "failed");
+        assert.equal(failures.length, 2);
+        for (const failure of failures) {
+          assert.equal(failure.metadataSanitized?.failure_stage, "read_style_context");
+          assert.equal(failure.metadataSanitized?.request_method, "GET");
+          assert.equal(failure.metadataSanitized?.request_path, "/internal/project-sync/weekly-reports/style-context");
+          assert.deepEqual(failure.metadataSanitized?.request_query, { summary_date: "2026-08-27", github_id: "alice" });
+          assert.equal(failure.metadataSanitized?.request_body, null);
+          if (scenario === "week_not_found") {
+            assert.equal(failure.metadataSanitized?.http_status, 404);
+            assert.equal(failure.metadataSanitized?.error_code, "weekly_report_week_not_found");
+            assert.match(failure.message ?? "", /HTTP 404:weekly_report_week_not_found/);
+          }
+        }
         assert.match(report.projects[0]!.warnings.join(" "), /weekly_report_write_failed/);
       } else {
         assert.equal(contents.length, 4);
