@@ -163,7 +163,7 @@ export class DeterministicProjectProgressSummarizer implements ProjectProgressSu
     const remainder = subjects.length - visible.length;
     // Without a model we cannot translate English subjects reliably. Use a
     // factual Chinese count instead of presenting untranslated prose as a summary.
-    const summary = visible.length > 0 && subjects.every(hasChineseProjectProgressText)
+    const summary = visible.length > 0 && subjects.every((subject) => !isInvalidProjectProgressSummary(subject))
       ? `完成${visible.join("；")}${remainder > 0 ? `等 ${subjects.length} 项更新` : ""}。`
       : `完成 ${input.commits.length} 条代码提交。`;
     return {
@@ -176,6 +176,8 @@ export class DeterministicProjectProgressSummarizer implements ProjectProgressSu
 export function isLikelyProjectProgressProcessSummary(summary: string): boolean {
   const normalized = summary.replace(/\s+/gu, " ").trim();
   return [
+    /(?:^|[。！？!?；;\n])\s*(?:让我(?:们)?|请允许我(?:们)?|我(?:们)?(?:需要|打算|决定|要)).{0,80}(?:分析|读取|查看|检查|梳理|调用|获取|了解)/u,
+    /(?:针对|根据|从).{0,30}候选提交[，,:：\s]*(?:我|我们)(?:看到|发现|注意到)/u,
     /分析候选\s+(?:commits?|提交)/iu,
     /选择性读取.*(?:关键.*)?(?:commits?|提交).*(?:详情|信息)/iu,
     /(?:^|[。！？!?；;\n])\s*(?:我)?(?:先|将|会|准备|计划|开始|继续|接下来|下一步|随后|之后).{0,100}(?:分析|读取|查看|检查|梳理|调用)/u,

@@ -17,7 +17,7 @@ test("references last week's style with a dedicated schema and audits metadata w
   let request: WeeklyReportAgentRunInput | undefined;
   const summarizer = new CodexWeeklyReportStyleSummarizer(config, async (value) => {
     request = value;
-    return success("## 本周工作\n- Project A：修复登录超时。");
+    return success("## Project A\n- **修复登录超时。**");
   });
   const result = await summarizer.summarize(input);
   assert.equal(JSON.parse(request!.prompt).previous_report, input.previousReport.content);
@@ -28,7 +28,7 @@ test("references last week's style with a dedicated schema and audits metadata w
   assert.equal(result.interaction.fallbackUsed, false);
   assert.equal(result.interaction.requestPayloadSanitized.reference_report_id, 41);
   assert.equal(JSON.stringify(result.interaction).includes("完成上传"), false);
-  assert.equal(result.content, "本周工作\n- Project A：修复登录超时。");
+  assert.equal(result.content, "Project A\n- **修复登录超时。**");
   assert.equal(result.interaction.requestPayloadSanitized.reference_weekly_num, 202552);
 });
 
@@ -50,4 +50,46 @@ test("bounds historical input and propagates cancellation without writing fallba
     throw new Error("cancelled");
   });
   await assert.rejects(summarizer.summarize({ ...input, previousReport: { ...input.previousReport, content: "x".repeat(20_000) }, signal: controller.signal }), { name: "AbortError" });
+});
+
+
+test("rejects invalid source summaries before invoking the model or producing fallback content", async () => {
+  let calls = 0;
+  const summarizer = new CodexWeeklyReportStyleSummarizer(config, async () => {
+    calls += 1;
+    return success("Project A\n天气与日期信息通过 API 实时获取。");
+  });
+  await assert.rejects(summarizer.summarize({ ...input,
+    summary: "针对候选提交，我看到2个提交的标题都涉及中文验证和总结。让我先读取详细信息来了解这些提交的具体改动。",
+  }), /项目总结无效/);
+  assert.equal(calls, 0);
+});
+
+test("rejects invented facts, omissions, negation changes, and malformed newlines", async () => {
+  for (const [summary, content] of [
+    [input.summary, "Project A\n修复登录超时。支持请假和天气查询。"],
+    [input.summary, "Project A\n天气与日期信息通过 API 实时获取。"],
+    [input.summary, "Project An1. 修复登录超时。"],
+    ["修复登录超时并完善 API 文档。", "Project A\n修复登录超时。"],
+    ["暂不支持出差申请。", "Project A\n支持出差申请。"],
+    ["修复 12 个问题。", "Project A\n修复 120 个问题。"],
+  ]) {
+    const result = await new CodexWeeklyReportStyleSummarizer(config, async () => success(content!))
+      .summarize({ ...input, summary: summary! });
+    assert.equal(result.content, `Project A\n${summary}`);
+    assert.equal(result.interaction.fallbackUsed, true);
+    assert.equal(result.interaction.errorCode, "weekly_report_style_content_changed");
+    assert.equal(result.interaction.responsePayloadSanitized.rejection_reason, "weekly_report_style_content_changed");
+  }
+});
+
+test("accepts layout changes while preserving numbers and technical names", async () => {
+  const summary = "修复 2 个 GitHub API 问题。\n完善 test 分支校验。";
+  const content = "Project A\n1. **修复 2 个 `GitHub API` 问题。**\n2. 完善 test 分支校验。";
+  const result = await new CodexWeeklyReportStyleSummarizer(config, async () => success(content))
+    .summarize({ ...input, summary });
+  assert.equal(result.content, content);
+  assert.equal(result.interaction.fallbackUsed, false);
+  assert.equal(result.interaction.responsePayloadSanitized.rejection_reason, null);
+  assert.match(String(result.interaction.requestPayloadSanitized.current_summary_digest), /^[a-f0-9]{64}$/u);
 });

@@ -238,7 +238,7 @@ describe("CodexProjectProgressSummarizer", () => {
     const result = await summarizer.summarize(input);
 
     assert.equal(result.summary, "完成登录链路与权限校验更新。");
-    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v7");
+    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v8");
     assert.equal(result.interaction?.inputTokens, 120);
     assert.equal(result.interaction?.outputTokens, 30);
     assert.equal(result.interaction?.responsePayloadSanitized.execution_mode, "codex_sdk_agent");
@@ -470,6 +470,30 @@ describe("CodexProjectProgressSummarizer", () => {
 
     assert.equal(result.interaction?.promptVersion, "sha256:oa-profile-v1");
     assert.equal(result.interaction?.systemPromptSnapshot, systemPrompt);
+    const audit = result.interaction!.requestPayloadSanitized;
+    assert.equal(audit.effective_prompt_version, "github-project-progress-agent-v8");
+    assert.match(String(audit.effective_system_prompt_snapshot), /<automation_prompt_profile>/);
+    assert.match(String(audit.effective_system_prompt_snapshot), /<final_output_contract>/);
+    assert.match(String(audit.effective_system_prompt_snapshot), /只总结已经完成的工程进展/);
+    assert.match(String(audit.effective_prompt_digest), /^[a-f0-9]{64}$/u);
+  });
+
+  it("keeps the full effective prompt contract while redacting secrets", async () => {
+    const summarizer = new CodexProjectProgressSummarizer({
+      ...config,
+      promptProfile: { promptVersion: "long-profile", requiredCapabilities: [],
+        systemPrompt: "中文要求。".repeat(1000) + " token=x model-secret",
+      },
+    }, async () => ({
+      finalResponse: JSON.stringify({ summary: "修复中文校验。", limitations: [] }),
+      usage: null, upstreamRequestId: null, prohibitedToolUseCount: 0,
+    }));
+    const result = await summarizer.summarize(input);
+    const effective = String(result.interaction?.requestPayloadSanitized.effective_system_prompt_snapshot);
+    assert.ok(effective.length > 4000);
+    assert.ok(effective.endsWith("</final_output_contract>"));
+    assert.doesNotMatch(effective, /token=x|model-secret/);
+    assert.match(effective, /REDACTED/);
   });
 
   it("rejects output from a run that used an unauthorized tool", async () => {
@@ -635,6 +659,25 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.doesNotMatch(rejected[0]!.response, /abc-secret|model-secret|private-token/);
   });
 
+  it("rejects the production process narrative and retries with an actual result", async () => {
+    let attempts = 0;
+    const summarizer = new CodexProjectProgressSummarizer(config, async (request) => {
+      attempts += 1;
+      if (attempts === 2) assert.match(request.prompt, /上次输出被拒绝/);
+      return {
+        finalResponse: JSON.stringify({ summary: attempts === 1
+          ? "针对候选提交，我看到2个提交的标题都涉及中文验证和总结。让我先读取详细信息来了解这些提交的具体改动。"
+          : "修复 GitHub 总结的中文校验。", limitations: [] }),
+        usage: null, upstreamRequestId: "process-regression", prohibitedToolUseCount: 0,
+      };
+    });
+    const result = await summarizer.summarize(input);
+    assert.equal(attempts, 2);
+    assert.equal(result.summary, "修复 GitHub 总结的中文校验。");
+    assert.equal(result.interaction?.responsePayloadSanitized.quality_retries, 1);
+    assert.equal(result.interaction?.fallbackUsed, false);
+  });
+
   it("falls back when Agent returns a process step as the project summary", async () => {
     const runner: ProjectProgressAgentRunner = async () => ({
       finalResponse: JSON.stringify({
@@ -751,7 +794,7 @@ describe("CodexProjectProgressSummarizer", () => {
     await summarizer.summarize(input);
     const identityDigest = entries.keys().next().value as string;
     entries.set(identityDigest, {
-      summary: "候选提交已找到。我将查看详情以总结进展。",
+      summary: "针对候选提交，我看到2个提交的标题都涉及中文验证和总结。让我先读取详细信息来了解这些提交的具体改动。",
       limitations: [],
     });
     const repaired = await summarizer.summarize(input);
