@@ -192,7 +192,7 @@ test(
       };
       await service.createAiInteraction(triggered.run_id, styleAudit);
       await service.createAiInteraction(triggered.run_id, {
-        ...styleAudit, interaction_key: "weekly-report-rewrite:12:0",
+        ...styleAudit, interaction_key: "weekly-report-rewrite:12:2026-01-01:0",
         prompt_version: WEEKLY_REPORT_REWRITE_PROMPT_VERSION,
         system_prompt_snapshot: WEEKLY_REPORT_REWRITE_PROMPT,
         request_payload_sanitized: { purpose: "weekly_report_rewrite", github_id: "alice" },
@@ -247,7 +247,15 @@ test(
       assert.equal(detail.status, "succeeded");
       assert.equal(detail.projects_total, 1);
       assert.equal(detail.projects_succeeded, 1);
-      assert.equal(detail.ai_interaction_count, 2);
+      assert.equal(detail.ai_interaction_count, 3);
+      assert.deepEqual(detail.ai_interactions.map((item) => item.interaction_key).sort(), [
+        "project-99-summary",
+        "weekly-report-rewrite:12:2026-01-01:0",
+        "weekly-report-style:99:2026-01-01:alice",
+      ]);
+      assert.deepEqual(detail.ai_interactions.find((item) =>
+        item.interaction_key === "weekly-report-rewrite:12:2026-01-01:0",
+      )?.request_payload_sanitized, { purpose: "weekly_report_rewrite", github_id: "alice" });
       assert.equal(detail.projects[0]?.run_id, triggered.run_id);
       assert.equal(detail.projects[0]?.outcome, "no_commits");
       assert.equal(detail.projects[0]?.source_digest, null);
@@ -272,7 +280,7 @@ test(
         new URLSearchParams(),
         42,
       )) as { ai_interaction_count: number };
-      assert.equal(detailWithoutIncludes.ai_interaction_count, 2);
+      assert.equal(detailWithoutIncludes.ai_interaction_count, 3);
 
       await service.patchJob(
         job.id,
