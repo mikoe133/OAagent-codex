@@ -1,3 +1,6 @@
+import type { WeeklyReportRewriter } from "./weeklyReportRewriter.js";
+import { rewriteProjectWeeklyReports, type WeeklyReportRewriteTarget } from "./rewriteProjectWeeklyReports.js";
+import type { WeeklyReportRewriteOa } from "../domain/weeklyReportRewrite.js";
 import { normalizeWeeklyReportContent } from "../domain/weeklyReportStyle.js";
 import { createHash } from "node:crypto";
 import {
@@ -84,6 +87,8 @@ export type ProjectProgressWeeklyReportSync = {
   authorName: string;
   content: string;
   appended: boolean;
+  mode?: "replace";
+  updated?: boolean;
   styleStatus?: "matched" | "no_previous_report" | "fallback";
   referenceReportId?: number;
   referenceWeeklyNum?: number;
@@ -98,7 +103,7 @@ export type ProjectProgressSummaryProposal = {
   aiNote: string;
   interaction?: ProjectProgressAiInteraction;
   repositoryInteractions?: ProjectProgressRepositoryInteraction[];
-  weeklyReportInteractions?: Array<{ githubId: string; interaction: ProjectProgressAiInteraction }>;
+  weeklyReportInteractions?: Array<{ githubId: string; interaction: ProjectProgressAiInteraction; auditKey?: string }>;
 };
 
 export type ProjectProgressProjectReport = {
@@ -276,6 +281,7 @@ export type ProjectProgressSyncInput = {
   githubReader: ProjectProgressGitHubReader;
   summarizer: ProjectProgressSummarizer;
   weeklyReportStyleSummarizer?: WeeklyReportStyleSummarizer;
+  weeklyReportRewriter?: WeeklyReportRewriter;
   store?: ProjectProgressStateSink;
   projectId?: number;
   writeMode?: "dry-run" | "unsafe-test" | "production";
@@ -395,6 +401,7 @@ async function executeProjectProgressSync(
   const entries: ProjectEntry[] = [];
   const repositoriesByKey = new Map<string, GitHubRepositoryIdentity>();
   const reports: ProjectProgressProjectReport[] = [];
+  const weeklyRewriteTargets: WeeklyReportRewriteTarget[] = [];
   const weeklyStyleContexts = new Map<string, Promise<WeeklyReportStyleContext>>();
   let mutationsApplied = 0;
   let cancelled = false;
@@ -1024,6 +1031,15 @@ async function executeProjectProgressSync(
       if (!writer) {
         return { appended: 0, skipped: 0 };
       }
+      if (input.weeklyReportRewriter) {
+        const authors = groupCommitsByAuthor(commits);
+        for (const author of authors.groups) weeklyRewriteTargets.push({
+          projectId: project.id, summaryDate: proposal.summaryDate, proposal,
+          githubId: author.githubId, authorName: author.authorLabel,
+        });
+        if (authors.skipped > 0) evaluation.warnings.push(`weekly_report_skipped_no_github_identity:${proposal.summaryDate}:${authors.skipped}`);
+        return { appended: 0, skipped: authors.skipped };
+      }
       let appended = 0;
       try {
         const result = await appendProjectWeeklyReportContent({
@@ -1299,6 +1315,15 @@ async function executeProjectProgressSync(
     progressTotal: entries.length,
     metadataSanitized: { mutations_applied: mutationsApplied },
   });
+
+  if (!cancelled && writer && input.weeklyReportRewriter) {
+    mutationsApplied += await rewriteProjectWeeklyReports({
+      targets: weeklyRewriteTargets, reports, oa: input.oaClient as ProjectProgressOaReader & WeeklyReportRewriteOa,
+      rewriter: input.weeklyReportRewriter, agentLimiter, writeLimiter: oaWriteLimiter,
+      trace: input.trace, signal: input.cancellationSignal, shouldCancel: input.shouldCancel,
+    });
+    if (input.shouldCancel?.()) cancelled = true;
+  }
 
   const repositoriesWithCommits = summaryScope === "today"
     ? new Set(

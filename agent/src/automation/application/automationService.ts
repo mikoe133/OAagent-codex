@@ -1,3 +1,4 @@
+import { WEEKLY_REPORT_REWRITE_PROMPT, WEEKLY_REPORT_REWRITE_PROMPT_VERSION } from "../../domain/weeklyReportRewrite.js";
 import { isWeeklyReportVersion, normalizeWeeklyReportVersion, compareWeeklyReportVersions, type WeeklyReportVersion } from "../../domain/weeklyReportVersion.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { WEEKLY_REPORT_STYLE_PROMPT, WEEKLY_REPORT_STYLE_PROMPT_VERSION } from "../../domain/weeklyReportStyle.js";
@@ -795,6 +796,7 @@ export class AutomationService implements AutomationOperations {
         scope: input.scope,
         data: {
           weekly_num: input.data.weekly_num,
+          ...(input.data.origin ? { origin: input.data.origin } : {}),
           ...(input.data.start_date ? { start_date: input.data.start_date, end_date: input.data.end_date } : {}),
           ...(input.data.content !== undefined ? { content: input.data.content } : {}),
           ...(input.data.content_hash !== undefined
@@ -908,7 +910,7 @@ export class AutomationService implements AutomationOperations {
         .where("trigger_type", "=", "event")
         .where("configuration_status", "=", "valid")
         .execute();
-      const job = jobs.find((candidate) => eventMatchesJob(candidate, input));
+      const job = input.data.origin === "project_progress_sync" ? undefined : jobs.find((candidate) => eventMatchesJob(candidate, input));
       const now = new Date();
       if (!job) {
         await tx
@@ -2080,8 +2082,13 @@ export class AutomationService implements AutomationOperations {
         input.interaction_key.startsWith("weekly-report-style:") &&
         input.prompt_version === WEEKLY_REPORT_STYLE_PROMPT_VERSION &&
         input.system_prompt_snapshot === WEEKLY_REPORT_STYLE_PROMPT;
+      const isWeeklyRewriteAudit = run.job_type_snapshot === "github_project_progress_sync" &&
+        input.request_payload_sanitized?.purpose === "weekly_report_rewrite" &&
+        input.interaction_key.startsWith("weekly-report-rewrite:") &&
+        input.prompt_version === WEEKLY_REPORT_REWRITE_PROMPT_VERSION &&
+        input.system_prompt_snapshot === WEEKLY_REPORT_REWRITE_PROMPT;
       if (
-        !isWeeklyStyleAudit && run.prompt_version_snapshot !== null &&
+        !isWeeklyStyleAudit && !isWeeklyRewriteAudit && run.prompt_version_snapshot !== null &&
         (input.prompt_version !== run.prompt_version_snapshot ||
           input.system_prompt_snapshot !== run.system_prompt_snapshot)
       ) {

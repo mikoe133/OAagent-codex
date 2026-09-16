@@ -267,7 +267,7 @@ export function AutomationRunDetailDialog({
                                 </div>
                                 <div className="min-w-0 space-y-1">
                                   <Detail label="内容" value={sync.content} preserveWhitespace />
-                                  <p className="text-xs text-muted-foreground">{sync.appended ? "本次已追加" : "周报中已存在"}</p>
+                                  <p className="text-xs text-muted-foreground">{sync.mode === "replace" ? (sync.updated ? "本次已重写整篇周报" : "整篇周报已是最新版本") : sync.appended ? "本次已追加" : "周报中已存在"}</p>
                                   {sync.style_status ? (
                                     <p className="text-xs text-muted-foreground">
                                       {sync.style_status === "matched"
