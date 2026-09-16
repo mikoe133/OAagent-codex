@@ -53,11 +53,12 @@ GitHub 读取只支持 GitHub App。App 只需安装到目标仓库，并授予 
 
 GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Workflow 先以 `600` 原子上传服务器 `.secrets/project-progress-github-app-private-key.pem`，部署脚本再用目标 Agent 镜像把文件所有者调整为容器运行时 `node` 用户并设置为 `0400`；Compose 将它只读挂载到容器 `/run/secrets/project-progress-github-app-private-key.pem`。Worker 健康检查会验证该路径可读，运行时只缓存短期 installation token。每个活跃仓库会在 `127.0.0.1` 随机端口启动一个临时 MCP 服务，Codex 子进程只收到一次性 Bearer token；Agent turn 结束后服务立即关闭，隔离工作区随即清理。默认最多分析 50 条候选 Commit、读取 12 条详情、每条返回 20 个文件、单文件 1200 个 Patch 字符、单仓库合计 12000 个 Patch 字符。预算和并发参数使用 GitHub Environment Variables。
 
-每日总结任务会在成功读取 GitHub 时持久化当天 Commit 的作者身份。某个仓库后续因 GitHub App 未授权而返回 `401` 时，如果本地仍有同日项目总结和对应 Commit 作者证据，任务会跳过 AI 重算；优先使用本地总结草稿，没有本地草稿时读取 OA 已有的同日项目总结，然后继续执行周报增量追加。没有作者证据或已有总结时不会猜测人员或内容，也不会写入周报，Trace 会记录 `weekly_report_skipped_no_commit_authors`。周报写入使用 OA 的 `POST /internal/project-sync/weekly-reports/append`，Agent 传提交所属的 `summary_date`，由 OA 通过 `weekly_report_days` 解析真实 `weekly_num`，再按 `user_profile.github_id` 定位提交者、锁定该用户的周报行，并用 marker 保证重试幂等。该接口必须和 OAagent 使用同一 `OA_PROJECT_SYNC_TOKEN`，部署 OA 端后才会生效。
+当前 Worker 先读取当天 Commit、生成并保存当天项目总结，再按作者和日期汇合同日总结。使用 `GET /internal/project-sync/weekly-reports/style-context?mode=rewrite` 读取当前周报全文，以「当前周报 + 当天 Commit 总结」融合重写整篇正文，保留既有工作、更新旧状态、消除重复。独立事实审核通过后，使用 `POST /internal/project-sync/weekly-reports/append` 的 `mode=replace` 覆盖全文。不会额外读取整周项目动态；当天无总结时不更新。
 
-GitHub 总结写入周报前，Worker 通过 `GET /internal/project-sync/weekly-reports/style-context?github_id=...&summary_date=...` 优先读取目标作者上一业务周的周报，无有效内容时再读取上上周周报，使用本次任务配置的模型改写当前项目总结。历史周报内容只参考段落、列表和加粗格式；当前项目总结是唯一事实来源。风格改写必须保留原总结的措辞、数字、标点和顺序，代码会移除允许的格式标记后比对正文；新增、删减或改述正文均回退原总结，记录 `weekly_report_style_content_changed`。项目标题必须独占首行，不接受表格或额外栏目标题。风格来源单独保存在同步元数据和审计记录中，生成并写入 OA 的周报正文不包含来源周次、报告编号或仿写说明。仍按作者、项目、日期和 Commit digest 使用原有 marker 增量追加，不覆盖整份周报或已存在 marker 的内容。同一运行按作者与总结日期缓存只读上下文。
+**无需建表或数据库迁移。** 先部署 OAbackend 的原接口扩展，再部署 OAagent Worker。保存前比较旧正文哈希；发生人工编辑冲突时重新读取新正文并生成一次。生成或审核失败保留原文，不退回追加。契约见 [整篇周报重写 API](weekly-report-rewrite-api.md)。
 
-上一周由 OA 根据目标业务周期的开始日期前一天定位，支持跨年，不对 `weekly_num` 做减一。上周周期不存在、该作者无周报或内容为空白时，再查上上周；找到上周周期时按其开始日期前一天定位上上周，缺失周期时将查询日期再回退 7 天。最多查询这两周，两周均无有效内容才使用原项目总结。模型失败或输出无效时也回退原总结，并记录 `weekly_report_style_fallback`；身份/权限/目标周报不存在或读取接口失败时不追加，记录 `weekly_report_write_failed`。运行 Trace 展示读取及改写阶段，周报明细包含 `style_status`、`reference_report_id`、`reference_weekly_num`；AI 审计使用 `purpose=weekly_report_style`，不保存历史周报原文，只记录引用编号和摘要哈希。
+当前周报中的手写与旧自动内容均作为底稿，旧追加标记只从模型输入中去除，标记两侧正文保留。重复执行仍可能调用模型，提示保持已包含当天进展的正文；新正文与当前相同则不写入。旧的追加模式和风格查询模式保留兼容。前端显示整篇重写结果，AI 审计使用 `purpose=weekly_report_rewrite`。
+
 
 启用此流程需先部署 OAbackend 的新只读接口，再更新 OAagent 服务端、Worker 和前端。风格来源字段保存在既有 JSON 审计列中，不新增数据库列。缺少该接口的 OA 版本会导致风格读取失败并跳过本次周报追加。
 

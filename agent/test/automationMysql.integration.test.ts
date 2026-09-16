@@ -1,3 +1,4 @@
+import { WEEKLY_REPORT_REWRITE_PROMPT, WEEKLY_REPORT_REWRITE_PROMPT_VERSION } from "../src/domain/weeklyReportRewrite.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -190,6 +191,12 @@ test(
         response_payload_sanitized: {}, status: "succeeded",
       };
       await service.createAiInteraction(triggered.run_id, styleAudit);
+      await service.createAiInteraction(triggered.run_id, {
+        ...styleAudit, interaction_key: "weekly-report-rewrite:12:0",
+        prompt_version: WEEKLY_REPORT_REWRITE_PROMPT_VERSION,
+        system_prompt_snapshot: WEEKLY_REPORT_REWRITE_PROMPT,
+        request_payload_sanitized: { purpose: "weekly_report_rewrite", github_id: "alice" },
+      });
       await assert.rejects(service.createAiInteraction(triggered.run_id, {
         ...styleAudit, system_prompt_snapshot: "Unrecognized style prompt",
       }), (error: unknown) => error instanceof AutomationHttpError && error.code === "automation_prompt_snapshot_mismatch");
@@ -406,6 +413,14 @@ test(
         retention_days: 90,
         tag_ids: [],
       }, 42);
+      const ignored = await service.receiveAutomationEvent({
+        event_id: randomUUID(), event_type: "weekly_report.updated", aggregate_type: "weekly_report",
+        aggregate_id: `auto-report-${suffix}`, aggregate_version: 1,
+        occurred_at: new Date().toISOString(), actor_id: 42, scope: { user_id: 42 },
+        data: { weekly_num: 202635, origin: "project_progress_sync", content: "自动重写后的周报" },
+      }) as { status: string; run_id: string | null };
+      assert.equal(ignored.status, "ignored");
+      assert.equal(ignored.run_id, null);
       const eventId = randomUUID();
       const event = (await service.receiveAutomationEvent({
         event_id: eventId,

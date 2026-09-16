@@ -1999,6 +1999,37 @@ describe("syncProjectProgress", () => {
     });
   }
 
+  it("rewrites one complete author report after all project facts are saved and never appends", async () => {
+    const projects = [51, 52].map((id) => ({ id, projectName: `Project ${id}`, status: "updating" as const, githubUrls: ["https://github.com/alpha/api"] }));
+    const calls: string[] = [];
+    const result = await syncProjectProgress({
+      observedAt: new Date("2026-09-16T12:00:00Z"), writeMode: "production",
+      oaClient: {
+        listProjects: async () => projects, getProject: async (id: number) => projects.find((p) => p.id === id),
+        updateProjectStatus: async () => undefined, listCommitSummaries: async () => [],
+        createCommitSummary: async (input: { projectId: number }) => { calls.push(`persist:${input.projectId}`); return { id: input.projectId, ...input }; },
+        updateCommitSummary: async () => { throw new Error("unexpected update"); },
+        appendWeeklyReportContent: async () => { throw new Error("must never append"); },
+        getWeeklyReportRewriteContext: async () => {
+          assert.deepEqual(calls, ["persist:51", "persist:52"]);
+          calls.push("context");
+          return { report_id: 12, weekly_num: 121, owner_id: 7, github_id: "alice", start_date: "2026-09-14", end_date: "2026-09-20", content: "old", content_hash: "a".repeat(64) };
+        },
+        replaceWeeklyReport: async (input: { content: string }) => {
+          calls.push("replace"); assert.equal(input.content, "整篇周报");
+          return { report_id: 12, weekly_num: 121, owner_id: 7, github_id: "alice", version: 2, updated: true };
+        },
+      } as never,
+      githubReader: { readRepository: async (repo) => ({ repositoryId: 1, fullName: repo.fullName, canonicalUrl: repo.canonicalUrl, complete: true, lastActivityAt: "2026-09-16T02:00:00Z", commits: [commit(1, repo.fullName, "a", "2026-09-16T01:00:00Z", { authorLogin: "alice" })] }) },
+      summarizer: { summarize: async () => ({ summary: "完成项目更新。", limitations: [] }) },
+      weeklyReportRewriter: { rewrite: async (input) => { calls.push("rewrite"); assert.equal(input.context.content, "old"); assert.deepEqual(input.summaries.map((s) => [s.project_id, s.summary_date, s.content]), [[51, "2026-09-16", "完成项目更新。"], [52, "2026-09-16", "完成项目更新。"]]); return { content: "整篇周报", interaction: { provider: "openrouter", model: "test", promptVersion: "test", systemPromptSnapshot: "test", requestPayloadSanitized: {}, responsePayloadSanitized: {}, finalSummary: "整篇周报", limitations: [], fallbackUsed: false, upstreamRequestId: null, inputTokens: 0, outputTokens: 0, latencyMs: 0, status: "succeeded", errorCode: null, errorSummary: null } }; } },
+      store: createWritableStore(),
+    });
+    assert.deepEqual(calls, ["persist:51", "persist:52", "context", "rewrite", "replace"]);
+    assert.equal(result.projects[0]?.weeklyReportSyncs?.[0]?.mode, "replace");
+    assert.equal(result.projects[1]?.weeklyReportSyncs?.[0]?.updated, true);
+  });
+
   it("writes directly when the weekly report is empty", async () => {
     let writtenSummaryDate: string | null = null;
     let writtenWeeklyContent: string | null = null;

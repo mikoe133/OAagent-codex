@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { weeklyReportPeriod } from "../../domain/weeklyReportPeriod.js";
+import { isBusinessDate } from "../../domain/weeklyReportPeriod.js";
+import { weeklyReportRewriteContextSchema, weeklyReportRewriteResultSchema, type WeeklyReportRewriteRequest } from "../../domain/weeklyReportRewrite.js";
 import { isWeeklyReportVersion, normalizeWeeklyReportVersion } from "../../domain/weeklyReportVersion.js";
 import type { ProjectStatus } from "../../domain/projectProgress.js";
 import {
@@ -269,6 +272,46 @@ export class ProjectProgressOaClient implements
       },
     );
     return decodeWeeklyReportAppendResult(decodeEnvelope(payload).data);
+  }
+
+  async getWeeklyReportRewriteContext(input: { summaryDate: string; githubId: string }, signal?: AbortSignal) {
+    if (!isBusinessDate(input.summaryDate) || !input.githubId.trim()) throw new OaContractError("周报重写查询参数无效。");
+    const payload = await this.request(PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportRewriteContext,
+      "/internal/project-sync/weekly-reports/style-context",
+      { mode: "rewrite", summary_date: input.summaryDate, github_id: input.githubId }, { signal });
+    const parsed = weeklyReportRewriteContextSchema.safeParse(decodeEnvelope(payload).data);
+    if (!parsed.success) throw new OaContractError("周报重写上下文不完整或字段无效。");
+    const context = parsed.data;
+    if (context.content_hash !== createHash("sha256").update(context.content, "utf8").digest("hex")) throw new OaContractError("周报正文摘要不匹配。");
+    if (context.github_id.toLowerCase() !== input.githubId.trim().toLowerCase() ||
+      input.summaryDate < context.start_date || input.summaryDate > context.end_date) {
+      throw new OaContractError("周报重写上下文作者或周期不匹配。");
+    }
+    return context;
+  }
+
+  async replaceWeeklyReport(input: WeeklyReportRewriteRequest, signal?: AbortSignal) {
+    const context = weeklyReportRewriteContextSchema.parse(input.context);
+    if (!isBusinessDate(input.summaryDate) || input.summaryDate < context.start_date || input.summaryDate > context.end_date ||
+      input.githubId.trim().toLowerCase() !== context.github_id.toLowerCase() || !input.content.trim() ||
+      Array.from(input.content).length > 1000) {
+      throw new OaContractError("周报整篇替换参数无效。");
+    }
+    const body = {
+      mode: "replace",
+      expected_content_hash: createHash("sha256").update(context.content, "utf8").digest("hex"),
+      report_id: context.report_id, github_id: input.githubId, summary_date: input.summaryDate,
+      content: input.content,
+      origin: "project_progress_sync",
+    };
+    const payload = await this.request(PROJECT_PROGRESS_ENDPOINTS.oaWeeklyReportReplace,
+      "/internal/project-sync/weekly-reports/append", {}, { method: "POST", body, signal });
+    const parsed = weeklyReportRewriteResultSchema.safeParse(decodeEnvelope(payload).data);
+    if (!parsed.success) throw new OaContractError("周报整篇替换响应无效。");
+    const result = parsed.data;
+    if (result.report_id !== context.report_id || result.owner_id !== context.owner_id || result.weekly_num !== context.weekly_num ||
+      result.github_id.toLowerCase() !== context.github_id.toLowerCase() || result.content_hash !== createHash("sha256").update(input.content, "utf8").digest("hex")) throw new OaContractError("周报整篇替换响应目标不匹配。");
+    return result;
   }
 
   async getWeeklyReportStyleContext(

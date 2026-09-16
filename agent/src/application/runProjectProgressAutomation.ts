@@ -208,7 +208,7 @@ export async function runProjectProgressAutomation(input: {
           ...repositoryInteractions.map((item) => ({ ...item, auditKey: null as string | null })),
           ...(summary.weeklyReportInteractions ?? []).map((item) => ({
             repositoryKey: null, interaction: item.interaction,
-            auditKey: `weekly-report-style:${project.projectId}:${summary.summaryDate}:${item.githubId.toLowerCase()}`,
+            auditKey: item.auditKey ?? `weekly-report-style:${project.projectId}:${summary.summaryDate}:${item.githubId.toLowerCase()}`,
           })),
         ];
         for (const repositoryInteraction of interactions) {
