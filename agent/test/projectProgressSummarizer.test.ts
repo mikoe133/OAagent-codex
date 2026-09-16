@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DeterministicProjectProgressSummarizer,
+  isInvalidProjectProgressSummary,
   ResponsesProjectProgressSummarizer,
 } from "../src/application/projectProgressSummarizer.js";
 
@@ -214,5 +215,35 @@ describe("ResponsesProjectProgressSummarizer", () => {
 
     assert.match(result.summary, /修复登录跳转/);
     assert.deepEqual(result.limitations, ["模型总结失败，已使用确定性兜底"]);
+  });
+});
+
+
+describe("Chinese project progress output", () => {
+  it("rejects English prose but accepts Chinese with technical names", () => {
+    assert.equal(isInvalidProjectProgressSummary("Day 33 focused on documentation and tooling."), true);
+    assert.equal(isInvalidProjectProgressSummary("完善 Agent API 文档并修复 GitHub OAuth 回调。"), false);
+  });
+
+  it("falls back on the Responses path when the model returns English", async () => {
+    const summarizer = new ResponsesProjectProgressSummarizer({
+      apiBaseUrl: "https://model.example.test/v1",
+      apiKey: "secret",
+      model: "summary-model",
+    }, async () => Response.json({ output: [{ content: [{
+      type: "output_text",
+      text: JSON.stringify({ summary: "Fixed login redirects.", limitations: [] }),
+    }] }] }));
+    const result = await summarizer.summarize(input);
+    assert.equal(result.summary, "完成修复登录跳转。");
+    assert.deepEqual(result.limitations, ["模型总结失败，已使用确定性兜底"]);
+  });
+
+  it("uses a factual count instead of untranslated English subjects", async () => {
+    const result = await new DeterministicProjectProgressSummarizer().summarize({
+      ...input,
+      commits: [{ ...input.commits[0]!, subject: "Fix login redirects" }],
+    });
+    assert.equal(result.summary, "完成 1 条代码提交。");
   });
 });
