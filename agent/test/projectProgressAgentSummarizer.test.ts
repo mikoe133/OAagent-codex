@@ -238,7 +238,7 @@ describe("CodexProjectProgressSummarizer", () => {
     const result = await summarizer.summarize(input);
 
     assert.equal(result.summary, "完成登录链路与权限校验更新。");
-    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v6");
+    assert.equal(result.interaction?.promptVersion, "github-project-progress-agent-v7");
     assert.equal(result.interaction?.inputTokens, 120);
     assert.equal(result.interaction?.outputTokens, 30);
     assert.equal(result.interaction?.responsePayloadSanitized.execution_mode, "codex_sdk_agent");
@@ -483,7 +483,7 @@ describe("CodexProjectProgressSummarizer", () => {
 
     const result = await summarizer.summarize(input);
 
-    assert.match(result.summary, /fix login authorization flow/);
+    assert.equal(result.summary, "完成 1 条代码提交。");
     assert.deepEqual(result.limitations, ["Agent 总结失败，已使用确定性兜底"]);
     assert.equal(result.interaction?.fallbackUsed, true);
     assert.equal(result.interaction?.errorCode, "agent_summary_failed");
@@ -565,6 +565,45 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.equal(result.interaction?.responsePayloadSanitized.agent_attempts, 1);
   });
 
+  it("rewrites an English summary in Chinese on the quality retry", async () => {
+    let attempts = 0;
+    const summarizer = new CodexProjectProgressSummarizer(config, async (runInput) => {
+      attempts += 1;
+      assert.match(runInput.developerInstructions, /summary 必须使用简体中文/);
+      if (attempts === 2) assert.match(runInput.prompt, /请将英文进展改写为中文/);
+      return {
+        finalResponse: JSON.stringify({
+          summary: attempts === 1
+            ? "Day 33 focused on documentation and tooling: documented the public Agent API, expanded weekly report diagnostics, and merged these changes through test into the main branch."
+            : "完善 Agent API 文档与周报诊断工具，并经 test 分支合并至主分支。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "language-retry",
+        prohibitedToolUseCount: 0,
+      };
+    });
+    const result = await summarizer.summarize(input);
+    assert.equal(attempts, 2);
+    assert.equal(result.summary, "完善 Agent API 文档与周报诊断工具，并经 test 分支合并至主分支。");
+    assert.equal(result.interaction?.fallbackUsed, false);
+    assert.equal(result.interaction?.responsePayloadSanitized.quality_retries, 1);
+  });
+
+  it("uses a Chinese fallback after repeated English responses", async () => {
+    const summarizer = new CodexProjectProgressSummarizer(config, async () => ({
+      finalResponse: JSON.stringify({ summary: "Fixed login authorization.", limitations: [] }),
+      usage: null,
+      upstreamRequestId: null,
+      prohibitedToolUseCount: 0,
+    }));
+    const result = await summarizer.summarize(input);
+    assert.equal(result.summary, "完成 1 条代码提交。");
+    assert.equal(result.interaction?.fallbackUsed, true);
+    assert.equal(result.interaction?.responsePayloadSanitized.agent_attempts, 2);
+    assert.match(result.interaction?.errorSummary ?? "", /必须使用简体中文/);
+  });
+
   it("corrects a rejected final summary locally and preserves a redacted audit", async () => {
     let attempts = 0;
     const summarizer = new CodexProjectProgressSummarizer(config, async (runInput) => {
@@ -614,7 +653,7 @@ describe("CodexProjectProgressSummarizer", () => {
     assert.equal(result.interaction?.responsePayloadSanitized.quality_retries, 1);
     const rejected = result.interaction?.responsePayloadSanitized.rejected_outputs as unknown[];
     assert.equal(rejected.length, 2);
-    assert.match(result.summary, /fix login authorization flow/);
+    assert.equal(result.summary, "完成 1 条代码提交。");
     assert.deepEqual(result.limitations, ["Agent 总结失败，已使用确定性兜底"]);
     assert.equal(result.interaction?.fallbackUsed, true);
     assert.match(result.interaction?.errorSummary ?? "", /最终项目总结/);
@@ -634,7 +673,7 @@ describe("CodexProjectProgressSummarizer", () => {
 
     const result = await summarizer.summarize(input);
 
-    assert.match(result.summary, /fix login authorization flow/);
+    assert.equal(result.summary, "完成 1 条代码提交。");
     assert.equal(result.interaction?.fallbackUsed, true);
     assert.match(result.interaction?.errorSummary ?? "", /最终项目总结/);
   });
@@ -653,7 +692,7 @@ describe("CodexProjectProgressSummarizer", () => {
 
     const result = await summarizer.summarize(input);
 
-    assert.match(result.summary, /fix login authorization flow/);
+    assert.equal(result.summary, "完成 1 条代码提交。");
     assert.equal(result.interaction?.fallbackUsed, true);
     assert.match(result.interaction?.errorSummary ?? "", /最终项目总结/);
   });
@@ -669,7 +708,7 @@ describe("CodexProjectProgressSummarizer", () => {
 
     const result = await summarizer.summarize(input);
 
-    assert.match(result.summary, /fix login authorization flow/);
+    assert.equal(result.summary, "完成 1 条代码提交。");
     assert.equal(result.interaction?.fallbackUsed, true);
     assert.equal(result.interaction?.status, "fallback");
     assert.equal(result.interaction?.errorCode, "agent_summary_failed");
@@ -713,6 +752,54 @@ describe("CodexProjectProgressSummarizer", () => {
     const identityDigest = entries.keys().next().value as string;
     entries.set(identityDigest, {
       summary: "候选提交已找到。我将查看详情以总结进展。",
+      limitations: [],
+    });
+    const repaired = await summarizer.summarize(input);
+
+    assert.equal(runs, 2);
+    assert.equal(repaired.summary, "完成任务后端服务并修复自动化领取幂等性。");
+    assert.equal(repaired.interaction?.responsePayloadSanitized.cache_hit, false);
+    assert.equal(entries.get(identityDigest)?.summary, repaired.summary);
+  });
+
+  it("ignores a cached English summary and replaces it with a final summary", async () => {
+    const entries = new Map<string, { summary: string; limitations: string[] }>();
+    const cache = {
+      getRepositorySummaryCache: (identityDigest: string) =>
+        entries.get(identityDigest) ?? null,
+      putRepositorySummaryCache: (entry: {
+        identityDigest: string;
+        summary: string;
+        limitations: string[];
+      }) => {
+        entries.set(entry.identityDigest, {
+          summary: entry.summary,
+          limitations: entry.limitations,
+        });
+      },
+    };
+    let runs = 0;
+    const runner: ProjectProgressAgentRunner = async () => {
+      runs += 1;
+      return {
+        finalResponse: JSON.stringify({
+          summary: "完成任务后端服务并修复自动化领取幂等性。",
+          limitations: [],
+        }),
+        usage: null,
+        upstreamRequestId: "thread-cache-repair",
+        prohibitedToolUseCount: 0,
+      };
+    };
+    const summarizer = new CodexProjectProgressSummarizer({
+      ...config,
+      repositorySummaryCache: cache,
+    }, runner);
+
+    await summarizer.summarize(input);
+    const identityDigest = entries.keys().next().value as string;
+    entries.set(identityDigest, {
+      summary: "Day 33 focused on documentation and tooling.",
       limitations: [],
     });
     const repaired = await summarizer.summarize(input);
