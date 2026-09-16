@@ -1571,6 +1571,9 @@ async function appendProjectWeeklyReportContent(input: {
   if (!hasWeeklyReportWriter(writer)) {
     return { appended: 0, skipped: 0 };
   }
+  if (isInvalidProjectProgressSummary(input.proposal.summary)) {
+    throw new Error("项目总结无效，已阻止周报写入");
+  }
   const authorGroups = groupCommitsByAuthor(input.commits);
   if (authorGroups.groups.length === 0) {
     return { appended: 0, skipped: authorGroups.skipped };

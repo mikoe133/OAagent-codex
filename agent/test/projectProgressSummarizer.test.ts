@@ -247,3 +247,28 @@ describe("Chinese project progress output", () => {
     assert.equal(result.summary, "完成 1 条代码提交。");
   });
 });
+
+
+describe("process narrative regression", () => {
+  it("rejects first-person plans without rejecting completed engineering work", () => {
+    for (const text of [
+      "针对候选提交，我看到2个提交的标题都涉及中文验证和总结。让我先读取详细信息来了解这些提交的具体改动。",
+      "让我先读取详细信息来了解这些提交的具体改动。",
+      "我需要查看提交详情才能总结。",
+      "请允许我读取文件详情。",
+      "完成中文校验。让我先检查剩余提交。",
+    ]) assert.equal(isInvalidProjectProgressSummary(text), true, text);
+    for (const text of [
+      "修复中文验证并合并至 test 和 main 分支。",
+      "完成提交详情读取工具与候选提交分析功能。",
+      "修复周报中过程描述的漏检问题。",
+    ]) assert.equal(isInvalidProjectProgressSummary(text), false, text);
+  });
+
+  it("does not copy a process narrative from a commit into deterministic fallback", async () => {
+    const result = await new DeterministicProjectProgressSummarizer().summarize({
+      ...input, commits: [{ ...input.commits[0]!, subject: "让我先读取详细信息。" }],
+    });
+    assert.equal(result.summary, "完成 1 条代码提交。");
+  });
+});

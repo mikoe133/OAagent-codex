@@ -88,47 +88,49 @@ describe("syncProjectProgress", () => {
     );
   });
 
-  it("classifies a punctuation-only repository summary as retryable failure", async () => {
-    const project = {
-      id: 4,
-      projectName: "punctuation-summary",
-      status: "updating" as const,
-      githubUrls: ["https://github.com/example/punctuation-summary"],
-    };
-    const report = await syncProjectProgress({
-      observedAt: new Date("2026-07-24T12:00:00.000Z"),
-      oaClient: {
-        listProjects: async () => [project],
-        getProject: async () => project,
-      },
-      githubReader: {
-        readRepository: async () => ({
-          repositoryId: 4,
-          fullName: "example/punctuation-summary",
-          canonicalUrl: "https://github.com/example/punctuation-summary",
-          complete: true,
-          lastActivityAt: "2026-07-24T01:00:00.000Z",
-          commits: [commit(
-            4,
-            "example/punctuation-summary",
-            "sha-punctuation",
-            "2026-07-24T01:00:00.000Z",
-          )],
-        }),
-      },
-      summarizer: {
-        summarize: async () => ({ summary: "...", limitations: [] }),
-      },
-    });
+  for (const invalidSummary of ["...", "针对候选提交，我看到2个提交的标题都涉及中文验证和总结。让我先读取详细信息来了解这些提交的具体改动。"]) {
+    it(`classifies an invalid repository summary as retryable failure: ${invalidSummary}`, async () => {
+      const project = {
+        id: 4,
+        projectName: "punctuation-summary",
+        status: "updating" as const,
+        githubUrls: ["https://github.com/example/punctuation-summary"],
+      };
+      const report = await syncProjectProgress({
+        observedAt: new Date("2026-07-24T12:00:00.000Z"),
+        oaClient: {
+          listProjects: async () => [project],
+          getProject: async () => project,
+        },
+        githubReader: {
+          readRepository: async () => ({
+            repositoryId: 4,
+            fullName: "example/punctuation-summary",
+            canonicalUrl: "https://github.com/example/punctuation-summary",
+            complete: true,
+            lastActivityAt: "2026-07-24T01:00:00.000Z",
+            commits: [commit(
+              4,
+              "example/punctuation-summary",
+              "sha-punctuation",
+              "2026-07-24T01:00:00.000Z",
+            )],
+          }),
+        },
+        summarizer: {
+          summarize: async () => ({ summary: invalidSummary, limitations: [] }),
+        },
+      });
 
-    assert.equal(report.retryRecommended, true);
-    assert.equal(report.metrics.repositoryTasksFallback, 1);
-    assert.match(
-      report.projects[0]?.warnings.join(" ") ?? "",
-      /repository_summary_fallback:example\/punctuation-summary:2026-07-24/,
-    );
-    assert.notEqual(report.projects[0]?.summaries[0]?.summary, "...");
-  });
+      assert.equal(report.retryRecommended, true);
+      assert.equal(report.metrics.repositoryTasksFallback, 1);
+      assert.match(
+        report.projects[0]?.warnings.join(" ") ?? "",
+        /repository_summary_fallback:example\/punctuation-summary:2026-07-24/,
+      );
+      assert.notEqual(report.projects[0]?.summaries[0]?.summary, invalidSummary);
+    });
+  }
 
   it("fans out one Agent summary per active repository with 6/2/1 concurrency", async () => {
     const repositoryCount = 8;
@@ -1906,7 +1908,7 @@ describe("syncProjectProgress", () => {
     });
   }
 
-  for (const scenario of ["matched", "no_previous", "model_failure", "context_failure", "week_not_found"] as const) {
+  for (const scenario of ["matched", "no_previous", "model_failure", "content_changed", "context_failure", "week_not_found"] as const) {
     it(`prepares author-specific weekly report content before append: ${scenario}`, async () => {
       const projects = [51, 52].map((id) => ({ id, projectName: `Project ${id}`, status: "updating" as const, githubUrls: ["https://github.com/alpha/api"] }));
       const calls: string[] = [];
@@ -1945,6 +1947,7 @@ describe("syncProjectProgress", () => {
           const prompt = JSON.parse(input.prompt);
           calls.push(`style:${prompt.previous_report}`);
           if (scenario === "model_failure") throw new Error("unavailable");
+          if (scenario === "content_changed") return { finalResponse: JSON.stringify({ content: `${prompt.project_name}\n支持天气查询与请假申请。` }), usage: null, upstreamRequestId: "style-invented", prohibitedToolUseCount: 0 };
           return { finalResponse: JSON.stringify({ content: `## ${prompt.project_name}\n- 完成更新。` }), usage: null, upstreamRequestId: "style-test", prohibitedToolUseCount: 0 };
         }),
         store: createWritableStore(),

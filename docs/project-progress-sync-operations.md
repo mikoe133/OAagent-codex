@@ -55,7 +55,7 @@ GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Wor
 
 每日总结任务会在成功读取 GitHub 时持久化当天 Commit 的作者身份。某个仓库后续因 GitHub App 未授权而返回 `401` 时，如果本地仍有同日项目总结和对应 Commit 作者证据，任务会跳过 AI 重算；优先使用本地总结草稿，没有本地草稿时读取 OA 已有的同日项目总结，然后继续执行周报增量追加。没有作者证据或已有总结时不会猜测人员或内容，也不会写入周报，Trace 会记录 `weekly_report_skipped_no_commit_authors`。周报写入使用 OA 的 `POST /internal/project-sync/weekly-reports/append`，Agent 传提交所属的 `summary_date`，由 OA 通过 `weekly_report_days` 解析真实 `weekly_num`，再按 `user_profile.github_id` 定位提交者、锁定该用户的周报行，并用 marker 保证重试幂等。该接口必须和 OAagent 使用同一 `OA_PROJECT_SYNC_TOKEN`，部署 OA 端后才会生效。
 
-GitHub 总结写入周报前，Worker 通过 `GET /internal/project-sync/weekly-reports/style-context?github_id=...&summary_date=...` 优先读取目标作者上一业务周的周报，无有效内容时再读取上上周周报，使用本次任务配置的模型改写当前项目总结。历史周报内容只参考标题、列表/表格、语气和详略；当前项目总结是唯一事实来源。风格来源单独保存在同步元数据和审计记录中，生成并写入 OA 的周报正文不包含来源周次、报告编号或仿写说明。仍按作者、项目、日期和 Commit digest 使用原有 marker 增量追加，不覆盖整份周报或已存在 marker 的内容。同一运行按作者与总结日期缓存只读上下文。
+GitHub 总结写入周报前，Worker 通过 `GET /internal/project-sync/weekly-reports/style-context?github_id=...&summary_date=...` 优先读取目标作者上一业务周的周报，无有效内容时再读取上上周周报，使用本次任务配置的模型改写当前项目总结。历史周报内容只参考段落、列表和加粗格式；当前项目总结是唯一事实来源。风格改写必须保留原总结的措辞、数字、标点和顺序，代码会移除允许的格式标记后比对正文；新增、删减或改述正文均回退原总结，记录 `weekly_report_style_content_changed`。项目标题必须独占首行，不接受表格或额外栏目标题。风格来源单独保存在同步元数据和审计记录中，生成并写入 OA 的周报正文不包含来源周次、报告编号或仿写说明。仍按作者、项目、日期和 Commit digest 使用原有 marker 增量追加，不覆盖整份周报或已存在 marker 的内容。同一运行按作者与总结日期缓存只读上下文。
 
 上一周由 OA 根据目标业务周期的开始日期前一天定位，支持跨年，不对 `weekly_num` 做减一。上周周期不存在、该作者无周报或内容为空白时，再查上上周；找到上周周期时按其开始日期前一天定位上上周，缺失周期时将查询日期再回退 7 天。最多查询这两周，两周均无有效内容才使用原项目总结。模型失败或输出无效时也回退原总结，并记录 `weekly_report_style_fallback`；身份/权限/目标周报不存在或读取接口失败时不追加，记录 `weekly_report_write_failed`。运行 Trace 展示读取及改写阶段，周报明细包含 `style_status`、`reference_report_id`、`reference_weekly_num`；AI 审计使用 `purpose=weekly_report_style`，不保存历史周报原文，只记录引用编号和摘要哈希。
 
@@ -161,3 +161,12 @@ WHERE run_id = '25e4b1ff-496b-490b-888e-9fd81b9d0f08'
   AND phase = 'weekly_report_style'
 ORDER BY id;
 ```
+
+
+### 排查过程描述与风格改写失真
+
+项目总结会拦截“让我先读取详情”“我需要查看提交”等过程描述，并在 Agent 内纠正重试一次；持续失败时使用确定性总结。缓存复用也经过相同校验，周报改写及追加入口拒绝无效源总结。该校验属于保守规则，不能代替所有语义质量判断。
+
+AI 审计顶层 `prompt_version` 和 `system_prompt_snapshot` 继续保存运行绑定的任务配置，供服务端校验。`request_payload_sanitized` 新增 `effective_prompt_version`、`effective_prompt_digest`（脱敏前实际指令的 SHA-256）和 `effective_system_prompt_snapshot`（包含默认规则、自定义配置和最终输出契约的脱敏指令），可定位实际生效的行为约束。
+
+周报风格审计记录 `current_summary_digest`、`current_summary_chars`，以及 `response_payload_sanitized.validation_policy` 和 `rejection_reason`。事实文本未保留时标记 fallback，返回原有效总结，不写入模型新增内容。不会自动清理已落库的历史错误周报；既有 marker 仍维持幂等，需要单独核对修正。
