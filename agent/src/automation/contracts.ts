@@ -36,6 +36,8 @@ const weeklyReportSyncAudit = z
     author_name: z.string().trim().min(1).max(255),
     content: z.string().trim().min(1).max(100_000),
     appended: z.boolean(),
+    mode: z.literal("replace").optional(),
+    updated: z.boolean().optional(),
     style_status: z.enum(["matched", "no_previous_report", "fallback"]).optional(),
     reference_report_id: z.number().int().positive().optional(),
     reference_weekly_num: z.number().int().positive().optional(),
@@ -262,6 +264,7 @@ export const automationEventCreateSchema = z
     data: z
       .object({
         weekly_num: z.number().int().positive(),
+        origin: z.enum(["user", "project_progress_sync"]).optional(),
         start_date: z.string().optional(),
         end_date: z.string().optional(),
         content: z.string().min(1).max(900_000).optional(),

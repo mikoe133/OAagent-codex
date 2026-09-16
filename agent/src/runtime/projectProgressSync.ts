@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { CodexProjectProgressSummarizer } from "../application/projectProgressAgentSummarizer.js";
-import { CodexWeeklyReportStyleSummarizer } from "../application/weeklyReportStyleSummarizer.js";
+import { CodexWeeklyReportRewriter } from "../application/weeklyReportRewriter.js";
 import { syncProjectProgress } from "../application/syncProjectProgress.js";
 import { loadProjectProgressConfig } from "../config/projectProgressConfig.js";
 import { GitHubRestProjectReader } from "../infrastructure/github/githubClient.js";
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
           maxCommitPagesPerBranch: config.githubLimits.maxCommitPagesPerBranch,
         },
       ),
-      weeklyReportStyleSummarizer: new CodexWeeklyReportStyleSummarizer({ model: config.model, workingDirectory: repoRoot }),
+      weeklyReportRewriter: new CodexWeeklyReportRewriter({ model: config.model, workingDirectory: repoRoot }),
       summarizer: new CodexProjectProgressSummarizer({
         model: config.model,
         githubAuth,

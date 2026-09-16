@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -690,3 +691,51 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+describe("whole weekly report replacement contract", () => {
+  const config = { baseUrl: "https://oa.example.test", alias: "production", token: "test-token", tokenHeader: "Authorization", tokenPrefix: "Bearer", mutationContext: { runId: "run", runMutationToken: "mutation-secret", fencingToken: 2 } };
+  const context = { report_id: 12, weekly_num: 121, owner_id: 7, github_id: "alice", start_date: "2026-09-14", end_date: "2026-09-20", content: "原周报", content_hash: createHash("sha256").update("原周报").digest("hex") };
+
+  it("uses an author-scoped current report and content-hash compare-and-swap replacement", async () => {
+    const calls: string[] = [];
+    const client = new ProjectProgressOaClient(config, async (input, init) => {
+      const url = new URL(String(input)); calls.push(url.pathname);
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-token");
+      if (init?.method === "GET") {
+        assert.equal(url.searchParams.get("github_id"), "alice");
+        assert.equal(url.searchParams.get("mode"), "rewrite");
+        assert.equal(url.searchParams.has("project_ids"), false);
+        return Response.json({ success: true, data: context });
+      }
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.expected_content_hash, context.content_hash);
+      assert.equal(body.run_mutation_token, undefined);
+      assert.equal(body.fencing_token, undefined);
+      assert.equal(body.mode, "replace");
+      assert.match(body.expected_content_hash, /^[a-f0-9]{64}$/);
+      assert.equal(body.project_ids, undefined);
+      assert.equal(body.origin, "project_progress_sync");
+      assert.equal(body.content, "整篇新周报");
+      assert.equal("marker" in body, false);
+      return Response.json({ success: true, data: { report_id: 12, weekly_num: 121, owner_id: 7, github_id: "alice", content_hash: createHash("sha256").update("整篇新周报").digest("hex"), updated: true } });
+    });
+    const snapshot = await client.getWeeklyReportRewriteContext({ summaryDate: "2026-09-16", githubId: "alice" });
+    const result = await client.replaceWeeklyReport({ summaryDate: "2026-09-16", githubId: "alice", context: snapshot, content: "整篇新周报" });
+    assert.equal(result.updated, true);
+    assert.deepEqual(calls, ["/internal/project-sync/weekly-reports/style-context", "/internal/project-sync/weekly-reports/append"]);
+  });
+
+  it("rejects incomplete, wrong-author and wrong-period contexts", async () => {
+    for (const data of [{ ...context, content_hash: "a".repeat(64) }, { ...context, github_id: "bob" }, { ...context, start_date: "2026-09-17" }]) {
+      const client = new ProjectProgressOaClient(config, async () => Response.json({ success: true, data }));
+      await assert.rejects(client.getWeeklyReportRewriteContext({ summaryDate: "2026-09-16", githubId: "alice" }), OaContractError);
+    }
+  });
+
+  it("does not retry a replacement on version conflict", async () => {
+    let requests = 0;
+    const client = new ProjectProgressOaClient(config, async () => { requests += 1; return Response.json({ error: { code: "weekly_report_version_conflict" } }, { status: 409 }); });
+    await assert.rejects(client.replaceWeeklyReport({ summaryDate: "2026-09-16", githubId: "alice", context, content: "新周报" }), OaRequestError);
+    assert.equal(requests, 1);
+  });
+});

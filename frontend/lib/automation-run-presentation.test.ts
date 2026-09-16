@@ -316,3 +316,10 @@ function interaction(
     ...overrides,
   }
 }
+
+
+test("labels whole-report rewrite audits separately from repository summaries", () => {
+  assert.equal(automationInteractionRepositoryFullName(interaction({
+    request_payload_sanitized: { purpose: "weekly_report_rewrite", github_id: "alice" },
+  })), "整篇周报 · alice")
+})

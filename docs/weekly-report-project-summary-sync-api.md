@@ -118,3 +118,8 @@ Content-Type: application/json
 | `500` | OAagent 内部错误，可稍后按原 `event_id` 重试 |
 
 事件必须在 OA 周报事务提交成功后投递。建议使用 Outbox，避免周报已保存但事件未送达。
+
+
+### 自动生成周报的来源标记
+
+事件 `data` 可增加 `origin: "user" | "project_progress_sync"`。OA 整篇重写路径不发送反向事件；若其他投递方发送此类事件，应由服务端设置 `project_progress_sync`。OAagent 会保存接收记录并返回 ignored，不创建周报反向归纳任务，避免项目动态与周报互相生成的回环。用户手动编辑应设为 user 或兼容地省略。详见 [整篇重写接口契约](weekly-report-rewrite-api.md)。
