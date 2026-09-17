@@ -280,7 +280,12 @@ describe("runProjectProgressAutomation", () => {
     assert.equal(peakUploads, 1);
   });
 
-  it("requests a retry when summary generation used a fallback", async () => {
+  for (const warning of [
+    "repository_summary_fallback:example/api:2026-07-30",
+    "weekly_report_write_failed:2026-07-30:weekly_report_fact_review_failed",
+    "weekly_report_write_failed:2026-07-30:github_identity_not_found",
+  ]) {
+  it(`reports a failed step without rescheduling the run: ${warning}`, async () => {
     const terminalUpdates: Array<{
       status: AutomationRunStatus;
       retryRecommended?: boolean;
@@ -302,9 +307,7 @@ describe("runProjectProgressAutomation", () => {
     fallbackReport.retryRecommended = true;
     fallbackReport.metrics.repositoryTasksSucceeded = 0;
     fallbackReport.metrics.repositoryTasksFallback = 1;
-    fallbackReport.projects[0]!.warnings.push(
-      "repository_summary_fallback:example/api:2026-07-30",
-    );
+    fallbackReport.projects[0]!.warnings.push(warning);
 
     const result = await runProjectProgressAutomation({
       automationClient: client,
@@ -318,10 +321,11 @@ describe("runProjectProgressAutomation", () => {
     assert.deepEqual(projectOutcomes, ["failed"]);
     assert.deepEqual(terminalUpdates, [{
       status: "failed",
-      retryRecommended: true,
+      retryRecommended: false,
       errorCode: "project_summary_failed",
     }]);
   });
+  }
 
   it("reports live trace stages while the run is active", async () => {
     const traceEvents: Array<{ eventKey: string; status: string }> = [];

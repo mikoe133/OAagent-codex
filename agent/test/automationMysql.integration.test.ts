@@ -191,8 +191,12 @@ test(
         response_payload_sanitized: {}, status: "succeeded",
       };
       await service.createAiInteraction(triggered.run_id, styleAudit);
+      const rewriteResponse = { retry_scope: "weekly_report", attempts: [
+        { attempt: 1, status: "failed", phase: "review", draft_content: "仅完成登录修复。", review_issues: ["遗漏接口文档。"], reason: "weekly_report_fact_review_failed", will_retry: true },
+        { attempt: 2, status: "succeeded", review_approved: true },
+      ] };
       await service.createAiInteraction(triggered.run_id, {
-        ...styleAudit, interaction_key: "weekly-report-rewrite:12:2026-01-01:0",
+        ...styleAudit, response_payload_sanitized: rewriteResponse, interaction_key: "weekly-report-rewrite:12:2026-01-01:0",
         prompt_version: WEEKLY_REPORT_REWRITE_PROMPT_VERSION,
         system_prompt_snapshot: WEEKLY_REPORT_REWRITE_PROMPT,
         request_payload_sanitized: { purpose: "weekly_report_rewrite", github_id: "alice" },
@@ -242,6 +246,7 @@ test(
           purged_at: string | null;
           created_at: string;
           request_payload_sanitized: unknown;
+          response_payload_sanitized: unknown;
         }>;
       };
       assert.equal(detail.status, "succeeded");
@@ -256,6 +261,9 @@ test(
       assert.deepEqual(detail.ai_interactions.find((item) =>
         item.interaction_key === "weekly-report-rewrite:12:2026-01-01:0",
       )?.request_payload_sanitized, { purpose: "weekly_report_rewrite", github_id: "alice" });
+      assert.deepEqual(detail.ai_interactions.find((item) =>
+        item.interaction_key === "weekly-report-rewrite:12:2026-01-01:0",
+      )?.response_payload_sanitized, rewriteResponse);
       assert.equal(detail.projects[0]?.run_id, triggered.run_id);
       assert.equal(detail.projects[0]?.outcome, "no_commits");
       assert.equal(detail.projects[0]?.source_digest, null);

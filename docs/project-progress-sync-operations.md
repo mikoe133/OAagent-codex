@@ -11,7 +11,7 @@ OA 是调度事实来源：OA 按任务配置在工作日 20:00 创建运行，O
 5. 只为 `Asia/Shanghai` 当天实际有 Commit 的仓库创建 Codex Thread；每仓库一个，同时最多运行 2 个。
 6. 同一项目的仓库结果全部完成后再聚合，同一项目每天最多写入一条总结。
 7. 最近一次提交距计划执行时间达到 240 小时，状态改为 `maintenance`；维护中项目再次出现提交时改为 `updating`。
-8. Codex Agent 先阅读单仓库当天候选 Commit。代码会为 `_`、`update`、`fix` 等低信息标题强制预读取受限 Commit 详情，并把文件名、增删统计和 Patch 片段作为必用证据注入总结；其他标题仍由 Agent 按需调用 `read_commit_details`。泛化总结会使用同一证据自动重试一次。
+8. Codex Agent 先阅读单仓库当天候选 Commit。代码会为 `_`、`update`、`fix` 等低信息标题强制预读取受限 Commit 详情，并把文件名、增删统计和 Patch 片段作为必用证据注入总结；其他标题仍由 Agent 按需调用 `read_commit_details`。泛化总结只对当前仓库使用同一证据自动纠正重试，遵守任务的单步骤总尝试次数。
 9. 项目结果和每个仓库 Thread 的 AI interaction 使用稳定幂等键写入 OA；周报项目总结按配置并发写入（默认 4，允许 1-20），自动化控制面保持独立调度。
 10. 收到取消请求或失去租约时，立即取消排队和在途 Thread，并停止后续业务写入。
 
@@ -121,7 +121,7 @@ npm run sync:project-progress -- --project-id 62
 
 该命令不参与 OA 自动化调度，只用于诊断。
 
-手动触发会跳过当日草稿和仓库总结缓存，重新生成总结，并覆盖同一项目、同一日期下唯一的一条 OA 总结。只有 Agent/模型总结失败会创建自动重试；GitHub 读取或配置错误、OA 写入失败和任务超时都不会自动重试。重试会绕过总结缓存重新调用模型，但只更新当前 Worker 已托管的总结；存在多条同日总结时，任何来源都不会自动覆盖。
+手动触发会跳过当日草稿和仓库总结缓存，重新生成总结，并覆盖同一项目、同一日期下唯一的一条 OA 总结。Agent/模型失败在当前仓库或当前作者周报步骤内重试，不再创建整个 GitHub 项目同步运行的自动重试任务。任务的 `retry_max_attempts`（含首次）和 `retry_interval_seconds` 用于步骤内重试；已成功的其他仓库不会重新总结。账号/权限/配置缺失以及无效输入不重试。GitHub 请求层原有瞬态网络重试保持不变；存在多条同日总结时，任何来源都不会自动覆盖。
 
 ## 服务器轮询
 
@@ -166,8 +166,21 @@ ORDER BY id;
 
 ### 排查过程描述与风格改写失真
 
-项目总结会拦截“让我先读取详情”“我需要查看提交”等过程描述，并在 Agent 内纠正重试一次；持续失败时使用确定性总结。缓存复用也经过相同校验，周报改写及追加入口拒绝无效源总结。该校验属于保守规则，不能代替所有语义质量判断。
+项目总结会拦截“让我先读取详情”“我需要查看提交”等过程描述，并只在当前仓库 Agent 内有限纠正重试；持续失败时使用确定性总结。缓存复用也经过相同校验，周报改写及追加入口拒绝无效源总结。该校验属于保守规则，不能代替所有语义质量判断。
 
 AI 审计顶层 `prompt_version` 和 `system_prompt_snapshot` 继续保存运行绑定的任务配置，供服务端校验。`request_payload_sanitized` 新增 `effective_prompt_version`、`effective_prompt_digest`（脱敏前实际指令的 SHA-256）和 `effective_system_prompt_snapshot`（包含默认规则、自定义配置和最终输出契约的脱敏指令），可定位实际生效的行为约束。
 
 周报风格审计记录 `current_summary_digest`、`current_summary_chars`，以及 `response_payload_sanitized.validation_policy` 和 `rejection_reason`。事实文本未保留时标记 fallback，返回原有效总结，不写入模型新增内容。不会自动清理已落库的历史错误周报；既有 marker 仍维持幂等，需要单独核对修正。
+
+
+### 仓库与周报步骤重试审计
+
+- 仓库：每个 `repository + summary_date` 使用一个总尝试预算（默认 3 次，含首次），传输和输出质量失败共享预算，不叠加多层重试。复用同一批 Commit 证据；成功仓库结果保持不变。
+- 周报：每个作者、日期对应的整篇周报单独重试。审核拒绝时，将上一轮草稿和具体意见作为不可信数据反馈给下一轮生成，再独立审核。不重新执行仓库 Commit 总结，不重写其他作者已成功的周报。
+- 缺 GitHub 账号、身份歧义、401/403/404/422、权限/配置/额度问题、非法工具调用、无效来源等不进行模型重试。任务取消/租约失效会中断等待和调用；重试受当前运行 deadline 约束，不创建新运行延长超时。
+- 已耗尽重试的生成失败会将对应项目记为 failed/partial_failed，`retry_recommended=false`，不让调度器全量重跑。其他类型自动任务沿用既有策略。手动重新执行仍使用原有运行范围。
+- 周报正文冲突继续单独处理：重新读取新底稿后最多再生成一次；与模型输出重试分别记录在不同周报审计条目中。
+
+记录位于现有 `automation_ai_interactions.response_payload_sanitized.attempts` 数组，无新表：每项含 attempt、status、phase、reason、retryable、will_retry。仓库失败输出为 `response`；周报为 `draft_content`、`generation_response`、`review_response`、`review_issues` 和两个请求 ID。后续重试成功仍保留之前失败项。无上游响应时内容为 null，错误原因仍保存。
+
+诊断文本会脱敏凭证，每个输出上限 20000 字符，截断以对应 `*_truncated` 标记说明。整条响应审计还按 UTF-8 / JSON 编码限制在 240 KiB 内，为接口的 256 KiB 上限预留空间；必要时进一步截短诊断文本并标记 `diagnostics_truncated=true`，保留每轮的状态、错误码和请求 ID。失败草稿只放审计 JSON，不作为可发布的 final_summary。原有审计保留/清理策略仍适用。缺账号等模型调用前失败记录在项目 warnings 和 Trace，无 AI 输出记录。

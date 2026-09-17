@@ -46,6 +46,7 @@ const config = {
     maxTotalPatchChars: 12_000,
   },
   workingDirectory: "/tmp",
+  retryPolicy: { maxAttempts: 2, intervalMs: 0 },
 };
 
 describe("CodexProjectProgressSummarizer", () => {
@@ -890,4 +891,44 @@ describe("CodexProjectProgressSummarizer", () => {
       await rm(temporaryRoot, { recursive: true, force: true });
     }
   });
+});
+
+it("retries only the failing repository with one total attempt budget", async () => {
+  const counts = { healthy: 0, flaky: 0 };
+  const summarizer = new CodexProjectProgressSummarizer({ ...config, retryPolicy: { maxAttempts: 3, intervalMs: 0 } }, async (request) => {
+    const key = request.prompt.includes("example/flaky") ? "flaky" : "healthy";
+    const attempt = ++counts[key];
+    if (key === "flaky" && attempt === 1) throw new Error("HTTP 503 model-secret token=transport-secret");
+    return {
+      finalResponse: JSON.stringify({ summary: key === "flaky" && attempt === 2 ? "让我先读取详情。" : "修复登录授权校验。", limitations: [] }),
+      usage: null, upstreamRequestId: `${key}-${attempt}`, prohibitedToolUseCount: 0,
+    };
+  });
+  const results = await Promise.all(["healthy", "flaky"].map((key) => summarizer.summarize({ ...input,
+    repositoryFullName: `example/${key}`, commits: input.commits.map((c) => ({ ...c, repositoryFullName: `example/${key}` })),
+  })));
+  assert.deepEqual(counts, { healthy: 1, flaky: 3 });
+  assert.ok(results.every((r) => r.interaction?.fallbackUsed === false));
+  const attempts = results[1]!.interaction!.responsePayloadSanitized.attempts as Array<Record<string, unknown>>;
+  assert.equal(attempts.length, 3);
+  assert.equal(attempts[0]?.phase, "generation");
+  assert.equal(attempts[0]?.response, null);
+  assert.match(String(attempts[1]?.response), /让我先读取详情/);
+  assert.equal(attempts[2]?.status, "succeeded");
+  assert.doesNotMatch(JSON.stringify(attempts), /model-secret|transport-secret/);
+});
+
+it("records every exhausted repository transport attempt", async () => {
+  let calls = 0;
+  const result = await new CodexProjectProgressSummarizer({ ...config, retryPolicy: { maxAttempts: 3, intervalMs: 0 } }, async () => {
+    calls++;
+    throw new Error("HTTP 503 service unavailable " + "故障".repeat(1500));
+  }).summarize(input);
+  assert.equal(calls, 3);
+  const attempts = result.interaction!.responsePayloadSanitized.attempts as Array<Record<string, unknown>>;
+  assert.equal(attempts.length, 3);
+  assert.equal(attempts[2]?.will_retry, false);
+  assert.equal(result.interaction!.fallbackUsed, true);
+  assert.equal(result.interaction!.errorSummary!.length, 1000);
+  assert.equal(String(attempts[0]?.reason).length, 2000);
 });
