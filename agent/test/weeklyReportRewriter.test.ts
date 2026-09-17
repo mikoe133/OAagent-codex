@@ -3,7 +3,7 @@ import test from "node:test";
 import { CodexWeeklyReportRewriter, contentHash } from "../src/application/weeklyReportRewriter.js";
 import { weeklyReportRewriteInputSchema } from "../src/domain/weeklyReportRewrite.js";
 
-const config = { model: { provider: "openrouter" as const, model: "z-ai/glm-5.3", apiBaseUrl: "https://model.test", apiKey: "test", parameters: {} }, workingDirectory: "/tmp" };
+const config = { model: { provider: "openrouter" as const, model: "z-ai/glm-5.3", apiBaseUrl: "https://model.test", apiKey: "test", parameters: {} }, workingDirectory: "/tmp", retryPolicy: { maxAttempts: 1, intervalMs: 0 } };
 const content = "OA-Agent：完成接口文档，正在修复登录问题。其他工作：完成客户沟通。";
 const input = weeklyReportRewriteInputSchema.parse({
   context: { report_id: 12, weekly_num: 121, owner_id: 7, github_id: "alice", start_date: "2026-09-14", end_date: "2026-09-20", content, content_hash: contentHash(content) },
@@ -85,4 +85,72 @@ test("propagates cancellation during review", async () => {
     return run(calls === 1 ? draft() : { approved: true, issues: [] });
   });
   await assert.rejects(rewriter.rewrite(input, controller.signal), { name: "AbortError" });
+});
+
+test("retries only this report with the rejected draft and review issues, retaining failure audits after success", async () => {
+  let calls = 0;
+  const result = await new CodexWeeklyReportRewriter({ ...config, retryPolicy: { maxAttempts: 3, intervalMs: 0 } }, async (request) => {
+    calls++;
+    if (calls === 1) return run({ ...draft(), content: "完成登录问题修复。" });
+    if (calls === 2) return run({ approved: false, issues: ["遗漏接口文档和客户沟通。"] });
+    if (calls === 3) {
+      const payload = JSON.parse(request.prompt);
+      assert.equal(payload.current_report, content);
+      assert.deepEqual(payload.daily_summaries, input.summaries);
+      assert.equal(payload.correction.previous_draft, "完成登录问题修复。");
+      assert.deepEqual(payload.correction.issues, ["遗漏接口文档和客户沟通。"]);
+      return run(draft());
+    }
+    return run({ approved: true, issues: [] });
+  }).rewrite(input);
+  assert.equal(calls, 4);
+  assert.equal(result.content, draft().content);
+  assert.equal(result.interaction.fallbackUsed, false);
+  const audit = result.interaction.responsePayloadSanitized.attempts as Array<Record<string, unknown>>;
+  assert.equal(audit.length, 2);
+  assert.equal(audit[0]?.phase, "review");
+  assert.equal(audit[0]?.draft_content, "完成登录问题修复。");
+  assert.deepEqual(audit[0]?.review_issues, ["遗漏接口文档和客户沟通。"]);
+  assert.equal(audit[0]?.will_retry, true);
+  assert.equal(audit[1]?.status, "succeeded");
+});
+
+test("exhausts only the configured report attempts and preserves all rejected outputs with redacted secrets", async () => {
+  let calls = 0;
+  const result = await new CodexWeeklyReportRewriter({ ...config, model: { ...config.model, apiKey: "model-secret" }, retryPolicy: { maxAttempts: 3, intervalMs: 0 } }, async () => {
+    calls++;
+    return calls % 2 ? run(draft()) : run({ approved: false, issues: ["遗漏工作。model-secret token=private-token Bearer private-bearer"] });
+  }).rewrite(input);
+  assert.equal(calls, 6);
+  assert.equal(result.content, null);
+  assert.equal(result.interaction.errorCode, "weekly_report_fact_review_failed");
+  const audit = result.interaction.responsePayloadSanitized.attempts as Array<Record<string, unknown>>;
+  assert.equal(audit.length, 3);
+  assert.equal(audit[2]?.will_retry, false);
+  assert.match(String(audit[2]?.review_response), /遗漏工作/);
+  assert.doesNotMatch(JSON.stringify(audit), /model-secret|private-token|private-bearer/);
+});
+
+for (const message of ["HTTP 401 unauthorized", "HTTP 403 forbidden", "模型配置无效", "github_identity_not_found"]) {
+  test(`does not retry permanent prerequisites: ${message}`, async () => {
+    let calls = 0;
+    const result = await new CodexWeeklyReportRewriter({ ...config, retryPolicy: { maxAttempts: 3, intervalMs: 0 } }, async () => { calls++; throw new Error(message); }).rewrite(input);
+    assert.equal(calls, 1);
+    assert.equal(result.content, null);
+    const audit = result.interaction.responsePayloadSanitized.attempts as Array<Record<string, unknown>>;
+    assert.equal(audit[0]?.retryable, false);
+    assert.equal(audit[0]?.generation_response, null);
+    assert.match(String(audit[0]?.reason), new RegExp(message));
+  });
+}
+
+test("records transport failures and retries only the failed report", async () => {
+  let calls = 0;
+  const result = await new CodexWeeklyReportRewriter({ ...config, retryPolicy: { maxAttempts: 3, intervalMs: 0 } }, async () => {
+    if (++calls === 1) throw new Error("HTTP 503 unavailable");
+    return run(calls === 2 ? draft() : { approved: true, issues: [] });
+  }).rewrite(input);
+  assert.equal(calls, 3);
+  assert.equal(result.content, draft().content);
+  assert.equal((result.interaction.responsePayloadSanitized.attempts as Array<Record<string, unknown>>)[0]?.phase, "generation");
 });
