@@ -263,7 +263,7 @@ async function main(): Promise<void> {
                     : "lookback",
                 },
               ),
-              weeklyReportRewriter: new CodexWeeklyReportRewriter({ model: config.model, workingDirectory: repoRoot }),
+              weeklyReportRewriter: new CodexWeeklyReportRewriter({ model: config.model, workingDirectory: repoRoot, retryPolicy: { maxAttempts: claim.retryPolicy.maxAttempts, intervalMs: claim.retryPolicy.intervalSeconds * 1000 } }),
               summarizer: new CodexProjectProgressSummarizer({
                 model: config.model,
                 githubAuth,
@@ -276,6 +276,7 @@ async function main(): Promise<void> {
                   ? { modelCatalogVersion: claim.modelCatalogVersion }
                   : {}),
                 repositorySummaryCache: store,
+                retryPolicy: { maxAttempts: claim.retryPolicy.maxAttempts, intervalMs: claim.retryPolicy.intervalSeconds * 1000 },
                 bypassRepositorySummaryCacheRead:
                   executionPolicy.forceRegenerateSummaries,
                 githubRequestLimiter,

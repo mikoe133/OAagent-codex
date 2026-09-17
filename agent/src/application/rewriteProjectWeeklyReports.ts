@@ -1,3 +1,4 @@
+import { isRetryableSummaryError } from "./summaryRetry.js";
 import type { WeeklyReportRewriteOa, WeeklyReportRewriteContext } from "../domain/weeklyReportRewrite.js";
 import { OaRequestError, ProjectProgressLeaseLostError } from "../infrastructure/oa/projectProgressOaClient.js";
 import type { AsyncSemaphore } from "../infrastructure/concurrency/asyncSemaphore.js";
@@ -39,7 +40,7 @@ export async function rewriteProjectWeeklyReports(input: {
         }])).values()];
         const generated = await input.agentLimiter.run(() => input.rewriter.rewrite({ context, summaryDate: target.summaryDate, summaries }, input.signal), input.signal);
         (target.proposal.weeklyReportInteractions ??= []).push({ githubId: target.githubId, interaction: generated.interaction, auditKey: `weekly-report-rewrite:${context.report_id}:${target.summaryDate}:${attempt}` });
-        if (generated.content === null) throw new Error("weekly_report_rewrite_quality_failed");
+        if (generated.content === null) throw new Error(generated.interaction.errorCode ?? "weekly_report_rewrite_quality_failed");
         const content = generated.content;
         let updated = false;
         ensureActive();
@@ -79,7 +80,7 @@ export async function rewriteProjectWeeklyReports(input: {
         handled.add(item);
         reportFor(item).warnings.push(`weekly_report_write_failed:${item.summaryDate}:${reason}`);
       }
-      await input.trace?.({ ...event, status: "failed", message: `整篇周报未更新，保留原文：${reason}` });
+      await input.trace?.({ ...event, status: "failed", message: `整篇周报未更新，保留原文：${reason}`, metadataSanitized: { retry_scope: "weekly_report", automatic_run_retry: false, retryable: isRetryableSummaryError(error), reason } });
     }
   }
   return updates;

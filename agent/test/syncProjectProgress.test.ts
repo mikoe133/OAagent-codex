@@ -81,7 +81,7 @@ describe("syncProjectProgress", () => {
       repository_tasks_fallback: 1,
       repository_tasks_failed: 0,
     });
-    assert.equal(report.retryRecommended, true);
+    assert.equal(report.retryRecommended, false);
     assert.match(
       report.projects[1]?.warnings.join(" ") ?? "",
       /repository_summary_fallback:example\/repository-2:2026-07-24/,
@@ -122,7 +122,7 @@ describe("syncProjectProgress", () => {
         },
       });
 
-      assert.equal(report.retryRecommended, true);
+      assert.equal(report.retryRecommended, false);
       assert.equal(report.metrics.repositoryTasksFallback, 1);
       assert.match(
         report.projects[0]?.warnings.join(" ") ?? "",

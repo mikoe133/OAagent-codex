@@ -1351,7 +1351,7 @@ async function executeProjectProgressSync(
         : "dry-run",
     observedAt: input.observedAt.toISOString(),
     mutationsApplied,
-    retryRecommended: reports.some(projectNeedsRetry),
+    retryRecommended: false, // Failures have scoped retries; never reschedule every repository.
     cancelled,
     metrics: {
       repositoriesDiscovered: repositoriesByKey.size,
@@ -1734,15 +1734,6 @@ function buildWeeklyReportMarker(
 function normalizedText(value: string | null | undefined): string | null {
   const text = value?.trim();
   return text ? text : null;
-}
-
-function projectNeedsRetry(report: ProjectProgressProjectReport): boolean {
-  return report.warnings.some((warning) =>
-    warning.startsWith("repository_summary_fallback:") ||
-    warning.startsWith("repository_summary_failed:") ||
-    warning.startsWith("repository_summary_incomplete:") ||
-    warning.startsWith("weekly_report_write_failed:")
-  );
 }
 
 function repositoryReadWarning(repositoryFullName: string, error: unknown): string {

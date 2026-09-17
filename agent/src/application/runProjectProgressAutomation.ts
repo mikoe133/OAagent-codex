@@ -284,7 +284,7 @@ export async function runProjectProgressAutomation(input: {
 
     await heartbeat.stop();
     heartbeat.assertLease();
-    const terminal = resolveTerminal(report, heartbeat.cancelRequested);
+    const terminal = resolveTerminal(report, heartbeat.cancelRequested, claim.jobType === "github_project_progress_sync");
     await traceReporter.publish({
       eventKey: "finalize_run",
       sequence: 900,
@@ -562,6 +562,7 @@ function interactionKey(
 function resolveTerminal(
   report: ProjectProgressSyncReport,
   cancelRequested: boolean,
+  scopedRetries: boolean,
 ): {
   status: "succeeded" | "partial_failed" | "failed" | "cancelled";
   retryRecommended: boolean;
@@ -595,14 +596,14 @@ function resolveTerminal(
   ).length;
   if (
     nonSummaryFailures === 0 &&
-    report.retryRecommended &&
+    (scopedRetries || report.retryRecommended) &&
     summaryFailures > 0
   ) {
     return {
       status: summaryFailures === report.projects.length ? "failed" : "partial_failed",
-      retryRecommended: true,
+      retryRecommended: scopedRetries ? false : report.retryRecommended,
       errorCode: "project_summary_failed",
-      errorSummary: `${summaryFailures} 个项目总结失败，已写入兜底结果。`,
+      errorSummary: scopedRetries ? `${summaryFailures} 个项目的总结或周报同步失败；不重跑整个任务，详情见步骤审计。` : `${summaryFailures} 个项目总结失败，已写入兜底结果。`,
     };
   }
   if (failed === 0) {
@@ -616,7 +617,7 @@ function resolveTerminal(
   const status = failed === report.projects.length ? "failed" : "partial_failed";
   return {
     status,
-    retryRecommended: report.retryRecommended,
+    retryRecommended: scopedRetries ? false : report.retryRecommended,
     errorCode: status === "failed"
       ? "project_processing_failed"
       : "project_processing_partial_failed",
@@ -628,7 +629,8 @@ function isSummaryRetryWarning(warning: string): boolean {
   return warning.startsWith("repository_summary_fallback:") ||
     warning.startsWith("repository_summary_failed:") ||
     warning.startsWith("repository_summary_incomplete:") ||
-    warning === "weekly_report_agent_fallback";
+    warning === "weekly_report_agent_fallback" ||
+    warning.startsWith("weekly_report_write_failed:");
 }
 
 function safeErrorSummary(error: unknown): string {

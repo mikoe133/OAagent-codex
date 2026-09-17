@@ -1,3 +1,4 @@
+import { boundedSummaryAudit, summaryRetryPolicy, waitForSummaryRetry, isRetryableSummaryError, summaryDiagnostic, summaryErrorReason, type SummaryRetryPolicy } from "./summaryRetry.js";
 import {
   Codex,
   type ModelReasoningEffort,
@@ -7,7 +8,6 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import type { ProjectProgressConfig } from "../config/projectProgressConfig.js";
 import {
   buildRepositoryEvidence,
@@ -40,15 +40,12 @@ import {
 } from "./projectProgressSummarizer.js";
 
 const AGENT_REQUEST_TIMEOUT_MS = 180_000;
-const AGENT_TRANSIENT_MAX_ATTEMPTS = 2;
-const AGENT_TRANSIENT_RETRY_DELAY_MS = 1_000;
 const MODEL_API_KEY_ENV = "PROJECT_PROGRESS_AGENT_MODEL_API_KEY";
 const MCP_BEARER_TOKEN_ENV = "PROJECT_PROGRESS_AGENT_MCP_TOKEN";
 const MCP_SERVER_NAME = "github_project_progress";
 const MCP_TOOL_NAME = "read_commit_details";
 const REPOSITORY_SUMMARY_CACHE_IDENTITY_VERSION =
   "repository-summary-cache-identity-v2";
-const MAX_QUALITY_RETRIES = 1;
 
 export const PROJECT_PROGRESS_AGENT_PROMPT_VERSION = "github-project-progress-agent-v8";
 export const PROJECT_PROGRESS_AGENT_SYSTEM_PROMPT = [
@@ -109,6 +106,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       modelCatalogVersion?: string;
       repositorySummaryCache?: RepositorySummaryCache;
       bypassRepositorySummaryCacheRead?: boolean;
+      retryPolicy?: SummaryRetryPolicy;
     },
     private readonly runner: ProjectProgressAgentRunner = runProjectProgressAgent,
     private readonly fallback: ProjectProgressSummarizer = new DeterministicProjectProgressSummarizer(),
@@ -182,6 +180,8 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
     let agentRun: ProjectProgressAgentRunResult | null = null;
     let agentAttempts = 0;
     let qualityRetries = 0;
+    const policy = summaryRetryPolicy(this.config.retryPolicy);
+    const attempts: Array<Record<string, unknown>> = [];
     const rejectedOutputs: Array<{ attempt: number; reason: string; response: string }> = [];
     let prefetchedDetailCalls = 0;
     try {
@@ -222,65 +222,46 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
         ),
         ...(input.signal ? { signal: input.signal } : {}),
       };
-      agentRun = await runAgentWithTransientRetry(
-        async () => {
-          agentAttempts += 1;
-          return this.runner(runInput);
-        },
-        input.signal,
-      );
-      if (agentRun.prohibitedToolUseCount > 0) {
-        throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
-      }
-      let output: ProjectProgressSummaryOutput;
-      while (true) {
+      let output: ProjectProgressSummaryOutput | null = null;
+      let lastReason = "";
+      for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+        input.signal?.throwIfAborted();
+        let currentRun: ProjectProgressAgentRunResult | null = null;
+        let phase = "generation";
+        agentAttempts += 1;
         try {
-          output = decodeAgentOutput(agentRun.finalResponse);
-          if (!hasChineseProjectProgressText(output.summary)) {
-            throw new Error("Agent summary 必须使用简体中文叙述；请将英文进展改写为中文，API、GitHub 等技术名称可保留英文。");
-          }
-          if (isInvalidProjectProgressSummary(output.summary)) {
-            throw new Error("Agent 输出的内容不是最终项目总结。");
-          }
-          if (
-            hasUsableCommitDetails(requiredCommitDetails) &&
-            needsEvidenceQualityRetry(output.summary)
-          ) {
-            throw new Error("Agent 输出未依据 Commit 详情形成具体工程总结。");
-          }
+          currentRun = await this.runner({ ...runInput,
+            prompt: attempt === 1 ? runInput.prompt : buildProjectProgressAgentPrompt(
+              evidenceEnvelope.evidence, requiredCommitDetails, true,
+            ) + `\n上次输出被拒绝：${lastReason} 请直接返回符合结构的最终项目总结，不要输出计划或下一步动作。`,
+          });
+          agentRun = agentRun ? mergeAgentRuns(agentRun, currentRun) : currentRun;
+          if (currentRun.prohibitedToolUseCount > 0) throw new Error("Agent 尝试使用未授权工具，已拒绝本次输出。");
+          phase = "validation";
+          const candidate = decodeAgentOutput(currentRun.finalResponse);
+          if (!hasChineseProjectProgressText(candidate.summary)) throw new Error("Agent summary 必须使用简体中文叙述；请将英文进展改写为中文，API、GitHub 等技术名称可保留英文。");
+          if (isInvalidProjectProgressSummary(candidate.summary)) throw new Error("Agent 输出的内容不是最终项目总结。");
+          if (hasUsableCommitDetails(requiredCommitDetails) && needsEvidenceQualityRetry(candidate.summary)) throw new Error("Agent 输出未依据 Commit 详情形成具体工程总结。");
+          output = candidate;
+          attempts.push({ attempt, status: "succeeded", upstream_request_id: currentRun.upstreamRequestId });
           break;
         } catch (error) {
-          const reason = error instanceof SyntaxError
-            ? "Agent 输出不是有效 JSON。"
-            : sanitizeError(error);
-          rejectedOutputs.push({
-            attempt: qualityRetries + 1,
-            reason,
-            response: sanitizeRejectedResponse(agentRun.finalResponse, this.config.model.apiKey),
-          });
-          if (qualityRetries >= MAX_QUALITY_RETRIES) throw new Error(reason);
-          qualityRetries += 1;
-          const firstRun = agentRun;
-          const retryRun = await runAgentWithTransientRetry(
-            async () => {
-              agentAttempts += 1;
-              return this.runner({
-                ...runInput,
-                prompt: buildProjectProgressAgentPrompt(
-                  evidenceEnvelope.evidence,
-                  requiredCommitDetails,
-                  true,
-                ) + `\n上次输出被拒绝：${reason} 请直接返回符合结构的最终项目总结，不要输出计划或下一步动作。`,
-              });
-            },
-            input.signal,
-          );
-          agentRun = mergeAgentRuns(firstRun, retryRun);
-          if (retryRun.prohibitedToolUseCount > 0) {
-            throw new Error("Agent 质量重试尝试使用未授权工具，已拒绝本次输出。");
-          }
+          input.signal?.throwIfAborted();
+          const reason = error instanceof SyntaxError ? "Agent 输出不是有效 JSON。" : summaryErrorReason(error, [this.config.model.apiKey, mcpServer.bearerToken]);
+          const retryable = isRetryableSummaryError(error);
+          const willRetry = retryable && attempt < policy.maxAttempts;
+          const response = currentRun ? summaryDiagnostic(currentRun.finalResponse, [this.config.model.apiKey, mcpServer.bearerToken]) : null;
+          attempts.push({ attempt, phase, status: "failed", reason, response,
+            response_truncated: (currentRun?.finalResponse.length ?? 0) > 20_000,
+            retryable, will_retry: willRetry, upstream_request_id: currentRun?.upstreamRequestId ?? null });
+          if (currentRun) rejectedOutputs.push({ attempt, reason, response: response ?? "" });
+          lastReason = reason;
+          if (!willRetry) throw error;
+          if (phase === "validation") qualityRetries += 1;
+          await waitForSummaryRetry(policy, input.signal);
         }
       }
+      if (!output) throw new Error("Agent 总结重试已耗尽。");
       const metrics = mcpServer.tool.getMetrics();
       const limitations = mergeLimitations(
         output.limitations,
@@ -313,6 +294,7 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           cacheHit: false,
           qualityRetries,
           rejectedOutputs,
+          attempts,
           prefetchedDetailCalls,
         }),
       };
@@ -320,6 +302,8 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       if (input.signal?.aborted) {
         throw input.signal.reason;
       }
+      if (attempts.length === 0) attempts.push({ attempt: 0, phase: "preparation", status: "failed",
+        reason: summaryErrorReason(error, [this.config.model.apiKey, mcpServer?.bearerToken ?? ""]), retryable: false, will_retry: false });
       const fallback = await this.fallback.summarize(input);
       const output = {
         summary: fallback.summary,
@@ -341,8 +325,9 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
           cacheHit: false,
           qualityRetries,
           rejectedOutputs,
+          attempts,
           prefetchedDetailCalls,
-          error,
+          error: new Error(summaryErrorReason(error, [this.config.model.apiKey, mcpServer?.bearerToken ?? ""])),
         }),
       };
     } finally {
@@ -350,45 +335,6 @@ export class CodexProjectProgressSummarizer implements ProjectProgressSummarizer
       await removeThreadWorkspace(workspace);
     }
   }
-}
-
-async function runAgentWithTransientRetry(
-  run: () => Promise<ProjectProgressAgentRunResult>,
-  signal?: AbortSignal,
-): Promise<ProjectProgressAgentRunResult> {
-  for (let attempt = 1; attempt <= AGENT_TRANSIENT_MAX_ATTEMPTS; attempt += 1) {
-    signal?.throwIfAborted();
-    try {
-      return await run();
-    } catch (error) {
-      if (
-        attempt >= AGENT_TRANSIENT_MAX_ATTEMPTS ||
-        !isRetryableAgentTransportError(error)
-      ) {
-        throw error;
-      }
-      await delay(AGENT_TRANSIENT_RETRY_DELAY_MS, undefined, {
-        ...(signal ? { signal } : {}),
-        ref: false,
-      });
-    }
-  }
-  throw new Error("Agent 重试状态无效。");
-}
-
-function isRetryableAgentTransportError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  return [
-    /stream disconnected before completion/iu,
-    /error sending request/iu,
-    /connection (?:closed|reset)/iu,
-    /\bECONNRESET\b/iu,
-    /\bEPIPE\b/iu,
-    /fetch failed/iu,
-    /HTTP (?:408|425|429|500|502|503|504)\b/iu,
-  ].some((pattern) => pattern.test(error.message));
 }
 
 export async function runProjectProgressAgent(
@@ -735,6 +681,7 @@ function buildAgentInteraction(input: {
   cacheHit: boolean;
   qualityRetries?: number;
   rejectedOutputs?: Array<{ attempt: number; reason: string; response: string }>;
+  attempts?: Array<Record<string, unknown>>;
   prefetchedDetailCalls?: number;
   error?: unknown;
 }): ProjectProgressAiInteraction {
@@ -771,7 +718,7 @@ function buildAgentInteraction(input: {
       prompt_profile_applied: input.config.promptProfile !== null &&
         input.config.promptProfile !== undefined,
     },
-    responsePayloadSanitized: {
+    responsePayloadSanitized: boundedSummaryAudit({
       execution_mode: input.cacheHit
         ? "repository_summary_cache"
         : "codex_sdk_agent",
@@ -785,8 +732,11 @@ function buildAgentInteraction(input: {
       agent_attempts: input.agentAttempts,
       quality_retries: input.qualityRetries ?? 0,
       rejected_outputs: input.rejectedOutputs ?? [],
+      attempts: input.attempts ?? [],
+      retry_scope: "repository",
+      max_attempts: summaryRetryPolicy(input.config.retryPolicy).maxAttempts,
       prefetched_detail_calls: input.prefetchedDetailCalls ?? 0,
-    },
+    }),
     finalSummary: input.output.summary,
     limitations: input.output.limitations,
     fallbackUsed: input.fallbackUsed,
@@ -796,7 +746,7 @@ function buildAgentInteraction(input: {
     latencyMs: input.latencyMs,
     status: input.fallbackUsed ? "fallback" : "succeeded",
     errorCode: input.fallbackUsed ? "agent_summary_failed" : null,
-    errorSummary: input.fallbackUsed ? sanitizeError(input.error) : null,
+    errorSummary: input.fallbackUsed ? summaryErrorReason(input.error, [input.config.model.apiKey]).slice(0, 1000) : null,
   };
 }
 
@@ -885,16 +835,6 @@ function sanitizeRejectedResponse(value: string, apiKey: string, maxLength = 4_0
     .replace(/((?:api[_-]?key|token|password|secret|sessionid)["']?\s*[:=]\s*["']?)[^\s"',;\\}]+/gi, "$1[REDACTED]")
     .replace(/https?:\/\/[^\s"\\]+/gi, "[URL REDACTED]")
     .slice(0, maxLength);
-}
-
-function sanitizeError(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Agent 总结失败";
-  return message
-    .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
-    .replace(/sessionid=[^\s;]+/gi, "sessionid=[REDACTED]")
-    .replace(/[\r\n]+/g, " ")
-    .trim()
-    .slice(0, 1_000);
 }
 
 function escapePromptData(value: string): string {

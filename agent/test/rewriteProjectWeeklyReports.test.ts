@@ -89,3 +89,49 @@ test("different days use sequential fresh baselines instead of fetching weekly f
   assert.deepEqual(days, ["2026-09-15", "2026-09-16"]);
   assert.equal(baseline, "原周报2026-09-152026-09-16");
 });
+
+test("missing GitHub identity does not retry or invoke generation and other authors continue", async () => {
+  const state = setup();
+  state.targets[1]!.githubId = "bob";
+  const reads: string[] = []; let generations = 0;
+  await rewriteProjectWeeklyReports({ ...state, oa: {
+    getWeeklyReportRewriteContext: async (input) => {
+      reads.push(input.githubId);
+      if (input.githubId === "alice") throw new OaRequestError("missing account", 404, "github_identity_not_found");
+      return { ...context, github_id: "bob" };
+    },
+    replaceWeeklyReport: async () => ({ ...saved(), github_id: "bob" }),
+  }, rewriter: { rewrite: async () => { generations++; return { content: "新周报", interaction }; } } });
+  assert.deepEqual(reads, ["alice", "bob"]);
+  assert.equal(generations, 1);
+  assert.match(state.reports[0]!.warnings.join(" "), /github_identity_not_found/);
+  assert.equal(state.reports[1]!.weeklyReportSyncs?.[0]?.updated, true);
+});
+
+test("a failed report retries in place without regenerating another author's successful report", async () => {
+  const { CodexWeeklyReportRewriter } = await import("../src/application/weeklyReportRewriter.js");
+  const state = setup();
+  state.targets[1]!.githubId = "bob";
+  const calls = { alice: 0, bob: 0 };
+  const reads: string[] = [], writes: string[] = [];
+  const rewriter = new CodexWeeklyReportRewriter({
+    model: { provider: "openrouter", model: "test", apiKey: "fixture-key", apiBaseUrl: "https://model.test", parameters: {} },
+    workingDirectory: "/tmp", retryPolicy: { maxAttempts: 3, intervalMs: 0 },
+  }, async (request) => {
+    const payload = JSON.parse(request.prompt);
+    const author: "alice" | "bob" = payload.current_report.includes("alice") ? "alice" : "bob";
+    const attempt = ++calls[author];
+    const response = payload.draft
+      ? { approved: !(author === "bob" && attempt === 2), issues: author === "bob" && attempt === 2 ? ["遗漏已完成工作"] : [] }
+      : { content: "保留原有工作，完成本次项目更新。", source_ids: ["current-report", ...payload.daily_summaries.map((s: { source_id: string }) => s.source_id)] };
+    return { finalResponse: JSON.stringify(response), usage: null, upstreamRequestId: `${author}-${attempt}`, prohibitedToolUseCount: 0 };
+  });
+  const count = await rewriteProjectWeeklyReports({ ...state, rewriter, oa: {
+    getWeeklyReportRewriteContext: async (input) => { reads.push(input.githubId); return { ...context, github_id: input.githubId, content: `${input.githubId} 的已有工作` }; },
+    replaceWeeklyReport: async (input) => { writes.push(input.githubId); return { ...saved(), github_id: input.githubId }; },
+  } });
+  assert.equal(count, 2);
+  assert.deepEqual(calls, { alice: 2, bob: 4 });
+  assert.deepEqual(reads, ["alice", "bob"]);
+  assert.deepEqual(writes, ["alice", "bob"]);
+});
