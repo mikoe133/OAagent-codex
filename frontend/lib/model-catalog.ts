@@ -39,6 +39,11 @@ export const MODELS_BY_PROVIDER = {
       name: "DeepSeek V4 Pro",
       icon: "/images/deepseek-color.png",
     },
+    {
+      id: "deepseek/deepseek-v4-flash",
+      name: "DeepSeek V4 Flash",
+      icon: "/images/deepseek-color.png",
+    },
     { id: "openai/gpt-5.6", name: "GPT-5.6", icon: "/images/gpt.png", disabled: true },
   ],
 } as const satisfies Record<ModelProvider, readonly ModelOption[]>

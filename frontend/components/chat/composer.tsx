@@ -24,7 +24,7 @@ const SHOW_VOICE_INPUT = false
 const SHOW_FILE_UPLOAD = false
 
 interface ComposerProps {
-  onSend: (content: string, imageData?: string) => void
+  onSend: (content: string, imageData?: string) => void | boolean | Promise<void | boolean>
   onStop: () => void
   isStreaming: boolean
   disabled?: boolean
@@ -296,7 +296,14 @@ export function Composer({
     if (isRecording) {
       stopRecording()
     }
-    onSend(value || "Describe this image", uploadedImage || undefined)
+    const submission = onSend(value || "Describe this image", uploadedImage || undefined)
+    // Restore a draft rejected before admission (for example, an expired OA session).
+    void Promise.resolve(submission).then((accepted) => {
+      if (accepted === false) {
+        setValue((current) => current || value)
+        setUploadedImage((current) => current || uploadedImage)
+      }
+    })
     setValue("")
     setUploadedImage(null)
     setSpeechError(null)

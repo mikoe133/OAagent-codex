@@ -7,6 +7,7 @@ import { getDefaultModel, resolveRequestedModel, resolveRequestedProvider, resol
 import { ChatError, ChatScheduler } from './chatScheduler.js';
 import { CopilotClient, type CopilotRecord } from './copilotClient.js';
 import { RequestStore, fingerprint, type RequestRecord } from './requestStore.js';
+import { ChatTraceRecorder } from './chatTrace.js';
 
 type Principal = { principalId: string; oaUserId: string | null };
 type Active = { cancel: () => void; done: Promise<void>; listeners: Set<(event: Record<string, unknown>) => void> };
@@ -117,7 +118,7 @@ export class PublicChatApi {
         json(res, 202, { recordId, requestId, cancellationRequested: this.active.has(key), state: value.state }); return;
       }
       if (method === 'POST' && operation === 'sync') {
-        if (value.state !== 'completed') throw new ChatError(409, 'result_unavailable', '尚无可同步的成功结果');
+        if (!['completed', 'failed', 'cancelled'].includes(value.state)) throw new ChatError(409, 'result_unavailable', '请求尚未结束，暂无可同步的历史');
         await this.exclusive(async () => {
           if (this.scheduler.busy(sessionKey)) throw new ChatError(409, 'session_busy', '会话仍有任务执行，请稍后重试');
           await this.sync(client, key, value);
@@ -146,44 +147,54 @@ export class PublicChatApi {
         const value: RequestRecord = { recordId, requestId: messageKey, fingerprint: digest, message: input.message,
           state: 'queued', createdAt: now, updatedAt: now, historySync: 'pending' };
         await this.records.create(key, value);
+        const trace = new ChatTraceRecorder(this.records, key);
         const listeners = new Set<(event: Record<string, unknown>) => void>();
         let job;
         try {
           job = this.scheduler.submit(owner, sessionKey, async signal => {
-            value.state = 'running'; value.updatedAt = new Date().toISOString(); await this.records.save(key, value);
-            // Read the latest OA record inside the per-session execution slot.
-            const latest = await client.get(recordId);
-            const legacyId = latest.record.agentSessionId;
-            const owned = await this.sessions.listForOwner(principal.principalId);
-            const internalId = typeof legacyId === 'string' && /^[A-Za-z0-9_.:-]{1,120}$/.test(legacyId) && owned.some(item => item.sessionId === legacyId)
-              ? legacyId : `oa-${fingerprint([this.config.oaApiBaseUrl, this.config.oaAuthAlias, recordId])}`;
-            if (!await this.sessions.bindOaToken(internalId, token, principal.principalId, principal.oaUserId)) throw new ChatError(403, 'forbidden', '内部会话归属不匹配');
-            signal.throwIfAborted();
-            const emit = (event: Record<string, unknown>) => { for (const listener of listeners) listener(event); };
-            await this.service.streamMessage({ ...input, sessionId: internalId, oaApiToken: token, oaUserId: principal.oaUserId, latency }, async event => {
-              if (event.type === 'run.failed') throw new Error('agent_failed');
-              if (event.type === 'run.completed') {
-                value.result = { recordId, requestId: messageKey, finalResponse: event.result.finalResponse,
-                  provider: event.result.provider, model: event.result.model, knowledgeSources: event.result.knowledgeSources };
-                value.state = 'completed'; value.updatedAt = new Date().toISOString();
-                await this.records.save(key, value); // Commit before attempting OA history sync.
-              } else {
-                const { sessionId: _sid, ...publicEvent } = event;
-                if (event.type !== 'thread.started') emit({ ...publicEvent, recordId, requestId: messageKey });
+            try {
+              await trace.record({ type: 'run.queued' });
+              value.state = 'running'; value.updatedAt = new Date().toISOString(); await this.records.save(key, value);
+              // Read the latest OA record inside the per-session execution slot.
+              const latest = await client.get(recordId);
+              const legacyId = latest.record.agentSessionId;
+              const owned = await this.sessions.listForOwner(principal.principalId);
+              const internalId = typeof legacyId === 'string' && /^[A-Za-z0-9_.:-]{1,120}$/.test(legacyId) && owned.some(item => item.sessionId === legacyId)
+                ? legacyId : `oa-${fingerprint([this.config.oaApiBaseUrl, this.config.oaAuthAlias, recordId])}`;
+              if (!await this.sessions.bindOaToken(internalId, token, principal.principalId, principal.oaUserId)) throw new ChatError(403, 'forbidden', '内部会话归属不匹配');
+              signal.throwIfAborted();
+              const emit = (event: Record<string, unknown>) => { for (const listener of listeners) listener(event); };
+              await this.service.streamMessage({ ...input, sessionId: internalId, oaApiToken: token, oaUserId: principal.oaUserId, latency }, async event => {
+                if (event.type === 'run.failed') throw new Error('agent_failed');
+                await trace.record(event);
+                if (event.type === 'run.completed') {
+                  value.result = { recordId, requestId: messageKey, finalResponse: event.result.finalResponse,
+                    provider: event.result.provider, model: event.result.model, knowledgeSources: event.result.knowledgeSources };
+                  value.state = 'completed'; value.updatedAt = new Date().toISOString();
+                  await this.records.save(key, value); // Commit before attempting OA history sync.
+                } else {
+                  const { sessionId: _sid, ...publicEvent } = event;
+                  if (event.type !== 'thread.started') emit({ ...publicEvent, recordId, requestId: messageKey });
+                }
+              }, signal).catch(error => { throw signal.aborted ? signal.reason : error; });
+              if (!value.result) throw new Error('agent_result_missing');
+              try { await this.sync(client, key, value); } catch { /* result remains available; explicit sync retry */ }
+            } catch (error) {
+              if (value.state !== 'completed') {
+                await this.fail(key, value, trace, signal.aborted ? signal.reason : error);
+                // Keep the session slot until the failure history has been saved.
+                try { await this.sync(client, key, value); } catch { /* explicit sync retry */ }
               }
-            }, signal).catch(error => { throw signal.aborted ? signal.reason : error; });
-            if (!value.result) throw new Error('agent_result_missing');
-            try { await this.sync(client, key, value); } catch { /* result remains available; explicit sync retry */ }
+              throw error;
+            }
           });
         } catch (error) { await this.records.discardUnaccepted(key); throw error; }
         const entry: Active = { ...job, listeners };
         this.active.set(key, entry);
         entry.done = job.done.catch(async error => {
-          if (value.state !== 'completed') {
-            value.state = error instanceof ChatError && error.code === 'cancelled' ? 'cancelled' : 'failed';
-            value.errorCode = error instanceof ChatError ? error.code : 'agent_failed'; value.updatedAt = new Date().toISOString();
-            await this.records.save(key, value);
-          }
+          // Queued cancellation/timeout never enters the task. Preserve its trace
+          // locally; explicit sync waits until the session is idle.
+          if (value.state === 'queued' || value.state === 'running') await this.fail(key, value, trace, error);
         }).finally(() => { this.active.delete(key); });
         // A persistence failure is observed by HTTP/query without an unhandled rejection.
         void entry.done.catch(() => {});
@@ -206,24 +217,46 @@ export class PublicChatApi {
   private async read(key: string) {
     const value = await this.records.read(key);
     if (value && ['running','queued'].includes(value.state) && !this.active.has(key)) value.state = 'unknown';
-    return value;
+    if (!value) return null;
+    const traceEvents = await this.records.readTrace(key);
+    return { ...value, traceEvents };
+  }
+  private async fail(key: string, value: RequestRecord, trace: ChatTraceRecorder, error: unknown) {
+    value.state = error instanceof ChatError && error.code === 'cancelled' ? 'cancelled' : 'failed';
+    value.errorCode = error instanceof ChatError ? error.code : 'agent_failed';
+    value.updatedAt = new Date().toISOString();
+    await trace.record({ type: 'run.failed', status: value.state, error: value.errorCode });
+    await this.records.save(key, value);
   }
   private async exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.admission.catch(() => {}).then(operation); this.admission = next; return next;
   }
   private async sync(client: CopilotClient, key: string, value: RequestRecord) {
-    if (!value.result) return;
+    if (!['completed', 'failed', 'cancelled'].includes(value.state)) return;
+    const traceEvents = await this.records.readTrace(key);
     const latest = await client.get(value.recordId);
     const messages = Array.isArray(latest.record.messages) ? latest.record.messages : [];
     const additions = [
       { id: `${value.requestId}:user`, requestId: value.requestId, role: 'user', content: value.message, createdAt: value.createdAt },
-      { id: `${value.requestId}:assistant`, requestId: value.requestId, role: 'assistant', content: value.result.finalResponse,
-        createdAt: value.updatedAt, status: 'completed', knowledgeSources: value.result.knowledgeSources },
+      { id: `${value.requestId}:assistant`, requestId: value.requestId, role: 'assistant', content: value.result?.finalResponse ?? '',
+        createdAt: value.updatedAt, status: value.state === 'cancelled' ? 'stopped' : value.state,
+        durationMs: Math.max(0, Date.parse(value.updatedAt) - Date.parse(value.createdAt)),
+        ...(value.errorCode ? { error: value.errorCode } : {}),
+        knowledgeSources: value.result?.knowledgeSources ?? [], traceEvents },
     ];
     const combined = [...messages];
-    for (const message of additions) if (!combined.some((item: any) => item.id === message.id)) combined.push(message);
-    await client.save(value.recordId, { ...latest.record, messages: combined, summary: value.result.finalResponse.slice(0, 3000) });
-    value.historySync = 'synced'; await this.records.save(key, value);
+    for (const message of additions) {
+      const index = combined.findIndex((item: any) => item.id === message.id);
+      if (index < 0) combined.push(message);
+      else if (message.role === 'assistant') combined[index] = { ...combined[index], ...message };
+    }
+    await client.save(value.recordId, { ...latest.record, messages: combined,
+      ...(value.result ? { summary: value.result.finalResponse.slice(0, 3000) } : {}) });
+    value.historySync = 'synced';
+    // read() enriches public responses with the journal; keep metadata snapshots
+    // small when /sync was invoked with an enriched record.
+    const { traceEvents: _trace, ...metadata } = value as RequestRecord & { traceEvents?: unknown };
+    await this.records.save(key, metadata);
   }
   private async stream(res: ServerResponse, key: string, recordId: string, requestId: string, active?: Active, latency?: ChatLatencyTrace) {
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', 'x-accel-buffering': 'no' });
@@ -244,8 +277,8 @@ export class PublicChatApi {
       const value = await this.read(key);
       latency?.finish({ status: value?.state === 'completed' ? 'completed' : 'failed', provider: value?.result?.provider, model: value?.result?.model });
       emit(value?.state === 'completed'
-        ? { type: 'run.completed', recordId, requestId, result: value.result, historySync: value.historySync }
-        : { type: 'run.failed', recordId, requestId, error: value?.errorCode ?? 'outcome_unknown', state: value?.state });
+        ? { type: 'run.completed', recordId, requestId, result: { ...value.result, traceEvents: value.traceEvents }, historySync: value.historySync }
+        : { type: 'run.failed', recordId, requestId, error: value?.errorCode ?? 'outcome_unknown', state: value?.state, traceEvents: value?.traceEvents });
     } catch { emit({ type: 'run.failed', recordId, requestId, error: 'result_unavailable' }); }
     finally { cleanup(); if (!res.destroyed) res.end(); }
   }

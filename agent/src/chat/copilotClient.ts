@@ -13,6 +13,8 @@ export class CopilotClient {
       response = await fetch(url, { method, headers: { Authorization: `Bearer ${this.token}`, Cookie: `sessionid=${this.token}`, 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000) });
     } catch { throw new ChatError(503, 'oa_unavailable', 'OA Copilot 暂不可用'); }
+    if (response.status === 404 && endpoint === '/copilot/record')
+      throw new ChatError(404, 'record_not_found', '当前会话已失效或不属于当前账号，请重新打开会话或新建对话');
     if (!response.ok) throw new ChatError([401,403,404].includes(response.status) ? response.status : 502, 'oa_record_error', 'OA Copilot 请求失败');
     let envelope: any;
     try { envelope = await response.json(); } catch { throw new ChatError(502, 'oa_invalid_response', 'OA 返回无效数据'); }

@@ -39,6 +39,8 @@ import {
   type ToolStep,
 } from "./chat-stream"
 import { resolveLoadedSessionMessages } from "./session-messages"
+import { restoreStoredTrace } from "./stored-trace"
+import { prepareChatSession, SessionUnavailableError, SESSION_UNAVAILABLE_MESSAGE } from "./session-recovery"
 // import LineSidebar from "./siderbar"
 
 // Data model for messages
@@ -95,6 +97,7 @@ type StoredMessage = {
   imageData?: unknown
   toolSteps?: unknown
   traceMessages?: unknown
+  traceEvents?: unknown
   knowledgeSources?: unknown
   status?: unknown
   error?: unknown
@@ -220,10 +223,11 @@ async function loadChatSession(session: ChatSessionListItem): Promise<ChatSessio
 
   if (response.status === 401) {
     window.location.assign(`/login?next=${encodeURIComponent("/chat")}`)
-    return null
+    throw new Error("请重新登录后发送消息")
   }
 
   if (!response.ok) {
+    if (response.status === 404) throw new SessionUnavailableError()
     throw new Error(`Failed to load session: ${response.status}`)
   }
 
@@ -290,7 +294,10 @@ async function readResponseError(response: Response): Promise<string> {
   }
 
   try {
-    const payload = JSON.parse(text) as { error?: unknown; message?: unknown }
+    const payload = JSON.parse(text) as { error?: unknown; message?: unknown; code?: unknown }
+    if (response.status === 404 && (payload.code === "record_not_found" || payload.code === "oa_record_error")) {
+      return SESSION_UNAVAILABLE_MESSAGE
+    }
     return stringValue(payload.error) || stringValue(payload.message) || fallback
   } catch {
     return text.trim()
@@ -327,6 +334,7 @@ function normalizeStoredMessage(value: unknown): Message | null {
   const feedback = message.feedback === "like" || message.feedback === "dislike" ? message.feedback : null
   const messageError = stringValue(message.error)
   const durationMs = normalizeResponseDuration(message.durationMs)
+  const storedTrace = restoreStoredTrace(message.traceEvents, status === 'failed' || status === 'stopped' ? status : 'completed')
 
   return {
     id: typeof message.id === "string" && message.id ? message.id : generateId(),
@@ -339,6 +347,7 @@ function normalizeStoredMessage(value: unknown): Message | null {
     ...(Array.isArray(message.traceMessages)
       ? { traceMessages: normalizeStoredTraceMessages(message.traceMessages) }
       : {}),
+    ...(storedTrace ?? {}),
     ...(Array.isArray(message.knowledgeSources)
       ? { knowledgeSources: normalizeKnowledgeSources(message.knowledgeSources) }
       : {}),
@@ -790,35 +799,40 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   // Send a message to the AI
   const sendMessage = useCallback(
     async (content: string, imageData?: string, retryRequestId?: string) => {
-      if (!content.trim() && !imageData) return
+      if (!content.trim() && !imageData) return false
 
-      if (preparingSessionRef.current) return
+      if (preparingSessionRef.current) return false
       let currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
-      if (!/^[1-9]\d*$/.test(currentAgentSessionId)) {
-        if (messagesRef.current.length) {
-          setError("请从左侧会话列表重新打开已有会话，以关联 OA 会话记录。")
-          return
+      if (activeSessionRunsRef.current.has(currentAgentSessionId)) return false
+      preparingSessionRef.current = true
+      const originalSessionId = currentAgentSessionId
+      try {
+        currentAgentSessionId = await prepareChatSession({
+          sessionId: originalSessionId,
+          hasMessages: messagesRef.current.length > 0,
+          load: () => loadChatSession({ sessionId: originalSessionId, recordId: originalSessionId }),
+          create: async () => {
+            const session = await createChatSession(originalSessionId)
+            if (!session?.recordId) throw new Error("创建 OA 会话失败")
+            return String(session.recordId)
+          },
+        })
+        if (activeSessionIdRef.current && activeSessionIdRef.current !== originalSessionId) {
+          setSessionListRefreshKey((value) => value + 1)
+          return false
         }
-        preparingSessionRef.current = true
-        try {
-          const session = await createChatSession(currentAgentSessionId)
-          if (!session?.recordId) throw new Error("创建 OA 会话失败")
-          if (activeSessionIdRef.current && activeSessionIdRef.current !== currentAgentSessionId) {
-            setSessionListRefreshKey((value) => value + 1)
-            return
-          }
-          currentAgentSessionId = String(session.recordId)
-          activeSessionIdRef.current = currentAgentSessionId
-          setAgentSessionId(currentAgentSessionId)
-          setActiveRecordId(currentAgentSessionId)
-          persistAgentSessionId(currentAgentSessionId)
-        } catch (error) {
-          setError(error instanceof Error ? error.message : "创建 OA 会话失败")
-          return
-        } finally { preparingSessionRef.current = false }
-      }
+        activeSessionIdRef.current = currentAgentSessionId
+        setAgentSessionId(currentAgentSessionId)
+        setActiveRecordId(currentAgentSessionId)
+        persistAgentSessionId(currentAgentSessionId)
+      } catch (error) {
+        if (activeSessionIdRef.current === originalSessionId) {
+          setError(error instanceof Error ? error.message : "读取 OA 会话失败")
+        }
+        return false
+      } finally { preparingSessionRef.current = false }
       if (activeSessionRunsRef.current.has(currentAgentSessionId)) {
-        return
+        return false
       }
 
       setError(null)
@@ -1100,6 +1114,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             routingTraceGate.dismiss()
             completedRunReceived = true
             const result = toRecord(event.result)
+            const storedTrace = restoreStoredTrace(result?.traceEvents)
+            if (storedTrace) {
+              updateAssistantToolSteps(storedTrace.toolSteps)
+              updateAssistantTraceMessages(storedTrace.traceMessages)
+            }
             const finalResponse = result?.finalResponse
             if (typeof finalResponse === "string") {
               applyFinalContent(finalResponse)
@@ -1110,6 +1129,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
           if (event.type === "run.failed") {
             routingTraceGate.dismiss()
+            const storedTrace = restoreStoredTrace(event.traceEvents, event.state === 'cancelled' ? 'stopped' : 'failed')
+            if (storedTrace) {
+              updateAssistantToolSteps(storedTrace.toolSteps)
+              updateAssistantTraceMessages(storedTrace.traceMessages)
+            }
             terminalStreamError = new Error(typeof event.error === "string" ? event.error : "Agent run failed")
           }
         }
@@ -1290,7 +1314,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     setActiveWorkspaceView("conversation")
     setSessionListFocusKey((value) => value + 1)
 
-    if (!isStreaming && messagesRef.current.length === 0) {
+    if (!isStreaming && messagesRef.current.length === 0 && !/^[1-9]\d*$/.test(activeSessionIdRef.current || "")) {
       setError(null)
       return
     }
@@ -1572,7 +1596,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             messages={messages}
             isStreaming={isStreaming}
             error={error}
-            onRetry={retry}
+            onRetry={error === SESSION_UNAVAILABLE_MESSAGE ? startNewSession : retry}
+            retryLabel={error === SESSION_UNAVAILABLE_MESSAGE ? "新建对话" : undefined}
             onFeedback={handleMessageFeedback}
             isLoaded={isLoaded}
             oaNavigationUrl={oaNavigationUrl}

@@ -63,7 +63,7 @@ const CUSTOM_MODEL_DEFINITIONS = {
   "deepseek/deepseek-v4-flash": {
     baseSlug: "gpt-5.5",
     displayName: "DeepSeek V4 Flash",
-    description: "DeepSeek V4 Flash semantic router served through OpenRouter.",
+    description: "DeepSeek V4 Flash served through OpenRouter.",
     contextWindow: 1_048_576,
     autoCompactTokenLimit: 996_147,
     supportsParallelToolCalls: false,

@@ -1,5 +1,7 @@
 # Chat latency observability
 
+页面展示的对话 Trace 已独立持久化到 Agent 本地日志及 OA 消息历史，详见 [Trace 保存位置与恢复](chat-trace-storage.md)。下面的 `[chat-latency]` 汇总日志仍输出到 stderr。
+
 Agent 服务会为每个 `/v1/sessions/:sessionId/messages` 和
 `/v1/sessions/:sessionId/messages/stream` 请求输出一条结构化日志：
 

@@ -329,9 +329,11 @@ GET /v1/models
 | POST | `/v1/sessions/{recordId}/messages/stream` | 提交消息并通过 SSE 接收进度，必须携带请求编号 |
 | GET | `/v1/sessions/{recordId}/requests/{requestId}` | 查询原请求状态、结果及历史同步情况 |
 | POST | `/v1/sessions/{recordId}/requests/{requestId}/cancel` | 显式请求停止排队/执行；返回 202，不回滚已发生的 OA 操作 |
-| POST | `/v1/sessions/{recordId}/requests/{requestId}/sync` | 将成功结果补存到 OA 历史；不调用模型，可重复调用 |
+| POST | `/v1/sessions/{recordId}/requests/{requestId}/sync` | 将已结束请求的结果和 Trace 补存到 OA 历史（成功、失败、取消）；不调用模型，可重复调用 |
 
 每一个读写接口，包括幂等重放、查询和取消，都重新验证 OA Token，并向 OA 读取对应记录，校验记录 user_id 与当前验证的用户 ID 一致。OA 不可用时不返回缓存结果绕过授权。内部幂等索引包含 OA 地址、alias、当前用户、recordId 和 requestId。
+
+对话 Trace 实时写入本地 JSONL，并随 assistant 消息保存到 OA 的 `traceEvents` 字段。请求查询返回已保存事件，历史页面可恢复展示；文件位置、失败补存和保留行为见 [AI 对话 Trace 持久化](chat-trace-storage.md)。
 
 创建示例：
 

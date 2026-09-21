@@ -40,6 +40,8 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
   const service = { async streamMessage(input: any, emit: any, signal: AbortSignal) {
     calls++;
     assert.match(input.sessionId, /^oa-/);
+    await emit({ type: 'progress', sessionId: input.sessionId, itemId: 'route', toolType: 'semantic_route', status: 'completed', message: '路由完成', durationMs: 12 });
+    await emit({ type: 'tool.started', sessionId: input.sessionId, itemId: 'lookup', toolType: 'command_execution', name: 'node scripts/callOaApi.mjs --operationId list_reports' });
     if (input.message === 'wait') { entered.resolve(); await release.promise; }
     if (input.message === 'fail') throw new Error('private secret');
     if (input.message === 'cancel') {
@@ -47,6 +49,7 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
       await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
     }
     signal.throwIfAborted();
+    await emit({ type: 'tool.completed', sessionId: input.sessionId, itemId: 'lookup', toolType: 'command_execution', name: 'node scripts/callOaApi.mjs --operationId list_reports', status: 'completed', outputDelta: 'saved output', durationMs: 34 });
     await emit({ type: 'thread.started', sessionId: input.sessionId, threadId: 'private-thread' });
     await emit({ type: 'message.delta', sessionId: input.sessionId, itemId: 'm', delta: 'answer', text: 'answer' });
     await emit({ type: 'run.completed', sessionId: input.sessionId, result: { finalResponse: 'answer', provider: input.provider, model: input.model, knowledgeSources: [], threadId: 'private-thread', sessionId: input.sessionId }, usage: null });
@@ -69,7 +72,9 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     const stream = await request('/1/messages/stream', 'POST', { message: 'wait' }, 'first');
     const reader = stream.body!.getReader(); await reader.read(); await reader.cancel();
     await entered.promise;
-    assert.equal((await (await request('/1/requests/first')).json()).state, 'running');
+    const running = await (await request('/1/requests/first')).json();
+    assert.equal(running.state, 'running');
+    assert.ok(running.traceEvents.some((event: any) => event.type === 'tool.started'));
     assert.equal((await request('/1/messages', 'POST', { message: 'wait' }, 'first')).status, 409);
     const restarted = await start();
     assert.equal((await (await request('/1/requests/first', 'GET', undefined, undefined, 'valid', restarted)).json()).state, 'unknown');
@@ -84,8 +89,13 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     }
     assert.equal(state.state, 'completed'); assert.equal(state.historySync, 'synced');
     assert.equal(state.result.finalResponse, 'answer'); assert.equal('fingerprint' in state, false);
+    assert.ok(state.traceEvents.some((event: any) => event.outputDelta === 'saved output'));
+    const restored = await (await request('/1/requests/first', 'GET', undefined, undefined, 'valid', restarted)).json();
+    assert.deepEqual(restored.traceEvents, state.traceEvents);
+    assert.deepEqual(records.get('1').record.messages[1].traceEvents, state.traceEvents);
     const replay = await request('/1/messages/stream', 'POST', { message: 'wait' }, 'first', 'valid', restarted);
     const text = await replay.text(); assert.match(text, /run.completed/); assert.doesNotMatch(text, /threadId|sessionId|private-thread/);
+    assert.match(text, /saved output/);
     assert.equal(calls, 1);
     assert.equal((await request('/1/messages', 'POST', { message: 'changed' }, 'first')).status, 409);
     assert.equal((await request('/1/requests/first', 'GET', undefined, undefined, 'other')).status, 404);
@@ -96,6 +106,7 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     assert.equal(unsynced.state, 'completed'); assert.equal(unsynced.historySync, 'pending'); assert.equal(calls, 2);
     failSave = false;
     assert.equal((await request('/1/requests/second/sync', 'POST')).status, 200);
+    assert.ok(records.get('1').record.messages[3].traceEvents.length > 0);
     assert.equal((await request('/1/requests/second/sync', 'POST')).status, 200);
     assert.equal(calls, 2); assert.equal(records.get('1').record.messages.length, 4);
     assert.equal((await request('/1', 'PATCH', { messages: [] })).status, 400);
@@ -103,6 +114,10 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     assert.equal(records.get('1').record.messages.length, 4);
     const failed = await request('/1/messages', 'POST', { message: 'fail' }, 'failed');
     assert.equal(failed.status, 409); assert.doesNotMatch(await failed.text(), /private secret/);
+    const failedHistory = records.get('1').record.messages.find((message: any) => message.id === 'failed:assistant');
+    assert.equal(failedHistory.status, 'failed');
+    assert.ok(failedHistory.traceEvents.some((event: any) => event.type === 'tool.started'));
+    assert.equal(failedHistory.traceEvents.at(-1).type, 'run.failed');
     assert.equal((await request('/1/messages', 'POST', { message: 'fail' }, 'failed')).status, 409); assert.equal(calls, 3);
     const cancellationStream = await request('/1/messages/stream', 'POST', { message: 'cancel' }, 'cancel');
     await cancelEntered.promise;
@@ -110,6 +125,9 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     assert.equal((await request('/1/requests/cancel/cancel', 'POST')).status, 202);
     assert.match(await cancellationStream.text(), /run.failed/);
     assert.equal((await (await request('/1/requests/cancel')).json()).state, 'cancelled');
+    const cancelledHistory = records.get('1').record.messages.find((message: any) => message.id === 'cancel:assistant');
+    assert.equal(cancelledHistory.status, 'stopped');
+    assert.equal(cancelledHistory.traceEvents.at(-1).status, 'cancelled');
     assert.equal((await request('/1/messages', 'POST', { message: 'cancel' }, 'cancel')).status, 409);
     assert.equal(calls, 4);
     assert.equal((await request('/1/messages', 'POST', { message: 'x'.repeat(140000) }, 'large')).status, 413);

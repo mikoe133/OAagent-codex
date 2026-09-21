@@ -93,6 +93,8 @@ export type ChatStreamEvent = {
   status?: unknown
   text?: unknown
   toolType?: unknown
+  traceEvents?: unknown
+  state?: unknown
 }
 
 export function drainChatSseBuffer(buffer: string, onEvent: (event: ChatStreamEvent) => void): string {

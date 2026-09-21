@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { restoreStoredTrace } from '../../../components/chat/stored-trace'
 import { createAgentHttpServer } from '../../../../agent/src/api/httpServer'
 import { SessionStore } from '../../../../agent/src/infrastructure/persistence/sessionStore'
 import { ChatLatencyMetricsRecorder } from '../../../../agent/src/infrastructure/observability/chatLatency'
@@ -37,6 +38,7 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
     const body = Buffer.concat(chunks).toString()
     const id = url.searchParams.get('record_id') || String(++count)
     if (req.method === 'POST') records.set(id, { id, user_id: 1, record: JSON.parse(body), created_at: 1720000000, updated_at: 1720000000 })
+    if (!records.has(id)) { res.writeHead(404); res.end(JSON.stringify({ message: 'copilot record not found' })); return }
     if (req.method === 'PATCH') records.get(id).record = JSON.parse(body)
     res.end(JSON.stringify({ data: records.get(id) }))
   })
@@ -45,6 +47,8 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
   const config = { sessionStorePath: storePath, oaApiBaseUrl: oaBase, oaAuthAlias: 'default', oaUserTokenHeader: 'Authorization', oaUserTokenPrefix: 'Bearer', modelProvider: 'nexttoken', model: 'gpt-5.6-terra' } as AppConfig
   const service = { async streamMessage(input: any, emit: any) {
     modelCalls++
+    await emit({ type: 'tool.started', sessionId: input.sessionId, itemId: 'lookup', toolType: 'mcp_tool_call', name: 'oa.lookup', input: { query: 'reports' } })
+    await emit({ type: 'tool.completed', sessionId: input.sessionId, itemId: 'lookup', toolType: 'mcp_tool_call', name: 'oa.lookup', result: { count: 1 }, durationMs: 15 })
     await emit({ type: 'message.delta', sessionId: input.sessionId, itemId: 'answer', delta: 'AI_OK', text: 'AI_OK' })
     await emit({ type: 'run.completed', sessionId: input.sessionId, result: { sessionId: input.sessionId, threadId: 'internal', provider: input.provider, model: input.model, finalResponse: 'AI_OK', knowledgeSources: [] } })
   } } as AgentService
@@ -61,6 +65,12 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
     assert.equal(created.status, 201)
     const recordId = (await created.json()).session.recordId
     assert.equal(recordId, '1')
+    const missing = await chat(request('/api/chat', 'POST', {
+      recordId: '999', requestId: 'missing', messages: [{ role: 'user', content: 'hello' }],
+    }))
+    assert.equal(missing.status, 404)
+    assert.equal((await missing.json()).code, 'record_not_found')
+    assert.equal(modelCalls, 0)
     const payload = { recordId, requestId: 'first', messages: [{ role: 'user', content: 'hello' }] }
     const response = await chat(request('/api/chat', 'POST', payload))
     assert.equal(response.status, 200)
@@ -75,6 +85,10 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
     const history = await sessions.GET(request(`/api/chat/sessions?recordId=${recordId}`))
     const messages = (await history.json()).session.messages
     assert.equal(messages.length, 2); assert.equal(messages[1].content, 'AI_OK')
+    const savedTrace = restoreStoredTrace(messages[1].traceEvents)!
+    assert.equal(savedTrace.toolSteps[0]?.durationMs, 15)
+    assert.match(savedTrace.toolSteps[0]?.input ?? '', /reports/)
+    assert.deepEqual(savedTrace.traceMessages, [{ id: 'answer', content: 'AI_OK', afterStepId: 'lookup' }])
     const listed = await sessions.GET(request('/api/chat/sessions'))
     assert.equal((await listed.json()).sessions[0].recordId, recordId)
     const second = await chat(request('/api/chat', 'POST', { ...payload, requestId: 'second' }))

@@ -32,6 +32,7 @@ export const MODEL_CATALOG = {
     "z-ai/glm-5.3",
     "moonshotai/kimi-k3",
     "deepseek/deepseek-v4-pro",
+    "deepseek/deepseek-v4-flash",
     "openai/gpt-5.5",
     "openai/gpt-5.4",
   ],
