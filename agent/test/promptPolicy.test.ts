@@ -25,6 +25,20 @@ describe("OA agent prompt policy", () => {
     assert.doesNotMatch(prompts, /先给结论,再给接口依据/);
   });
 
+  it("answers with OA calendar-year weeks while retaining internal week IDs for API calls", async () => {
+    const prompt = await readPrompt("output-policy.md");
+
+    assert.match(prompt, /所有涉及周次的回答.*年内自然周次/);
+    assert.match(prompt, /`year` \+ `weekly_num_of_year`/);
+    assert.match(prompt, /weekly_num=238, year=2026, weekly_num_of_year=38.*2026 年第 38 周.*不能回答“第 238 周”/);
+    assert.match(prompt, /不得.*把接口要求的 `weekly_num` 替换成年内周次/);
+    assert.match(prompt, /只有 `weekly_num` 时.*只读周历接口/);
+    assert.match(prompt, /跨年周.*`start_date` \/ `end_date`/);
+    assert.match(prompt, /不得在跨年时直接对年内周次加减一/);
+    assert.match(prompt, /不得擅自用 ISO 周编号或累计编号取模换算/);
+    assert.match(prompt, /缺少年份或年内周次.*展示已确认的日期范围.*不得编造周次/);
+  });
+
   it("uses compact candidates before a bounded fallback OpenAPI scan", async () => {
     const prompts = `${await readPrompt("system.md")}\n${await readPrompt("document-policy.md")}`;
 
