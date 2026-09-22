@@ -66,7 +66,7 @@ test("publishes release images and transfers private deployment artifacts", asyn
   assert.match(workflow, /push: \$\{\{ github\.event_name != 'pull_request' && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/test'\) \}\}/)
   assert.match(workflow, /uses: actions\/upload-artifact@v4/)
   assert.equal(workflow.match(/uses: actions\/download-artifact@v4/g)?.length, 2)
-  assert.equal(workflow.match(/gzip -dc "\$archive" \| ssh .* docker load/g)?.length, 2)
+  assert.equal(workflow.match(/bash scripts\/load-deployment-images\.sh "\$RUNNER_TEMP\/deployment-images"/g)?.length, 2)
   assert.equal(workflow.match(/SKIP_IMAGE_PULL=1 bash -s/g)?.length, 2)
   assert.doesNotMatch(workflow, /GHCR_PULL_TOKEN/)
   assert.doesNotMatch(workflow, /docker login ghcr\.io/)

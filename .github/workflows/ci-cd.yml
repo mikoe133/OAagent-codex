@@ -259,17 +259,9 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
 
       - name: Load deployment images on server
+        timeout-minutes: 20
         shell: bash
-        run: |
-          target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          for service in agent web; do
-            archive="$RUNNER_TEMP/deployment-images/${service}.tar.gz"
-            if [[ ! -f "$archive" ]]; then
-              echo "Missing deployment image archive: $archive" >&2
-              exit 1
-            fi
-            gzip -dc "$archive" | ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" docker load
-          done
+        run: bash scripts/load-deployment-images.sh "$RUNNER_TEMP/deployment-images"
 
       - name: Resolve release images
         shell: bash
@@ -419,17 +411,9 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
 
       - name: Load deployment images on server
+        timeout-minutes: 20
         shell: bash
-        run: |
-          target="${DEPLOY_USER}@${DEPLOY_HOST}"
-          for service in agent web; do
-            archive="$RUNNER_TEMP/deployment-images/${service}.tar.gz"
-            if [[ ! -f "$archive" ]]; then
-              echo "Missing deployment image archive: $archive" >&2
-              exit 1
-            fi
-            gzip -dc "$archive" | ssh -i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT" "$target" docker load
-          done
+        run: bash scripts/load-deployment-images.sh "$RUNNER_TEMP/deployment-images"
 
       - name: Resolve release images
         shell: bash
