@@ -16,7 +16,8 @@ interface MessageListProps {
   isStreaming: boolean
   error: string | null
   retryLabel?: string
-  onRetry: () => void
+  retryHint?: string
+  onRetry?: () => void
   onFeedback: (messageId: string, feedback: Message["feedback"]) => void
   isLoaded: boolean // Added isLoaded prop to know when localStorage is loaded
   oaNavigationUrl: string
@@ -30,6 +31,7 @@ export function MessageList({
   error,
   onRetry,
   retryLabel,
+  retryHint,
   onFeedback,
   isLoaded,
   oaNavigationUrl,
@@ -221,17 +223,20 @@ export function MessageList({
             <Alert.Content className="min-w-0 flex-1">
               <Alert.Title className="text-red-800 theme-dark:text-red-300">Something went wrong</Alert.Title>
               <Alert.Description className="break-words text-red-600 theme-dark:text-red-400">{error}</Alert.Description>
+              {retryHint && <p className="mt-2 text-sm text-red-600 theme-dark:text-red-400">{retryHint}</p>}
             </Alert.Content>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onRetry}
-              className="text-red-600 transition-colors hover:bg-red-100 hover:text-red-700 theme-dark:text-red-400 theme-dark:hover:bg-red-950/70 theme-dark:hover:text-red-300"
-              aria-label={retryLabel || "Retry sending message"}
-            >
-              <RefreshCw className="mr-1 h-4 w-4" aria-hidden="true" />
-              {retryLabel || "Retry"}
-            </Button>
+            {onRetry && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onRetry}
+                className="text-red-600 transition-colors hover:bg-red-100 hover:text-red-700 theme-dark:text-red-400 theme-dark:hover:bg-red-950/70 theme-dark:hover:text-red-300"
+                aria-label={retryLabel || "Retry sending message"}
+              >
+                <RefreshCw className="mr-1 h-4 w-4" aria-hidden="true" />
+                {retryLabel || "Retry"}
+              </Button>
+            )}
           </Alert>
         )}
 

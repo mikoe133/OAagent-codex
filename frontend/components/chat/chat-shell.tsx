@@ -40,6 +40,7 @@ import {
 } from "./chat-stream"
 import { resolveLoadedSessionMessages } from "./session-messages"
 import { restoreStoredTrace } from "./stored-trace"
+import { resolveMessageRetry } from "./message-retry"
 import { prepareChatSession, SessionUnavailableError, SESSION_UNAVAILABLE_MESSAGE } from "./session-recovery"
 // import LineSidebar from "./siderbar"
 
@@ -1261,15 +1262,13 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     ],
   )
 
+  const messageRetry = resolveMessageRetry(messages)
   const retry = useCallback(() => {
-    if (messages.length === 0) return
-    const lastUserMessage = [...messages].reverse().find((m) => m.role === "user")
-    if (lastUserMessage) {
-      const originalRequestId = lastUserMessage.id.endsWith(":user") ? lastUserMessage.id.slice(0, -5) : null
-      if (!originalRequestId) {
-        setError("旧消息没有请求编号，请先核对 OA 结果，再手动发送新消息。")
-        return
-      }
+    const { target } = resolveMessageRetry(messages)
+    // Legacy messages have no idempotency key. Preserve the original error and
+    // history instead of treating a retry as a new request.
+    if (target) {
+      const { message: lastUserMessage, requestId: originalRequestId } = target
       const index = messages.findIndex((m) => m.id === lastUserMessage.id)
       const retryMessages = messages.slice(0, index)
       messagesRef.current = retryMessages
@@ -1596,8 +1595,9 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             messages={messages}
             isStreaming={isStreaming}
             error={error}
-            onRetry={error === SESSION_UNAVAILABLE_MESSAGE ? startNewSession : retry}
+            onRetry={error === SESSION_UNAVAILABLE_MESSAGE ? startNewSession : messageRetry.target ? retry : undefined}
             retryLabel={error === SESSION_UNAVAILABLE_MESSAGE ? "新建对话" : undefined}
+            retryHint={error === SESSION_UNAVAILABLE_MESSAGE ? undefined : messageRetry.hint}
             onFeedback={handleMessageFeedback}
             isLoaded={isLoaded}
             oaNavigationUrl={oaNavigationUrl}
