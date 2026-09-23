@@ -44,25 +44,7 @@ AI 对话在每轮路由前使用当前登录态请求 `GET /admin/permissions`�
 调用 `/admin` 等管理接口的写操作时，服务端先返回待确认的接口、目标、修改参数和专属确认文本（如 `确认操作 a1b2c3d4e5f6`），AI 展示后等待用户单独回复。确认仅对当前会话、登录态和完全相同的请求有效，10 分钟过期且只可使用一次；取消、发送其他请求、修改参数或切换登录态需要重新确认，模型传入 `confirmed=true` 不能绕过。每次管理接口调用也会重新校验权限。确认状态仅保存在进程内，服务重启后需重新确认。
 
 
-```bash
-# 创建 session。不传 sessionId 时服务自动生成。
-curl -s -X POST http://127.0.0.1:3000/v1/sessions \
-  -H 'content-type: application/json' \
-  -H "Authorization: Bearer <OA_USER_TOKEN>" \
-  -d '{"sessionId":"demo"}'
-
-# 往同一个 session 继续发消息。服务会 resume 对应 Codex thread。
-curl -s -X POST http://127.0.0.1:3000/v1/sessions/demo/messages \
-  -H 'content-type: application/json' \
-  -H "Authorization: Bearer <OA_USER_TOKEN>" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?"}'
-
-# 流式发送消息。中途可看到部分输出、进展和工具调用。
-curl -N -X POST http://127.0.0.1:3000/v1/sessions/demo/messages/stream \
-  -H 'content-type: application/json' \
-  -H "Authorization: Bearer <OA_USER_TOKEN>" \
-  -d '{"message":"我想查一下周报列表,应该调用哪个接口?"}'
-```
+对外会话使用 OA `recordId`，消息请求必须携带 `Idempotency-Key`。创建会话、普通消息和 SSE 示例统一维护在 [对外对话 API](docs/agent-public-api.md) 中。
 
 所有 `/v1/*` 请求都必须携带 OA token。token 缺失或被 OA 拒绝时返回 `401`;OA 验证服务不可用时返回 `503`,不会降级放行。
 
@@ -87,12 +69,18 @@ agent/                   后端 workspace
   scripts/               后端受控工具脚本
   src/                   后端 TypeScript 源码
 frontend/                前端 workspace
-docs/                    实现规划、服务 API 文档与验收记录
+docs/                    接口契约、部署与运维文档
 ```
 
-## 验收
+## 文档
 
-见 [docs/m4-acceptance-record.md](docs/m4-acceptance-record.md):接口定位与敏感删除确认两个样例均通过。
+完整分类见 [文档索引](docs/README.md)。常用入口：
+
+- [对外对话 API](docs/agent-public-api.md)：OA 会话、消息、请求幂等、取消与历史补存。
+- [双环境部署](docs/dual-environment-deployment.md)：测试与生产环境配置、发布和回滚。
+- [GitHub 项目进度 Worker](docs/project-progress-sync-operations.md)：项目同步、周报重写与故障排查。
+- [周报项目总结同步](docs/weekly-report-project-summary-sync-api.md)：周报事件、项目匹配与来源绑定。
+- [AI 对话 Trace 存储](docs/chat-trace-storage.md)：对话执行过程的保存位置与恢复。
 
 ## Docker Compose 部署
 

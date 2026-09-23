@@ -15,9 +15,7 @@
 | 数据格式 | JSON（UTF-8） |
 | 调用方鉴权 | 固定 Agent API Bearer Token |
 | 权限用户 | 每次请求的 `X-OA-User-Id` |
-| OpenAPI 3.1 | [`AGENT_API_OPENAPI.yaml`](./AGENT_API_OPENAPI.yaml) |
-| API Changelog | [`AGENT_API_CHANGELOG.md`](./AGENT_API_CHANGELOG.md) |
-| 第三方接入指南 | [`AGENT_API_MCP_GUIDE.md`](./AGENT_API_MCP_GUIDE.md) |
+| OpenAPI 3.1 | [知识库接口契约](./knowledgebaseapi.yaml) |
 
 所有响应均包含 `X-Request-Id` 响应头和同值的 `requestId` JSON 字段。排障时请提供该值。
 
@@ -448,7 +446,7 @@ Content-Type: application/json
 
 先调用 `GET /capabilities` 获取 `contentSchemaVersion`、节点、marks、自定义节点示例、正文大小限制和 `draftPageMetadata`。首版 schema 为 `1`，正文根节点必须为 `doc`；未知节点、未知属性、临时上传节点、外链资源、跨页面附件和不可见页面提及会被拒绝。
 
-`/capabilities` 的正式字段名为 `nodes`、`marks`、`maxBytes`；`draftPageMetadata` 是包含 `fields` 和 `appliedAtomically` 的对象；`nodes`/`marks` 的元素为纯字符串。响应 `data` 是面向演进的能力发现对象，后端会持续新增字段，调用方必须忽略未知字段，不得使用拒绝额外字段的严格反序列化。完整 200 响应 schema 与 example 见 [`AGENT_API_OPENAPI.yaml`](./AGENT_API_OPENAPI.yaml) 的 `CapabilitiesResponse`，官方脱敏 fixture 见 [`fixtures/agent-api/capabilities.success.json`](./fixtures/agent-api/capabilities.success.json)。
+`/capabilities` 的正式字段名为 `nodes`、`marks`、`maxBytes`；`draftPageMetadata` 是包含 `fields` 和 `appliedAtomically` 的对象；`nodes`/`marks` 的元素为纯字符串。响应 `data` 是面向演进的能力发现对象，后端会持续新增字段，调用方必须忽略未知字段，不得使用拒绝额外字段的严格反序列化。完整 200 响应 schema 与 example 见 [知识库接口契约](./knowledgebaseapi.yaml) 的 `CapabilitiesResponse`。
 
 ~~~http
 POST /pages/PAGE_ID/content-drafts

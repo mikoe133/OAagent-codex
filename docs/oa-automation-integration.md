@@ -4,9 +4,9 @@
 
 ## 职责边界
 
-- OA 保存任务定义、标签、Cron、时区、模型快照、运行状态和审计记录。
-- OAagent 提供 `/internal/v1/models*`，并执行 `github_project_progress_sync` Worker。
-- OAagent 每分钟向 OA claim 一次；工作日 20:00 是否产生运行由 OA 调度器决定。
+- OAagent 的 Node 自动任务服务保存任务定义、标签、Cron、时区、模型快照、运行状态和审计记录；OA 业务服务保存项目和周报等业务数据。
+- OAagent 提供 `/internal/v1/models*`，Worker 支持 `github_project_progress_sync` 和 `weekly_report_project_summary_sync`。
+- Worker 轮询 Node 自动任务服务领取运行；定时运行由 maintenance 按 Cron 和时区创建，周报监控运行由事件触发。路由和存储配置见 [自动任务数据库与迁移](automation-node-migration.md)。
 - OAagent 保存模型供应商密钥；OA 不接收模型 API Key。
 
 ## 认证

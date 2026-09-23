@@ -120,6 +120,22 @@ Content-Type: application/json
 事件必须在 OA 周报事务提交成功后投递。建议使用 Outbox，避免周报已保存但事件未送达。
 
 
-### 自动生成周报的来源标记
+## 项目总结的来源绑定
+
+- 目标接口为 `POST /internal/project-sync/github-commit-summaries` 和 `PATCH /internal/project-sync/github-commit-summaries/{summary_id}`。
+- `summary` 只保存当前项目的更新点；`ai_note` 保存周报期间和项目相关来源片段。
+- 以 `source_report_id + project_id + summary_date` 查询 `automation_weekly_report_summary_bindings`。不存在绑定时创建独立总结，存在时只更新绑定的 `commit_summary_id`，并携带目标版本。
+- 同一周报的新版本及重试复用绑定；不同周报即使项目和日期相同，也各自创建独立记录。不得覆盖 GitHub 日总结、其他人的周报总结或人工总结。
+- OA 上游必须允许同一项目、同一日期存在多条来源独立记录。若仍有该组合的唯一约束，应先升级上游。
+
+## 执行与排障
+
+任务类型为 `weekly_report_project_summary_sync`，使用 `schedule_type=event`。Node 自动任务服务负责事件去重、运行快照和租约，Worker 负责读取周报、匹配项目与写入结果。事件中的完整正文可作为输入快照；缺少正文时才需要按周报 ID 回读 OA。
+
+周报正文作为不可信数据输入，模型只能选择项目目录中的 ID。匹配不确定的内容进入待复核记录，不写入猜测的项目；相关片段保存在 `automation_weekly_report_pending_items`。来源事件保存在 `automation_trigger_events`，运行结果与 AI 调用分别保存在 `automation_job_run_projects` 和 `automation_ai_interactions`。
+
+运行 Trace 的主要阶段为 `load_weekly_report`、`load_projects`、`weekly_report_agent`、`split_weekly_report`、`write_project_summaries`、`write_project_summary:{project_id}`、`upload_run_audit` 和 `finalize_run`。结合项目级节点和 warnings 定位读取、匹配、版本冲突或写入失败。接口与字段见 [运行 Trace API](automation_run_trace_api.md)。
+
+## 自动生成周报的来源标记
 
 事件 `data` 可增加 `origin: "user" | "project_progress_sync"`。OA 整篇重写路径不发送反向事件；若其他投递方发送此类事件，应由服务端设置 `project_progress_sync`。OAagent 会保存接收记录并返回 ignored，不创建周报反向归纳任务，避免项目动态与周报互相生成的回环。用户手动编辑应设为 user 或兼容地省略。详见 [整篇重写接口契约](weekly-report-rewrite-api.md)。

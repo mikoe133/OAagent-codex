@@ -1,6 +1,6 @@
 # GitHub 项目进度 Worker
 
-OA 是调度事实来源：OA 按任务配置在工作日 20:00 创建运行，OAagent Worker 常驻轮询并 claim。完整接口字段见 [OAagent 集成 API](oaagent_integration_api.md)。
+Node 自动任务服务是调度事实来源，按任务的 Cron 和时区创建运行；默认 GitHub 任务在工作日 20:00（Asia/Shanghai）执行。OAagent Worker 常驻轮询并 claim，项目和周报业务数据仍由 OA 提供。完整接口字段见 [OAagent 集成 API](oaagent_integration_api.md)。
 
 ## 执行规则
 
@@ -60,9 +60,9 @@ GitHub App 私钥使用只读文件注入，不把 PEM 正文放进 `.env`。Wor
 当前周报中的手写与旧自动内容均作为底稿，旧追加标记只从模型输入中去除，标记两侧正文保留。重复执行仍可能调用模型，提示保持已包含当天进展的正文；新正文与当前相同则不写入。旧的追加模式和风格查询模式保留兼容。前端显示整篇重写结果，AI 审计使用 `purpose=weekly_report_rewrite`。
 
 
-启用此流程需先部署 OAbackend 的新只读接口，再更新 OAagent 服务端、Worker 和前端。风格来源字段保存在既有 JSON 审计列中，不新增数据库列。缺少该接口的 OA 版本会导致风格读取失败并跳过本次周报追加。
+GitHub 同步任务的运行详情在项目总结下展示“周报同步内容”：包括 OA 返回的周次、周报编号、提交作者姓名及 GitHub 账号、同步模式和正文。人数按 OA 用户去重，条数按同步记录统计；多人同步中途失败仍保留之前成功的明细。作者姓名来自 Commit，周报归属由 OA 返回的 `owner_id` 确认。
 
-GitHub 同步任务的运行详情在项目总结下展示“周报同步内容”：包括 OA 返回的周次、周报编号、提交作者姓名及 GitHub 账号、同步的项目内容，并区分本次追加与幂等命中（周报中已存在）。人数按 OA 用户去重，条数按同步记录统计；多人同步中途失败仍保留之前成功的明细。这里展示的是该项目同步到周报的内容片段，不是整份个人周报；作者姓名来自 Commit，周报归属由 OA 返回的 `owner_id` 确认。
+整篇重写按作者和日期合并各项目的当天总结，只生成并保存一份周报，再将同一份结果记录到所有相关项目的 `weekly_report_syncs`。因此 `mode=replace` 的 `content` 是完整周报，多条项目记录不代表多次独立改写。周报 AI 审计挂在本次合并的首个项目下，排查时按运行 ID、`purpose=weekly_report_rewrite` 和 `report_id` 查找；`summary_sources` 列出本次参与的项目，`expected_content_hash` 标识改写前正文。
 
 这些明细通过项目运行审计的 `weekly_report_syncs` 字段持久化。部署时需执行 `008_automation_project_weekly_report_syncs.up.sql`（或启用服务启动自动迁移），并更新服务端、Worker 和前端。旧运行没有保存明细，迁移后为空列表，页面明确提示未记录；不会推测或自动补写历史明细。后续任务运行使用已有总结同步时也会记录明细。
 
@@ -151,14 +151,14 @@ sudo systemctl disable --now oa-agent-project-progress.timer
 
 `weekly_report_style` 步骤先调用 `GET /internal/project-sync/weekly-reports/style-context`，查询参数为 `summary_date` 和 `github_id`，没有 JSON 请求体。该查询成功后才会生成并追加周报。鉴权沿用 Worker 配置的 OA 服务 token、header 和 prefix。
 
-例如 `summary_date=2026-09-14&github_id=mikoe133` 返回 `HTTP 404:weekly_report_week_not_found` 时，应在 OA 服务端检查该错误码的返回分支、覆盖总结日期的业务周配置、日期边界，以及历史周查询逻辑。多位作者同一天失败时，优先检查公共的业务周配置。不能仅凭错误码判定缺的是目标周还是历史周；缺少参考正文的正常响应应使用 `previous_report: null`，OAagent 会回退到原项目总结。
+旧风格查询返回 `HTTP 404:weekly_report_week_not_found` 时，应在 OA 服务端检查该错误码的返回分支、覆盖总结日期的业务周配置、日期边界，以及历史周查询逻辑。多位作者同一天失败时，优先检查公共的业务周配置。不能仅凭错误码判定缺的是目标周还是历史周；缺少参考正文的正常响应应使用 `previous_report: null`，OAagent 会回退到原项目总结。当前 `mode=rewrite` 路径以当前周报为底稿，不依赖历史风格正文。
 
 新运行的 `automation_run_trace_events.metadata_sanitized` 记录 `request_method`、`request_path`、`request_query`、`request_body`；失败时还记录 `failure_stage`、`error_message`，OA HTTP 错误额外记录 `http_status`、`error_code`。不记录鉴权头或历史周报正文。历史事件不会自动补齐这些字段。
 
 ```sql
 SELECT event_key, message, metadata_sanitized
 FROM automation_run_trace_events
-WHERE run_id = '25e4b1ff-496b-490b-888e-9fd81b9d0f08'
+WHERE run_id = '<run_id>'
   AND phase = 'weekly_report_style'
 ORDER BY id;
 ```

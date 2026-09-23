@@ -93,10 +93,3 @@ npm run test:deploy
 ```
 
 `test:automation:integration` 会串行执行两组真实 MySQL 测试：并发 claim/maintenance 数据状态机，以及前端 BFF → Node 管理接口 → worker 内部接口的完整 HTTP 工作流。测试库地址必须以 `_automation_test` 结尾。
-
-## Legacy OA Cleanup
-
-旧 OA 仓库仍需在正式切流前处理：
-
-- 将 `scripts/sql/20260805_007_add_automation_no_commits_outcome.up.sql` 纳入正式版本。
-- 明确当前被标记删除的 automation down SQL 是否保留；如果旧 OA 迁移已经执行过，生产回滚建议使用新的 forward migration，而不是编辑已部署迁移。
