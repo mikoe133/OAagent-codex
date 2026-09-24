@@ -4,6 +4,7 @@ import { validateHeaderName } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
+import { parseOaReadConfig, type OaReadConfig } from "./oaReadConfig.js";
 import { parseAutomationConfig, type AutomationConfig } from "./automationConfig.js";
 import {
   getDefaultModel,
@@ -20,6 +21,8 @@ const DEFAULT_KNOWLEDGE_BASE_API_BASE_URL =
   "https://oa-kb.rwkvos.com/api/agent/v1";
 
 export type AppConfig = {
+  /** OA 业务查询专用只读连接；与自动任务写库完全分离。 */
+  oaRead?: OaReadConfig | null;
   /** 后端包根目录(openapi/、prompts/ 所在目录)。 */
   projectRoot: string;
   /** 仓库根目录(frontend/、agent/ 所在目录)。 */
@@ -173,6 +176,7 @@ export function loadConfig(): AppConfig {
       : process.env.OA_USER_TOKEN_PREFIX.trim();
 
   return {
+    oaRead: parseOaReadConfig(process.env, repoRoot),
     projectRoot,
     repoRoot,
     openapiPath,

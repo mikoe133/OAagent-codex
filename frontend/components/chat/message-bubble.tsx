@@ -4,6 +4,7 @@ import * as AccordionPrimitive from "@radix-ui/react-accordion"
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import {
+  BadgeInfo,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -211,6 +212,22 @@ function AssistantActions({
       {showActions && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
           <span className="mx-1 h-3 w-px bg-stone-200 theme-dark:bg-zinc-700" aria-hidden="true" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={message.model ? `回复模型：${message.model}` : "回复模型：未记录"}
+                className="h-7 w-7 rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700 theme-dark:text-zinc-500 theme-dark:hover:bg-zinc-800 theme-dark:hover:text-zinc-200"
+              >
+                <BadgeInfo className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              {message.model ? `回复模型：${message.model}` : "此回复未记录模型"}
+            </TooltipContent>
+          </Tooltip>
           <MessageCopyButton content={message.content} subject="response" />
           <Tooltip>
             <TooltipTrigger asChild>

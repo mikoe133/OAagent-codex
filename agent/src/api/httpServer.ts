@@ -28,6 +28,9 @@ import {
 
 import type { ChatScheduler } from "../chat/chatScheduler.js";
 import { PublicChatApi } from "../chat/publicChatApi.js";
+import { getOaReadService, readToolToken } from "../infrastructure/oa-read/readService.js";
+import { readOaAdminPermission } from "../infrastructure/oa/oaChatAccess.js";
+import { getActiveOaQueryPolicy } from "../infrastructure/oa/oaQueryPolicy.js";
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -126,6 +129,36 @@ async function routeRequest(
 
   if (method === "GET" && url.pathname === "/health") {
     writeJson(response, 200, { status: "ok" });
+    return;
+  }
+
+  if (method === "POST" && url.pathname === "/__internal/query-oa-database") {
+    if (!isLoopbackRequest(request)) { writeJson(response, 403, { error: "forbidden" }); return; }
+    const body = await readJsonBody(request);
+    const sessionId = stringField(body, "sessionId");
+    if (!sessionId || !isValidSessionId(sessionId) || request.headers.authorization !== `Bearer ${readToolToken(config.oaApiToolToken, sessionId)}`) {
+      writeJson(response, 401, { error: "unauthorized" }); return;
+    }
+    const token = sessionStore.getOaToken(sessionId);
+    if (!token || !getActiveOaQueryPolicy(sessionId)) { writeJson(response, 401, { error: "inactive_session" }); return; }
+    // Reuse the OA authentication boundary, but never route business reads back to OA APIs.
+    const verified = await validateOaToken(config, token);
+    if (verified.status !== "valid" || !verified.oaUserId) { writeJson(response, 401, { error: "unauthorized" }); return; }
+    if (!config.oaRead) { writeJson(response, 503, { error: "readonly_database_not_configured" }); return; }
+    const principal = { userId: verified.oaUserId, isAdmin: await readOaAdminPermission(config, token) };
+    writeJson(response, 200, await getOaReadService(config.oaRead).call(body, principal)); return;
+  }
+
+  // Optional manual refresh for operators; normal synchronization runs in the background.
+  if (method === "POST" && url.pathname === "/internal/v1/oa-read/metadata/sync") {
+    if (!config.automationApiToken || !hasAutomationAuthorization(request, config.automationApiToken)) {
+      writeJson(response, 401, { error: "unauthorized" }); return;
+    }
+    if (!config.oaRead) { writeJson(response, 503, { error: "readonly_database_not_configured" }); return; }
+    try {
+      const report = await getOaReadService(config.oaRead).sync("manual");
+      writeJson(response, report.status === "rejected" ? 409 : 200, report);
+    } catch { writeJson(response, 503, { error: "metadata_sync_failed" }); }
     return;
   }
 

@@ -12,7 +12,7 @@ export function chatLimits(env: NodeJS.ProcessEnv = process.env): ChatLimits {
     return value;
   };
   return {
-    concurrency: number('CHAT_MAX_CONCURRENCY', 2), userConcurrency: number('CHAT_USER_CONCURRENCY', 1),
+    concurrency: number('CHAT_MAX_CONCURRENCY', 3), userConcurrency: number('CHAT_USER_CONCURRENCY', 3),
     queue: number('CHAT_MAX_QUEUE', 20), userQueue: number('CHAT_USER_QUEUE', 5),
     perMinute: number('CHAT_USER_REQUESTS_PER_MINUTE', 20),
     queueMs: number('CHAT_QUEUE_TIMEOUT_MS', 120000), executionMs: number('CHAT_EXECUTION_TIMEOUT_MS', 600000),

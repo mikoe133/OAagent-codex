@@ -1,5 +1,6 @@
 import type { ThreadItem } from "@openai/codex-sdk";
 import path from "node:path";
+import { databaseReadGuidance } from "../infrastructure/oa-read/routing.js";
 import type { AppConfig } from "../config/config.js";
 import type { OpenApiOperationIndexEntry } from "../infrastructure/oa/openApiIndex.js";
 import {
@@ -88,7 +89,7 @@ export function buildRuntimeContext(
     ? ` --sessionId ${runtime.sessionId}`
     : "";
   const oaGuidance = usesOa
-    ? [
+    ? config.oaRead ? databaseReadGuidance(commandSessionArg) : [
         "- OA 工具对大响应采用渐进式读取:首次结果若 data.mode=inspect,其中 structure 只用于识别相关 JSON 路径和字段,样例值不能代表完整数组内容。",
         "- inspect 里暴露的 fields/itemFields 只是检索提示;遇到分组或嵌套数组时,优先把 responsePath 指到具体子数组,且 responsePath 支持中文等非 ASCII 字段名。",
         "- 收到 responseId 后不要重复调用原 OA operation;使用同一 responseId 和 responsePath 执行 find、filter、count、group_count 或 read。本地分析扫描已缓存的完整响应,不产生新的 OA 请求。",
@@ -164,7 +165,7 @@ export function buildRuntimeContext(
     usesOa ? `- OA 完整接口文档: ${openapiPath}` : null,
     candidateContext,
     oaApiBudgetContext,
-    "- 必须优先从当前路由接口域的候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,只允许在同一接口域候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
+    config.oaRead ? "- OA 查询遵循下方数据库模式指导；OpenAPI 候选仅用于 OA 写操作及其他接口域。" : "- 必须优先从当前路由接口域的候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,只允许在同一接口域候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
     `- 候选索引包含主要请求字段和响应字段。候选信息不足,或受限检索发现候选外 operation 时,才读取完整 schema,并精确限定到该 operation;具体读取次数服从本 turn 的动态查询模式。不得因候选接口未命中就直接断言接口不存在。`,
     oaGuidance,
     knowledgeBaseGuidance,

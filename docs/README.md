@@ -13,6 +13,7 @@
 | [认证 API](auth_api.md) | OA 登录与认证契约 |
 | [Copilot API](copilot_api.md) | OA 会话历史存取契约 |
 | [知识库 Agent API](../agent/knowledgebaseapi/AGENT_API.md) | 知识库读取、编辑和权限规则 |
+| [OA 只读数据库与元数据](oa-read-database.md) | 数据库查询路由、访问规则、表字段变化自动检测与版本发布 |
 | [生产对话路由](public-chat-routing.md) | Nginx 路径、上游和接入验证 |
 
 ## 自动任务与周报

@@ -4,6 +4,7 @@ import {
   type Thread,
   type ThreadOptions,
 } from "@openai/codex-sdk";
+import { readToolToken } from "../oa-read/readService.js";
 import type { AppConfig } from "../../config/config.js";
 import {
   normalizeModelReasoningEffort,
@@ -35,6 +36,10 @@ function buildChildEnv(
   env.CALL_KNOWLEDGE_BASE_API_URL = `http://127.0.0.1:${config.serverPort}/__internal/call-knowledge-base-api`;
   env.CALL_KNOWLEDGE_BASE_API_TOKEN = config.oaApiToolToken;
   if (toolSessionId) {
+    if (config.oaRead) {
+      env.CALL_OA_READ_URL = `http://127.0.0.1:${config.serverPort}/__internal/query-oa-database`;
+      env.CALL_OA_READ_TOKEN = readToolToken(config.oaApiToolToken, toolSessionId);
+    }
     env.CALL_OA_API_SESSION_ID = toolSessionId;
     env.CALL_KNOWLEDGE_BASE_API_SESSION_ID = toolSessionId;
   }
@@ -84,7 +89,7 @@ export function createThreadOptions(
   const knowledgeBaseToolEnabled = Boolean(
     config.knowledgeBaseApiBaseUrl && config.knowledgeBaseApiToken,
   );
-  const controlledApiToolEnabled = oaToolEnabled || knowledgeBaseToolEnabled;
+  const controlledApiToolEnabled = oaToolEnabled || knowledgeBaseToolEnabled || Boolean(config.oaRead);
   const sandboxMode =
     config.codexSandboxMode ??
     (controlledApiToolEnabled ? "workspace-write" : "read-only");

@@ -1,0 +1,2394 @@
+{
+  "format": 1,
+  "description": "OA 业务语义目录。结构由 MySQL information_schema 自动同步；字段解释在此维护。访问策略由服务端按物理表统一执行：全员禁读优先，其次管理员专用，其余表已登录成员可跨成员读取。",
+  "rules": [
+    "只读数据源为 OA 业务库；全部字段、表名及关系以已发布版本为准。",
+    "日期查询按 Asia/Shanghai 使用半开区间 [开始日期,下一期间开始日期)。",
+    "user.employee_type 仅代表当前身份；项目成员关系同样为当前关系。缺少历史快照时不能声称恢复了历史身份。",
+    "项目最新 updated_at 和当前 status 不代表历史月份进展；期间证据来自项目摘要、议题动作或周报。",
+    "空值与未知员工类型不能自动归为非实习。",
+    "项目进展摘要不等于成员个人贡献；员工身份与项目成员关系采用当前口径。"
+  ],
+  "entities": [
+    {
+      "name": "ai_reports",
+      "table": "ai_reports",
+      "description": "ai_reports 业务记录（仅管理员）。",
+      "access": "admin",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "start_weekly_num": {
+          "description": "数据库注释：起始周编号；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "end_weekly_num": {
+          "description": "数据库注释：结束周编号；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "weekly_ids_json": {
+          "description": "数据库注释：实际参与总结的双周编号；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "type": {
+          "description": "数据库注释：AI report type；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "payload": {
+          "description": "数据库注释：Masked original async task payload；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "participants": {
+          "description": "数据库注释：Users involved in this AI report；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "source_content": {
+          "description": "数据库注释：Prompt used for AI report generation；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "content": {
+          "description": "数据库注释：AI generated report content；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "ann",
+      "table": "ann",
+      "description": "公告",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "title": {
+          "description": "数据库注释：通知或公告的标题；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "content": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "from_department": {
+          "description": "数据库注释：公告署名；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "type": {
+          "description": "数据库注释：公告类型；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "priority": {
+          "description": "数据库注释：优先级；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "pub_time": {
+          "description": "数据库注释：通知或公告的发布日期；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "deadline_time": {
+          "description": "数据库注释：截止时间；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "notif_scope": {
+          "description": "数据库注释：通知人群范围 1:所有人，包含新入职人员 2:当前入职人员 3:指定人群；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_close": {
+          "description": "数据库注释：是否关闭；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_pined": {
+          "description": "数据库注释：是否置顶；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "need_ensure": {
+          "description": "数据库注释：是否需要用户点击已阅；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "ann_user",
+      "table": "ann_user",
+      "description": "ann_user 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "ann_id": {
+          "description": "数据库注释：公告id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_ensure": {
+          "description": "数据库注释：是否点击已阅；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_read": {
+          "description": "数据库注释：是否阅读；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "ann_id",
+          "entity": "ann",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "api_hub_project_apis",
+      "table": "api_hub_project_apis",
+      "description": "api_hub_project_apis 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "project_id": {
+          "description": "数据库注释：API hub project ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "url": {
+          "description": "数据库注释：API URL；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "method": {
+          "description": "数据库注释：HTTP method；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "request_example": {
+          "description": "数据库注释：Request example；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "response_example": {
+          "description": "数据库注释：Response example；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "status": {
+          "description": "数据库注释：API status: online, developing, offline；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "project_id",
+          "entity": "projects",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "api_hub_projects",
+      "table": "api_hub_projects",
+      "description": "api_hub_projects 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "数据库注释：API project name；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "description": {
+          "description": "数据库注释：API project description；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "creator_user_id": {
+          "description": "数据库注释：Selected OA project creator user ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "base_url": {
+          "description": "数据库注释：API base URL；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "assets",
+      "table": "assets",
+      "description": "资产台账（管理员）",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "assets_id": {
+          "description": "assets_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "category": {
+          "description": "category；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "name": {
+          "description": "name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "brand": {
+          "description": "brand；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "product_model_name": {
+          "description": "product_model_name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "sn_code": {
+          "description": "数据库注释：SN码；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "image_url": {
+          "description": "image_url；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "has_power_cable": {
+          "description": "数据库注释：是否有电源线；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "has_label": {
+          "description": "数据库注释：是否有标签；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "purchase_time": {
+          "description": "purchase_time；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "price": {
+          "description": "price；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "owner": {
+          "description": "owner；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "location": {
+          "description": "location；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "current_user_name": {
+          "description": "current_user_name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "historical_users": {
+          "description": "historical_users；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "statistical_remarks": {
+          "description": "statistical_remarks；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "memo": {
+          "description": "memo；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "old_id": {
+          "description": "old_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "auth_group",
+      "table": "auth_group",
+      "description": "auth_group 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "group_type": {
+          "description": "group_type；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "auth_permission",
+      "table": "auth_permission",
+      "description": "auth_permission 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "code": {
+          "description": "code；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "name": {
+          "description": "name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "code_type": {
+          "description": "code_type；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "auth_permission_group",
+      "table": "auth_permission_group",
+      "description": "auth_permission_group 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "group_id": {
+          "description": "group_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "permission_id": {
+          "description": "permission_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "auth_user_group",
+      "table": "auth_user_group",
+      "description": "auth_user_group 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "group_id": {
+          "description": "group_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "chat_messages",
+      "table": "chat_messages",
+      "description": "聊天记录（管理员视图；聊天室成员权限待映射）",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "username": {
+          "description": "数据库注释：用户名称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "content": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "room_id": {
+          "description": "room_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "reply_to": {
+          "description": "reply_to；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "msg_type": {
+          "description": "msg_type；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "img_src": {
+          "description": "数据库注释：图片链接；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "re_edit_time": {
+          "description": "数据库注释：重新编辑的时间；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "reactions": {
+          "description": "数据库注释：反应；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_deleted": {
+          "description": "数据库注释：是否删除；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "old_chat_room_id": {
+          "description": "old_chat_room_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "room_id",
+          "entity": "chat_rooms",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "chat_room_users",
+      "table": "chat_room_users",
+      "description": "chat_room_users 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "chat_room_id": {
+          "description": "数据库注释：群id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "alias": {
+          "description": "数据库注释：别名；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_silent": {
+          "description": "数据库注释：免打扰；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_top": {
+          "description": "数据库注释：是否置顶；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_charman": {
+          "description": "数据库注释：是否是主席；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "chat_room_id",
+          "entity": "chat_rooms",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "chat_room_users_categories",
+      "table": "chat_room_users_categories",
+      "description": "chat_room_users_categories 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "rooms_sort": {
+          "description": "数据库注释：聊天室排行；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "chat_rooms",
+      "table": "chat_rooms",
+      "description": "chat_rooms 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "数据库注释：群名称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "数据库注释：创建人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "notes": {
+          "description": "数据库注释：群公告；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "chairman": {
+          "description": "数据库注释：主席；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "rank": {
+          "description": "rank；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "old_id": {
+          "description": "数据库注释：老id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "dataset",
+      "table": "dataset",
+      "description": "dataset 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "is_taken": {
+          "description": "数据库注释：是否被取走；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "raw_content": {
+          "description": "数据库注释：原始内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "content": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "dataset_category",
+      "table": "dataset_category",
+      "description": "dataset_category 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "name": {
+          "description": "数据库注释：类别；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "dataset_category_relations",
+      "table": "dataset_category_relations",
+      "description": "dataset_category_relations 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "dataset_id": {
+          "description": "数据库注释：数据id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "catagory_id": {
+          "description": "数据库注释：分类id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "department",
+      "table": "department",
+      "description": "部门目录",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "数据库注释：部门名称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "desktop_version",
+      "table": "desktop_version",
+      "description": "desktop_version 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "version": {
+          "description": "数据库注释：阅读人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "update_type": {
+          "description": "数据库注释：1：不更新 2：提醒 3：强提醒 4：强制更新；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "notes": {
+          "description": "notes；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "pub_date": {
+          "description": "pub_date；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "platforms": {
+          "description": "platforms；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "docs",
+      "table": "docs",
+      "description": "docs 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "doc": {
+          "description": "doc；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "title": {
+          "description": "title；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "doc_type": {
+          "description": "数据库注释：docs、google sheet、build in sheet；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "public_edit": {
+          "description": "public_edit；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "deleted": {
+          "description": "deleted；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "folder_id": {
+          "description": "folder_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "table_data": {
+          "description": "table_data；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "is_table": {
+          "description": "is_table；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "editing_by": {
+          "description": "editing_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "editing_timestamp": {
+          "description": "editing_timestamp；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "google_sheet_url": {
+          "description": "google_sheet_url；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "docs_folder",
+      "table": "docs_folder",
+      "description": "docs_folder 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "parent_id": {
+          "description": "parent_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "file_storage",
+      "table": "file_storage",
+      "description": "file_storage 业务记录（仅管理员）。",
+      "access": "admin",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "original_filename": {
+          "description": "数据库注释：原始文件名；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "stored_filename": {
+          "description": "数据库注释：存储文件名；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "file_path": {
+          "description": "数据库注释：文件路径；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "file_size": {
+          "description": "数据库注释：文件大小(字节)；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "file_extension": {
+          "description": "数据库注释：文件扩展名；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "mime_type": {
+          "description": "数据库注释：MIME类型；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "category": {
+          "description": "数据库注释：文件分类；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "file_hash": {
+          "description": "数据库注释：文件哈希值；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "description": {
+          "description": "数据库注释：文件描述；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_deleted": {
+          "description": "数据库注释：是否删除；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "gpu_monitor_devices",
+      "table": "gpu_monitor_devices",
+      "description": "gpu_monitor_devices 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "gpu_uuid": {
+          "description": "gpu_uuid；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "server": {
+          "description": "server；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "server_name": {
+          "description": "server_name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "model": {
+          "description": "model；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "temperature": {
+          "description": "temperature；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "power": {
+          "description": "power；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "mem_used": {
+          "description": "mem_used；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "mem_total": {
+          "description": "mem_total；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "processes": {
+          "description": "processes；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "idle_time": {
+          "description": "idle_time；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "refresh_time": {
+          "description": "refresh_time；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "sort": {
+          "description": "sort；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "disk_usage": {
+          "description": "disk_usage；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "batch_timestamp": {
+          "description": "batch_timestamp；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "alert_level": {
+          "description": "alert_level；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "last_alert_time": {
+          "description": "last_alert_time；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "issue_assignees",
+      "table": "issue_assignees",
+      "description": "议题负责人关联",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "issue_id": {
+          "description": "数据库注释：任务ID，对应 Untitled.id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "issue_id",
+          "entity": "project_issues",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "meeting",
+      "table": "meeting",
+      "description": "meeting 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "week_num": {
+          "description": "数据库注释：第几周；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "week_range": {
+          "description": "数据库注释：描述；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "md": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "pending_event",
+      "table": "pending_event",
+      "description": "pending_event 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "event_type": {
+          "description": "数据库注释：待处理事件类型；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "status": {
+          "description": "数据库注释：事件状态：pending/handled；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "handled_by": {
+          "description": "数据库注释：处理人用户ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "handled_at": {
+          "description": "数据库注释：处理时间；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "project_actions",
+      "table": "project_actions",
+      "description": "议题动作历史（payload 未定义结构，不能猜测）",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "issue_id": {
+          "description": "issue_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_by": {
+          "description": "created_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "type": {
+          "description": "数据库注释：类别；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "payload": {
+          "description": "数据库注释：载体；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "issue_id",
+          "entity": "project_issues",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "project_comments",
+      "table": "project_comments",
+      "description": "议题评论",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "issue_id": {
+          "description": "issue_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_by": {
+          "description": "created_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "content": {
+          "description": "数据库注释：评论；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "reactions": {
+          "description": "reactions；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "issue_id",
+          "entity": "project_issues",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "project_github_commit_summaries",
+      "table": "project_github_commit_summaries",
+      "description": "按日期保存的项目进展摘要，来源可能为 Commit 或周报",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "project_id": {
+          "description": "数据库注释：项目 ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "summary_date": {
+          "description": "摘要归属日期（北京时间）；周报生成的摘要可能以周结束日归档，需结合 ai_note 判断覆盖范围。"
+        },
+        "summary": {
+          "description": "项目进展文字摘要；不能代表每位成员个人贡献。"
+        },
+        "ai_confidence": {
+          "description": "数据库注释：AI 置信度，0-100；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "ai_note": {
+          "description": "数据库注释：AI 总结留言备注；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "project_id",
+          "entity": "projects",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "project_issues",
+      "table": "project_issues",
+      "description": "项目议题任务",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "project_id": {
+          "description": "project_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "milestone_id": {
+          "description": "数据库注释：关联里程碑事件；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "created_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "title": {
+          "description": "数据库注释：标题；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "assignees": {
+          "description": "数据库注释：参与人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "labels": {
+          "description": "数据库注释：标签；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "priority": {
+          "description": "数据库注释：优先度 高中低；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "status": {
+          "description": "数据库注释：是否关闭；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "project_id",
+          "entity": "projects",
+          "targetColumn": "id"
+        },
+        {
+          "column": "milestone_id",
+          "entity": "project_milestones",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "project_milestones",
+      "table": "project_milestones",
+      "description": "项目里程碑",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "project_id": {
+          "description": "project_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "title": {
+          "description": "title；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "content": {
+          "description": "content；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "deadline": {
+          "description": "deadline；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "is_accomplish": {
+          "description": "is_accomplish；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_by": {
+          "description": "created_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "project_id",
+          "entity": "projects",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "project_participants",
+      "table": "project_participants",
+      "description": "项目与成员关联（当前关系）",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "project_id": {
+          "description": "数据库注释：原项目记录ID，对应 Untitled.id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "project_id",
+          "entity": "projects",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "projects",
+      "table": "projects",
+      "description": "项目基本信息及当前状态",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "created_by": {
+          "description": "created_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "people": {
+          "description": "旧版成员字段；优先使用 project_participants 关联，不解析未经定义的字符串格式。"
+        },
+        "project_name": {
+          "description": "项目名称；覆盖原数据库误写的“生日”注释。"
+        },
+        "describe": {
+          "description": "数据库注释：描述；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "markdown": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "status": {
+          "description": "当前项目状态，不能据此排除历史月份有活动的已归档项目。"
+        },
+        "github_urls": {
+          "description": "数据库注释：GitHub 仓库地址列表；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "softforge_id": {
+          "description": "数据库注释：软件id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "deleted": {
+          "description": "数据库注释：是否删除；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "public_projects",
+      "table": "public_projects",
+      "description": "public_projects 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "content": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "public_tasks",
+      "table": "public_tasks",
+      "description": "public_tasks 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "project_id": {
+          "description": "project_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "status": {
+          "description": "数据库注释：状态：0 未完成, 1 已完成；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "数据库注释：头像连接；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "toke_by": {
+          "description": "数据库注释：接单；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "task_detail": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "project_id",
+          "entity": "projects",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "public_tasks_user_work",
+      "table": "public_tasks_user_work",
+      "description": "public_tasks_user_work 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "task_id": {
+          "description": "task_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "status": {
+          "description": "数据库注释：0:未完成， 1:已完成；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "qa_answers",
+      "table": "qa_answers",
+      "description": "qa_answers 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "question_id": {
+          "description": "数据库注释：问题id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "content": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "reactions": {
+          "description": "数据库注释：反应；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_deleted": {
+          "description": "数据库注释：是否删除；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "question_id",
+          "entity": "qa_questions",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "qa_question_tags",
+      "table": "qa_question_tags",
+      "description": "qa_question_tags 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "topic_id": {
+          "description": "数据库注释：topic_id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "name": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "color": {
+          "description": "数据库注释：颜色；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "数据库注释：创建人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "qa_question_tags_relations",
+      "table": "qa_question_tags_relations",
+      "description": "qa_question_tags_relations 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "tags_id": {
+          "description": "数据库注释：tagID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "question_id": {
+          "description": "数据库注释：问题ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "数据库注释：创建人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "qa_questions",
+      "table": "qa_questions",
+      "description": "qa_questions 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "title": {
+          "description": "数据库注释：问题title；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "content": {
+          "description": "数据库注释：问题内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "数据库注释：创建人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "topic_id": {
+          "description": "数据库注释：问题的分类；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "top_time": {
+          "description": "数据库注释：置顶时间；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "is_deleted": {
+          "description": "数据库注释：是否删除；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "topic_id",
+          "entity": "qa_topics",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "qa_topics",
+      "table": "qa_topics",
+      "description": "qa_topics 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "数据库注释：title；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "description": {
+          "description": "description；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "color": {
+          "description": "color；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_by": {
+          "description": "数据库注释：创建人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "softforge_versions",
+      "table": "softforge_versions",
+      "description": "softforge_versions 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "softforge_id": {
+          "description": "softforge_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "version": {
+          "description": "version；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "public_time": {
+          "description": "数据库注释：是否当前版本；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "download_ios": {
+          "description": "数据库注释：apple下载地址；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "download_ios_link": {
+          "description": "download_ios_link；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_ios_nas": {
+          "description": "download_ios_nas；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_macos": {
+          "description": "download_macos；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_macos_link": {
+          "description": "download_macos_link；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_macos_nas": {
+          "description": "download_macos_nas；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_windows": {
+          "description": "数据库注释：windows下载地址；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "download_windows_link": {
+          "description": "download_windows_link；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_windows_nas": {
+          "description": "download_windows_nas；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_android": {
+          "description": "数据库注释：windows下载地址；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "download_android_link": {
+          "description": "download_android_link；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "download_android_nas": {
+          "description": "download_android_nas；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "softforges",
+      "table": "softforges",
+      "description": "softforges 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "created_by": {
+          "description": "created_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "current_version_id": {
+          "description": "current_version_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "name": {
+          "description": "数据库注释：软件名称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "tech_survey_projects",
+      "table": "tech_survey_projects",
+      "description": "tech_survey_projects 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "submission_id": {
+          "description": "数据库注释：Tech survey submission ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "sort_order": {
+          "description": "数据库注释：Project order；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "project_name": {
+          "description": "数据库注释：Project name；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "project_status": {
+          "description": "数据库注释：Project status；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "backup_contact": {
+          "description": "数据库注释：Project backup contact；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "github_url": {
+          "description": "数据库注释：GitHub URL；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "tech_survey_submissions",
+      "table": "tech_survey_submissions",
+      "description": "tech_survey_submissions 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "created_by": {
+          "description": "数据库注释：Creator user ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "company_email": {
+          "description": "数据库注释：Company email；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "name": {
+          "description": "数据库注释：Name；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "alias_name": {
+          "description": "数据库注释：Alias or English name；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "wechat_name": {
+          "description": "数据库注释：Wechat name；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "tech_domains": {
+          "description": "数据库注释：Comma separated tech domains；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "support_request": {
+          "description": "数据库注释：Support request；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "confirmed_at": {
+          "description": "confirmed_at；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "technical_skills",
+      "table": "technical_skills",
+      "description": "technical_skills 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "数据库注释：技能名称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "数据库注释：创建人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "members",
+      "table": "user",
+      "description": "成员与员工身份（当前状态，不是历史人事快照）",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "username": {
+          "description": "成员英文名或用户名。"
+        },
+        "full_name": {
+          "description": "成员中文姓名。"
+        },
+        "email": {
+          "description": "email；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "department_id": {
+          "description": "部门 ID，关联 department.id。"
+        },
+        "start_date": {
+          "description": "数据库注释：入职时间；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "employee_title": {
+          "description": "数据库注释：员工职称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "employee_type": {
+          "description": "当前员工类型；非实习使用明确的 full_time/part_time 集合，空值及未知枚举不能算非实习。历史月份人事身份未存快照，须注明采用当前身份。",
+          "values": {
+            "full_time": "全职",
+            "intern": "实习",
+            "part_time": "兼职"
+          }
+        },
+        "employee_status": {
+          "description": "employee_status；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "last_sign_in_at": {
+          "description": "last_sign_in_at；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "banned_until": {
+          "description": "banned_until；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "is_active": {
+          "description": "is_active；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "turn_date": {
+          "description": "turn_date；业务含义未标注，不得推测枚举或JSON结构。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "department_id",
+          "entity": "department",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "user_images",
+      "table": "user_images",
+      "description": "user_images 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "images_path": {
+          "description": "images_path；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "user_monthly_report",
+      "table": "user_monthly_report",
+      "description": "成员月报及归档月份",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "target_month": {
+          "description": "数据库注释：归档月份 YYYY-MM；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "start_weekly_num": {
+          "description": "数据库注释：起始周编号；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "end_weekly_num": {
+          "description": "数据库注释：结束周编号；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "weekly_ids_json": {
+          "description": "数据库注释：实际参与总结的周编号列表；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "source_content": {
+          "description": "数据库注释：拼接后的周报原文；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "summary_content": {
+          "description": "数据库注释：AI 生成的月报总结；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "user_profile",
+      "table": "user_profile",
+      "description": "成员档案、联系方式和个人资料",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "avatar_url": {
+          "description": "数据库注释：头像连接；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "birthday": {
+          "description": "数据库注释：生日；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "wx_id": {
+          "description": "数据库注释：微信id；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "wx_name": {
+          "description": "数据库注释：微信名称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "qq_id": {
+          "description": "qq_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "qq_name": {
+          "description": "qq_name；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "school": {
+          "description": "school；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "header_color": {
+          "description": "header_color；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "tech_stack": {
+          "description": "数据库注释：技术栈；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "github_id": {
+          "description": "数据库注释：GitHub ID；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "tags": {
+          "description": "数据库注释：用户自定义标签列表；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "intro": {
+          "description": "数据库注释：介绍自己；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "sort": {
+          "description": "sort；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "mbit": {
+          "description": "mbit；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "is_band": {
+          "description": "is_band；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "title": {
+          "description": "数据库注释：职位；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "position": {
+          "description": "数据库注释：职务；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "write_weekly_report": {
+          "description": "write_weekly_report；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "weekly_report_category": {
+          "description": "数据库注释：开发 算法 综合 管理；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "unit_salary": {
+          "description": "数据库注释：单位薪资；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "enterprise_wechat_user_id": {
+          "description": "enterprise_wechat_user_id；业务含义未标注，不得推测枚举或JSON结构。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "user_skill",
+      "table": "user_skill",
+      "description": "user_skill 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "skill_id": {
+          "description": "skill_id；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "description": {
+          "description": "数据库注释：描述；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "user_weekly_salary",
+      "table": "user_weekly_salary",
+      "description": "成员每周薪资（仅管理员）",
+      "access": "admin",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "weekly_num": {
+          "description": "数据库注释：周报编号；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "salary_encrypted": {
+          "description": "数据库注释：加密后的薪资；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "work_hours": {
+          "description": "数据库注释：工作时长；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "hourly_wage": {
+          "description": "数据库注释：时薪（元）；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "webs",
+      "table": "webs",
+      "description": "webs 业务记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "name": {
+          "description": "数据库注释：名称；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "description": {
+          "description": "数据库注释：描述；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_by": {
+          "description": "数据库注释：创建人；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "url": {
+          "description": "数据库注释：Web 地址；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    },
+    {
+      "name": "weekly_report",
+      "table": "weekly_report",
+      "description": "成员周报正文，通过 weekly_num 关联周历",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "weekly_num": {
+          "description": "关联 weekly_report_days.weekly_num；按周历日期范围筛选，不能用周报创建时间替代。"
+        },
+        "user_id": {
+          "description": "成员 ID，关联 members.id。"
+        },
+        "content": {
+          "description": "成员周报 Markdown 正文，不是结构化项目工时。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "user_id",
+          "entity": "members",
+          "targetColumn": "id"
+        },
+        {
+          "column": "weekly_num",
+          "entity": "weekly_report_days",
+          "targetColumn": "weekly_num"
+        }
+      ]
+    },
+    {
+      "name": "weekly_report_days",
+      "table": "weekly_report_days",
+      "description": "周历、周编号和实际日期范围",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "weekly_date": {
+          "description": "weekly_date；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "weekly_num": {
+          "description": "weekly_num；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "start_date": {
+          "description": "数据库注释：周开始日期；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "end_date": {
+          "description": "数据库注释：周结束日期；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "year": {
+          "description": "数据库注释：自然周所属年份；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "weekly_num_of_year": {
+          "description": "数据库注释：自然周序号(按 start_date 计算)；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "is_holiday_week": {
+          "description": "数据库注释：是否节假周；未另行说明的枚举/JSON结构不得推测。"
+        }
+      },
+      "filters": [],
+      "references": []
+    },
+    {
+      "name": "workon",
+      "table": "workon",
+      "description": "成员工作状态记录。",
+      "access": "authenticated",
+      "columns": {
+        "id": {
+          "description": "记录标识 ID。"
+        },
+        "created_by": {
+          "description": "created_by；业务含义未标注，不得推测枚举或JSON结构。"
+        },
+        "markdown": {
+          "description": "数据库注释：内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "no_important_md": {
+          "description": "数据库注释：旧内容；未另行说明的枚举/JSON结构不得推测。"
+        },
+        "updated_at": {
+          "description": "记录最近修改时间；不能据此判断某个历史月份是否有进展。"
+        },
+        "created_at": {
+          "description": "记录创建时间；不一定是业务发生时间。"
+        }
+      },
+      "filters": [],
+      "references": [
+        {
+          "column": "created_by",
+          "entity": "members",
+          "targetColumn": "id"
+        }
+      ]
+    }
+  ]
+}

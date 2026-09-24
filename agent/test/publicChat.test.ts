@@ -93,6 +93,8 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     const restored = await (await request('/1/requests/first', 'GET', undefined, undefined, 'valid', restarted)).json();
     assert.deepEqual(restored.traceEvents, state.traceEvents);
     assert.deepEqual(records.get('1').record.messages[1].traceEvents, state.traceEvents);
+    assert.equal(records.get('1').record.messages[1].model, 'gpt-5.6-terra');
+    assert.equal(records.get('1').record.messages[1].provider, 'nexttoken');
     const replay = await request('/1/messages/stream', 'POST', { message: 'wait' }, 'first', 'valid', restarted);
     const text = await replay.text(); assert.match(text, /run.completed/); assert.doesNotMatch(text, /threadId|sessionId|private-thread/);
     assert.match(text, /saved output/);

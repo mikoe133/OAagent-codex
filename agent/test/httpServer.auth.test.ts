@@ -676,3 +676,33 @@ function requestStream(
     request.end(JSON.stringify({ requestId: `test-${Math.random().toString(36).slice(2)}`, ...body }));
   });
 }
+
+test("database tool requires an active authenticated session and a session-bound capability", async () => {
+  const { readToolToken } = await import("../src/infrastructure/oa-read/readService.js");
+  const { beginOaTurn, finishOaTurn } = await import("../src/infrastructure/oa/oaQueryPolicy.js");
+  const directory = await mkdtemp(path.join(tmpdir(), "oa-read-http-"));
+  const originalFetch = globalThis.fetch;
+  const config = { oaApiBaseUrl: "https://oa.test", oaAuthAlias: "default", oaApiToolToken: "tool-secret", automationApiToken: "migration-secret" } as AppConfig;
+  const sessions = new SessionStore(path.join(directory, "sessions.json"));
+  await sessions.bindOaToken("session-a", "user-token", undefined, "7");
+  const server = createAgentHttpServer(config, {} as AgentService, sessions);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address(); assert.ok(address && typeof address === "object");
+  const call = (token: string, sessionId = "session-a") => requestAutomationJson(address.port, "POST", "/__internal/query-oa-database", token, { action: "catalog", sessionId });
+  try {
+    assert.equal((await call("tool-secret")).status, 401);
+    assert.equal((await call(readToolToken("tool-secret", "session-a"), "session-b")).status, 401);
+    assert.equal((await call(readToolToken("tool-secret", "session-a"))).status, 401);
+    beginOaTurn("session-a", { mode: "multi_step", exactPersonName: null });
+    globalThis.fetch = async () => Response.json({ code: 401, success: false }, { status: 401 });
+    assert.equal((await call(readToolToken("tool-secret", "session-a"))).status, 401);
+    globalThis.fetch = async () => Response.json({ code: 200, success: true, data: { user_id: 7, email: "member@test" } });
+    assert.equal((await call(readToolToken("tool-secret", "session-a"))).status, 503);
+    assert.equal((await requestAutomationJson(address.port, "POST", "/internal/v1/oa-read/metadata/sync", "tool-secret")).status, 401);
+    assert.equal((await requestAutomationJson(address.port, "POST", "/internal/v1/oa-read/metadata/sync", "migration-secret")).status, 503);
+  } finally {
+    finishOaTurn("session-a"); globalThis.fetch = originalFetch;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

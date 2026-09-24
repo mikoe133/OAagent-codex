@@ -308,3 +308,15 @@ function runRender(outputPath, overrides) {
     },
   })
 }
+
+test("passes the independent OA readonly URL through deployment without replacing the write database", async context => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oa-read-env-"));
+  context.after(() => rm(directory, {recursive:true,force:true}));
+  const output = path.join(directory,'.env');
+  const result = runRender(output, { COMPOSE_PROJECT_NAME: 'oa-agent-test', NEXTTOKEN_API_KEY: 'test-nexttoken-secret', OPENROUTER_API_KEY: 'test-openrouter-secret', OA_DOCKER_API_BASE_URL: 'https://oa-test.example.com', OA_AGENT_SSO_SHARED_SECRET: 'test-sso-secret', OA_AGENT_SSO_TTL_SECONDS: '300', WEB_PORT: '3001', DATABASE_URL_READ: 'mysql://oa_read:test%2Apassword@readonly.test:3306/oa', OA_READ_MAX_ROWS: '50' });
+  assert.equal(result.status,0,result.stderr);
+  const content=await readFile(output,'utf8');
+  assert.match(content,/^DATABASE_URL_READ=mysql:\/\/oa_read:test%2Apassword@readonly.test:3306\/oa$/m);
+  assert.match(content,/^OA_READ_MAX_ROWS=50$/m);
+  assert.doesNotMatch(content,/^DATABASE_URL=mysql:\/\/oa_read:/m);
+});

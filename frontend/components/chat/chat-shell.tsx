@@ -54,6 +54,8 @@ export interface Message {
   content: string
   createdAt: Date
   durationMs?: number
+  model?: string
+  provider?: string
   imageData?: string
   toolSteps?: ToolStep[]
   traceMessages?: TraceMessage[]
@@ -95,6 +97,8 @@ type StoredMessage = {
   content?: unknown
   createdAt?: unknown
   durationMs?: unknown
+  model?: unknown
+  provider?: unknown
   imageData?: unknown
   toolSteps?: unknown
   traceMessages?: unknown
@@ -334,6 +338,8 @@ function normalizeStoredMessage(value: unknown): Message | null {
   const status = normalizeStoredMessageStatus(message.status, message.role)
   const feedback = message.feedback === "like" || message.feedback === "dislike" ? message.feedback : null
   const messageError = stringValue(message.error)
+  const model = stringValue(message.model)
+  const provider = stringValue(message.provider)
   const durationMs = normalizeResponseDuration(message.durationMs)
   const storedTrace = restoreStoredTrace(message.traceEvents, status === 'failed' || status === 'stopped' ? status : 'completed')
 
@@ -343,6 +349,8 @@ function normalizeStoredMessage(value: unknown): Message | null {
     content: message.content,
     createdAt: Number.isNaN(createdAt.getTime()) ? new Date() : createdAt,
     ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(model ? { model } : {}),
+    ...(provider ? { provider } : {}),
     ...(typeof message.imageData === "string" ? { imageData: message.imageData } : {}),
     ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
     ...(Array.isArray(message.traceMessages)
@@ -882,6 +890,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       let currentToolSteps: ToolStep[] = []
       let currentTraceMessages: TraceMessage[] = []
       let currentKnowledgeSources: KnowledgeSource[] = []
+      let responseModel: string | undefined
+      let responseProvider: string | undefined
 
       const isCurrentSessionRun = () =>
         activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId
@@ -1115,6 +1125,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             routingTraceGate.dismiss()
             completedRunReceived = true
             const result = toRecord(event.result)
+            responseModel = stringValue(result?.model) || undefined
+            responseProvider = stringValue(result?.provider) || undefined
             const storedTrace = restoreStoredTrace(result?.traceEvents)
             if (storedTrace) {
               updateAssistantToolSteps(storedTrace.toolSteps)
@@ -1190,6 +1202,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
               ...assistantMessage,
               content: accumulatedContent,
               status: "completed",
+              model: responseModel,
+              provider: responseProvider,
               durationMs,
               ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
               ...(currentKnowledgeSources.length > 0 ? { knowledgeSources: currentKnowledgeSources } : {}),

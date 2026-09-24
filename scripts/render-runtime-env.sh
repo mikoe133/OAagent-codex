@@ -21,8 +21,8 @@ function reject_multiline() {
 
 readonly output_path="${1:?usage: render-runtime-env.sh OUTPUT_PATH}"
 
-: "${CHAT_MAX_CONCURRENCY:=2}"
-: "${CHAT_USER_CONCURRENCY:=1}"
+: "${CHAT_MAX_CONCURRENCY:=3}"
+: "${CHAT_USER_CONCURRENCY:=3}"
 : "${CHAT_MAX_QUEUE:=20}"
 : "${CHAT_USER_QUEUE:=5}"
 : "${CHAT_USER_REQUESTS_PER_MINUTE:=20}"
@@ -87,6 +87,11 @@ for name in \
   OA_AGENT_SSO_TTL_SECONDS \
   OA_AGENT_AUTOMATION_TOKEN \
   DATABASE_URL \
+  DATABASE_URL_READ \
+  OA_READ_SYNC_INTERVAL_SECONDS \
+  OA_READ_QUERY_TIMEOUT_MS \
+  OA_READ_MAX_ROWS \
+  OA_READ_CONCURRENCY \
   AUTOMATION_EXPECTED_DATABASE_NAME \
   OA_SESSION_SECRET \
   OA_SESSION_VERIFY_MAX_AGE \
@@ -133,6 +138,14 @@ done
   || fail "OA_KNOWLEDGE_API_BASE_URL must be an HTTP(S) URL"
 [[ "$DATABASE_URL" =~ ^mysql://[^[:space:]]+/[^[:space:]/]+$ ]] \
   || fail "DATABASE_URL must be a mysql:// URL with a database name"
+if [[ -n "${DATABASE_URL_READ:-}" ]]; then
+  [[ "$DATABASE_URL_READ" =~ ^mysql://[^[:space:]]+/[A-Za-z0-9_]+$ ]] \
+    || fail "DATABASE_URL_READ must be a mysql:// URL with a database name"
+fi
+for read_setting in OA_READ_SYNC_INTERVAL_SECONDS OA_READ_QUERY_TIMEOUT_MS OA_READ_MAX_ROWS OA_READ_CONCURRENCY; do
+  read_value="${!read_setting:-}"
+  [[ -z "$read_value" || "$read_value" =~ ^[1-9][0-9]{0,7}$ ]] || fail "Invalid $read_setting"
+done
 if [[ -n "$automation_expected_database_name" ]]; then
   [[ "$automation_expected_database_name" =~ ^[A-Za-z0-9_]+$ ]] \
     || fail "AUTOMATION_EXPECTED_DATABASE_NAME contains unsupported characters"
@@ -280,6 +293,11 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'OA_AGENT_SSO_TTL_SECONDS=%s\n' "$OA_AGENT_SSO_TTL_SECONDS"
   printf 'OA_AGENT_AUTOMATION_TOKEN=%s\n' "$OA_AGENT_AUTOMATION_TOKEN"
   printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+  printf 'DATABASE_URL_READ=%s\n' "${DATABASE_URL_READ:-}"
+  printf 'OA_READ_SYNC_INTERVAL_SECONDS=%s\n' "${OA_READ_SYNC_INTERVAL_SECONDS:-300}"
+  printf 'OA_READ_QUERY_TIMEOUT_MS=%s\n' "${OA_READ_QUERY_TIMEOUT_MS:-10000}"
+  printf 'OA_READ_MAX_ROWS=%s\n' "${OA_READ_MAX_ROWS:-200}"
+  printf 'OA_READ_CONCURRENCY=%s\n' "${OA_READ_CONCURRENCY:-4}"
   printf 'OA_SESSION_SECRET=%s\n' "$OA_SESSION_SECRET"
   printf 'OA_SESSION_VERIFY_MAX_AGE=%s\n' "$oa_session_verify_max_age"
   printf 'AUTOMATION_MIGRATE_ON_START=%s\n' "$automation_migrate_on_start"

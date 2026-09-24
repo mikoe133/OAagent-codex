@@ -440,8 +440,8 @@ historySync=pending 且 state=completed 表示模型已完成，但 OA 历史尚
 
 | 环境变量 | 默认值 | 含义 |
 | --- | --- | --- |
-| CHAT_MAX_CONCURRENCY | 2 | Agent 同时执行的对话数 |
-| CHAT_USER_CONCURRENCY | 1 | 单个 OA 用户同时执行数 |
+| CHAT_MAX_CONCURRENCY | 3 | Agent 同时执行的对话数 |
+| CHAT_USER_CONCURRENCY | 3 | 单个 OA 用户同时执行数 |
 | CHAT_MAX_QUEUE | 20 | 全局等待数 |
 | CHAT_USER_QUEUE | 5 | 单用户等待数 |
 | CHAT_USER_REQUESTS_PER_MINUTE | 20 | 单用户每分钟受理的新请求数 |

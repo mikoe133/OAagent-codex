@@ -1,4 +1,6 @@
 import type { ThreadEvent, ThreadItem, Usage } from "@openai/codex-sdk";
+import { withDatabaseReadRouting } from "../infrastructure/oa-read/routing.js";
+import { readToolToken } from "../infrastructure/oa-read/readService.js";
 import type { AppConfig } from "../config/config.js";
 import {
   getDefaultModel,
@@ -337,7 +339,7 @@ export class AgentService {
       this.sessions.updateSummary(input.sessionId, summary),
     );
 
-    const secrets = this.getSecrets(runtimeContext.sessionOaApiToken);
+    const secrets = this.getSecrets(runtimeContext.sessionOaApiToken, input.sessionId);
     return {
       sessionId: input.sessionId,
       threadId: thread.id,
@@ -418,7 +420,7 @@ export class AgentService {
       runtimeContext,
     );
     const state = createStreamState(input.developerMode === true);
-    const secrets = this.getSecrets(runtimeContext.sessionOaApiToken);
+    const secrets = this.getSecrets(runtimeContext.sessionOaApiToken, input.sessionId);
     const recoverStream = async (): Promise<boolean> => {
       const recovery = resolveStreamRecovery(
         state.finalResponse,
@@ -863,12 +865,15 @@ export class AgentService {
     };
   }
 
-  private getSecrets(sessionOaApiToken: string | null = null): string[] {
+  private getSecrets(sessionOaApiToken: string | null = null, sessionId?: string): string[] {
     return [
       ...Object.values(this.config.modelProviders).map((provider) => provider.apiKey),
       sessionOaApiToken ?? "",
       this.config.oaApiToolToken,
       this.config.knowledgeBaseApiToken ?? "",
+      this.config.oaRead?.databaseUrl ?? "",
+      ...(this.config.oaRead ? [new URL(this.config.oaRead.databaseUrl).password, decodeURIComponent(new URL(this.config.oaRead.databaseUrl).password)] : []),
+      ...(sessionId ? [readToolToken(this.config.oaApiToolToken, sessionId)] : []),
     ];
   }
 }
@@ -968,7 +973,7 @@ async function resolveRunConfig(
   );
   const runConfig = { ...config, modelProvider, model, openapiPath: openapi.path };
   const routingIndex = mergeOpenApiIndexes([
-    openapi.index,
+    config.oaRead ? withDatabaseReadRouting(openapi.index) : openapi.index,
     knowledgeBase.read.index,
     ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
   ]);

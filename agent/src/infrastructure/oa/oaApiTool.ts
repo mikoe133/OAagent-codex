@@ -103,6 +103,10 @@ export async function callOaApiTool(
     return operation;
   }
 
+  if (config.oaRead && isOaReadOperation(operation.method, operation.operationId, operation.pathTemplate, operation.operation.summary)) {
+    return toolError("oa_read_requires_database", "OA 查询已迁移到只读数据库。请使用 scripts/queryOaDatabase.mjs 的 catalog/describe/query；不得回退到业务查询 API。写操作仍使用本工具。");
+  }
+
   const query = applyConfiguredOaAlias(
     operation.operation,
     objectField(input.query),
@@ -511,6 +515,14 @@ function isSensitiveOperation(operation: OpenApiOperation): boolean {
   }
 
   return MUTATING_OPERATION_PATTERN.test(text);
+}
+
+export function isOaReadOperation(method: string, operationId: string, operationPath: string, summary: unknown): boolean {
+  if (["get", "head"].includes(method.toLowerCase())) return true;
+  if (method.toLowerCase() !== "post") return false;
+  const text = `${operationId} ${operationPath} ${typeof summary === "string" ? summary : ""}`;
+  const writeAction = /(^|[_/ -])(delete|remove|create|add|update|edit|modify|save|submit|upload|import|approve|reject|reset)([_/ -]|$)|删除|移除|新增|创建|修改|更新|保存|提交|上传|导入|驳回|重置/i;
+  return READ_ONLY_OPERATION_PATTERN.test(text) && !writeAction.test(text);
 }
 
 function renderPath(

@@ -39,6 +39,7 @@ COPY --chown=node:node agent/package.json ./agent/package.json
 COPY --chown=node:node agent/openapi ./agent/openapi
 COPY --chown=node:node agent/knowledgebaseapi ./agent/knowledgebaseapi
 COPY --chown=node:node agent/prompts ./agent/prompts
+COPY --chown=node:node agent/metadata ./agent/metadata
 COPY --chown=node:node agent/scripts ./agent/scripts
 COPY --chown=node:node scripts/sql ./scripts/sql
 USER node

@@ -8,11 +8,14 @@ import { runAutomationMigrations } from "../automation/persistence/migrations.js
 import { loadConfig } from "../config/config.js";
 import { startModelRelay } from "../infrastructure/codex/modelRelay.js";
 import { SessionStore } from "../infrastructure/persistence/sessionStore.js";
+import { getOaReadService } from "../infrastructure/oa-read/readService.js";
 
 async function main(): Promise<void> {
   const baseConfig = loadConfig();
   const modelRelay = await startModelRelay(baseConfig.modelProviders);
   const config = { ...baseConfig, modelRelayBaseUrl: modelRelay.baseUrl };
+  const oaRead = config.oaRead ? getOaReadService(config.oaRead) : null;
+  await oaRead?.start();
   const sessionStore = new SessionStore(config.sessionStorePath);
   const agentService = new AgentService(config, sessionStore);
   let automationDatabase: ReturnType<typeof createAutomationDatabase> | null = null;
@@ -98,6 +101,7 @@ async function main(): Promise<void> {
     automationMaintenance?.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await automationDatabase?.close();
+    await oaRead?.close();
     await modelRelay.close();
   };
   process.once("SIGTERM", () => void stop("SIGTERM"));

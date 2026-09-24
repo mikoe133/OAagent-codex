@@ -242,6 +242,7 @@ export class PublicChatApi {
         createdAt: value.updatedAt, status: value.state === 'cancelled' ? 'stopped' : value.state,
         durationMs: Math.max(0, Date.parse(value.updatedAt) - Date.parse(value.createdAt)),
         ...(value.errorCode ? { error: value.errorCode } : {}),
+        ...(value.result ? { model: value.result.model, provider: value.result.provider } : {}),
         knowledgeSources: value.result?.knowledgeSources ?? [], traceEvents },
     ];
     const combined = [...messages];

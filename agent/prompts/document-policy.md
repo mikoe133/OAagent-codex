@@ -1,5 +1,7 @@
 文档读取和使用规范:
 
+当运行时启用 OA database 模式时，OA 查询的事实来源为工具返回的已发布语义元数据和查询结果；以下 OpenAPI 定位与读取规则只适用于 OA 写操作以及其他 API 接口域。无需也不得在每次问题中扫描数据库结构。
+
 1. 先区分接口域:结构化 OA 数据使用 `oa`;公司知识页面里的文档内容使用 `knowledge_base_read`;明确的知识页面变更使用 `knowledge_base_write`;用户当前指令包含 RWKV 时额外启用并优先处理 `rwkv_knowledge` 固定资料源。
 2. 必须从运行时上下文选中的接口域候选索引中选择与用户意图最相关的 operation。候选接口未包含语义上可满足用户意图的 operation 时,只允许在同一接口域候选以外的完整 OpenAPI 中进行一次受限检索;只能按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。
 3. OA 候选索引只能由 OA OpenAPI 解释,知识库读写候选索引只能由知识库统一 OpenAPI 解释,不得改用名称相近的 OA 接口。
