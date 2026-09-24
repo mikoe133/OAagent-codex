@@ -1,8 +1,8 @@
 import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
-import { SESSION_COOKIE_NAME } from '@/lib/auth'
+import { readSessionToken } from '@/lib/server/session-cookie'
 export const runtime = 'nodejs'
 async function handle(request: Request) {
-  const token = request.headers.get('cookie')?.split(';').map(value => value.trim()).find(value => value.startsWith(`${SESSION_COOKIE_NAME}=`))?.slice(SESSION_COOKIE_NAME.length + 1)
+  const token = readSessionToken(request)
   if (!token) return Response.json({ error: 'Authentication required' }, { status: 401 })
   const query = new URL(request.url).searchParams
   const recordId = query.get('recordId') || '', requestId = query.get('requestId') || '', action = query.get('action')

@@ -1,12 +1,9 @@
 import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
-import { SESSION_COOKIE_NAME } from '@/lib/auth'
+import { readSessionToken } from '@/lib/server/session-cookie'
 
 export const runtime = 'nodejs'
 const base = getAgentApiBaseUrl
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } })
-function token(request: Request) {
-  return request.headers.get('cookie')?.split(';').map(value => value.trim()).find(value => value.startsWith(`${SESSION_COOKIE_NAME}=`))?.slice(SESSION_COOKIE_NAME.length + 1)
-}
 function normalize(value: any) {
   const timestamp = (input: unknown) => typeof input === 'number' ? new Date(input * 1000).toISOString() : input
   // sessionId is only a UI compatibility alias of the OA ID, never a second ID.
@@ -14,7 +11,7 @@ function normalize(value: any) {
     createdAt: timestamp(value.createdAt), updatedAt: timestamp(value.updatedAt), summary: value.summary || value.title || 'New Section' }
 }
 async function handle(request: Request) {
-  const credential = token(request)
+  const credential = readSessionToken(request)
   if (!credential) return json({ error: 'Authentication required' }, 401)
   try {
     const method = request.method
