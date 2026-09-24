@@ -156,7 +156,7 @@ jobs:
     if: github.ref == 'refs/heads/test' && github.event_name != 'pull_request'
     needs: images
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     concurrency:
       group: oa-agent-shared-server-deploy
       cancel-in-progress: false
@@ -264,7 +264,7 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
 
       - name: Load deployment images on server
-        timeout-minutes: 20
+        timeout-minutes: 60
         shell: bash
         run: bash scripts/load-deployment-images.sh "$RUNNER_TEMP/deployment-images"
 
@@ -313,7 +313,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: images
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     concurrency:
       group: oa-agent-shared-server-deploy
       cancel-in-progress: false
@@ -421,7 +421,7 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
 
       - name: Load deployment images on server
-        timeout-minutes: 20
+        timeout-minutes: 60
         shell: bash
         run: bash scripts/load-deployment-images.sh "$RUNNER_TEMP/deployment-images"
 

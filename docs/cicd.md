@@ -90,6 +90,18 @@ Environment Variables:
 
 Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份,同时通过私有 Artifact 和 SSH 把镜像加载到服务器。服务器不登录 GHCR,不需要配置 `GHCR_PULL_TOKEN`。
 
+### 镜像上传与导入超时排查
+
+服务器需要安装 `rsync`、GNU `timeout` / `sha256sum`（`coreutils`）和 Docker。Debian/Ubuntu 可执行 `sudo apt-get install -y rsync coreutils`。部署用户需要能够写入部署目录并直接运行 Docker。
+
+镜像加载分为服务器预检、上传、SHA-256 校验和本地 `docker load` 四个阶段。预检会检查 Docker 响应并输出部署目录与 Docker 数据目录的磁盘和 inode 使用情况。上传使用 rsync 显示进度，120 秒无 I/O 即失败并重试，最多 3 次；每个镜像的全部上传尝试共用 20 分钟预算。上传后的服务器本地导入最多 5 分钟。测试和生产的镜像加载步骤上限均为 60 分钟，部署 Job 上限为 75 分钟，为两个镜像及后续健康检查留出时间。
+
+上传中断后，文件保留在各环境的 `$DEPLOY_PATH/.deployment-images/<service>-<sha256>.tar.gz`，重试会续传同一份 Artifact；校验不通过会删除损坏文件，成功导入后也会删除归档。失败版本的残留归档可在确认没有部署运行后按文件清理，不能删除当前使用中的镜像或数据卷。
+
+- 卡在 `Uploading`：检查进度中的速率和服务器网络；SSH keepalive 只检测连接是否存活，不能代表数据仍在传输。
+- 卡在 `Checking server Docker` 或 `Loading ... from server disk`：检查 Docker daemon 日志、磁盘空间/inode、内存及 I/O；退出码 `124` 表示命令超时。导入阶段失败会保留已上传归档，重跑可复用。
+- 旧日志只有 `Loading agent image (attempt 1/3)` 后 20 分钟超时：旧实现将上传和导入合在一个 SSH 流中，仅在退出码 `255` 时重试，无法区分上述原因。需在包含修复的新 commit 上运行 CI/CD；重跑旧 run 仍会使用旧脚本。
+
 两个部署 Job 都通过 `${{ secrets.OA_KNOWLEDGE_BASE_API_KEY }}` 读取同一个 Repository Secret。Secret 仅在部署 Job 中生成服务器运行时 `.env`，再由 Compose 注入 `agent` 容器，不会写入 Docker 镜像，也不会提供给 PR、构建镜像 Job、Web 或 Worker 容器。
 
 `PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` 不写入 `.env`。Workflow 会通过 SSH 将它原子写到服务器部署目录下的 `.secrets/project-progress-github-app-private-key.pem`；部署脚本使用目标 Agent 镜像将文件设置为运行时 `node` 用户所有和 `0400`，再由 Compose 只读挂载给 `project-progress-worker`。Worker 环境变量只包含 `PROJECT_PROGRESS_GITHUB_APP_ID` 和容器内私钥路径。发布完成前，健康检查会验证私钥可读，部署脚本还会实际获取 installation token、枚举授权仓库并确认 `Contents: Read` 权限；鉴权失败会自动回滚。

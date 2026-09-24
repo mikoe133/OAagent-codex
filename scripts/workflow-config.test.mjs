@@ -6,6 +6,15 @@ import test from "node:test"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
+test("reserves time for both image transfers, imports, and deployment health checks", async () => {
+  const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
+  for (const job of ["deploy-test", "deploy-production"]) {
+    const section = workflow.split(`  ${job}:\n`)[1].split(/\n  [a-z-]+:\n/)[0]
+    assert.match(section, /^    timeout-minutes: 75$/m)
+    assert.match(section, /name: Load deployment images on server\n        timeout-minutes: 60/)
+  }
+})
+
 test("maps test and main branches to their deployment environments", async () => {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
 
