@@ -1,12 +1,13 @@
+import { observeChatRoute, type ChatRequestDiagnostics } from "@/lib/server/chat-diagnostics"
 import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
 import {
-  DEFAULT_ROUTER_MODEL,
   DEFAULT_MODEL_PROVIDER,
   isModelForProvider,
   isModelProvider,
   isRouterModel,
+  isRouterModelSelection,
   type ModelProvider,
 } from "@/lib/model-catalog"
 
@@ -19,6 +20,7 @@ type ChatRequestBody = {
   model?: unknown
   developerMode?: unknown
   routerModel?: unknown
+  routerModels?: unknown
 }
 
 type ChatMessage = {
@@ -41,7 +43,9 @@ type AgentStreamEvent = {
 
 export const runtime = "nodejs"
 
-export async function POST(req: Request) {
+export const POST = observeChatRoute("/api/chat", handleChat)
+
+async function handleChat(req: Request, diagnostics: ChatRequestDiagnostics) {
   try {
     const body = await readJsonBody(req)
     const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : null
@@ -76,13 +80,14 @@ export async function POST(req: Request) {
       return jsonResponse({ error: "Invalid developer mode" }, 400)
     }
     const developerMode = body.developerMode === true
-    const routerModel = body.routerModel === undefined
-      ? developerMode ? DEFAULT_ROUTER_MODEL : undefined
-      : body.routerModel
-    if (routerModel !== undefined && !isRouterModel(routerModel)) {
-      return jsonResponse({ error: "Invalid router model" }, 400)
+    const routerModel = body.routerModel
+    const routerModels = body.routerModels
+    if ((routerModel !== undefined && !isRouterModel(routerModel)) ||
+        (routerModels !== undefined && !isRouterModelSelection(routerModels)) ||
+        (routerModel !== undefined && routerModels !== undefined)) {
+      return jsonResponse({ error: "Invalid router model selection" }, 400)
     }
-    const agentResponse = await fetch(buildAgentStreamUrl(sessionId), {
+    const agentResponse = await diagnostics.fetch(buildAgentStreamUrl(sessionId), {
       method: "POST",
       headers: new Headers({ ...Object.fromEntries(buildAgentHeaders(sessionToken)), "Idempotency-Key": requestId }),
       body: JSON.stringify({
@@ -91,6 +96,7 @@ export async function POST(req: Request) {
         ...(model ? { model } : {}),
         ...(developerMode ? { developerMode: true } : {}),
         ...(routerModel ? { routerModel } : {}),
+        ...(isRouterModelSelection(routerModels) ? { routerModels: [...new Set(routerModels)] } : {}),
       }),
       signal: req.signal,
       cache: "no-store",
@@ -111,7 +117,7 @@ export async function POST(req: Request) {
       return jsonResponse({ error: "Agent response did not include a stream" }, 502)
     }
 
-    return new Response(streamAgentEvents(agentResponse.body), {
+    return new Response(streamAgentEvents(agentResponse.body, diagnostics), {
       headers: {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-store, no-transform",
@@ -120,7 +126,7 @@ export async function POST(req: Request) {
       },
     })
   } catch (error) {
-    console.error("Chat API error:", error)
+    diagnostics.log("handler_failed")
     return jsonResponse(
       {
         error: error instanceof Error ? error.message : "Agent service is unavailable",
@@ -186,7 +192,7 @@ function buildAgentHeaders(sessionToken: string): Headers {
   return headers
 }
 
-function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+function streamAgentEvents(agentBody: ReadableStream<Uint8Array>, diagnostics: ChatRequestDiagnostics): ReadableStream<Uint8Array> {
   const reader = agentBody.getReader()
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
@@ -210,6 +216,7 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
         }
 
         if (event.type === "run.completed") {
+          diagnostics.log("stream_completed")
           terminalRunEventReceived = true
           const finalResponse = event.result?.finalResponse
           if (typeof finalResponse === "string" && finalResponse && !emittedText) {
@@ -225,6 +232,7 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
         }
 
         if (event.type === "run.failed") {
+          diagnostics.log("stream_failed")
           failed = true
           terminalRunEventReceived = true
           enqueueEvent(event)
@@ -256,6 +264,7 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
         }
 
         if (!terminalRunEventReceived) {
+          diagnostics.log("stream_incomplete")
           enqueueEvent({
             type: "run.failed",
             error: "Agent stream ended before a terminal run event.",
@@ -264,6 +273,7 @@ function streamAgentEvents(agentBody: ReadableStream<Uint8Array>): ReadableStrea
 
         controller.close()
       } catch (error) {
+        diagnostics.log("stream_failed")
         enqueueEvent({
           type: "run.failed",
           error: error instanceof Error ? error.message : "Agent stream failed",

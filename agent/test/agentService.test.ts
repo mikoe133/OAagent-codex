@@ -14,6 +14,8 @@ import type { AppConfig } from "../src/config/config.js";
 import {
   MODEL_CATALOG,
   ROUTER_MODEL_CATALOG,
+  DEFAULT_ROUTER_MODELS,
+  resolveRequestedRouterModels,
   decodeAutomationModelParameters,
   getModelDisplayName,
   resolveAutomationModelSelection,
@@ -30,6 +32,9 @@ describe("model provider selection", () => {
       "z-ai/glm-4.7-flash",
       "qwen/qwen3.5-flash-02-23",
       "deepseek/deepseek-v4-flash",
+      "z-ai/glm-5.3-flash",
+      "deepseek/deepseek-v4.1-flash",
+      "qwen/qwen3.8-flash",
     ]);
     assert.equal(
       resolveRequestedRouterModel("qwen/qwen3.5-flash-02-23"),
@@ -37,6 +42,17 @@ describe("model provider selection", () => {
     );
     assert.throws(() => resolveRequestedRouterModel("z-ai/glm-5.3"), /路由模型/);
     assert.throws(() => resolveRequestedRouterModel(undefined), /路由模型:空/);
+  });
+
+  it("defaults to two racers, normalizes explicit selections and rejects invalid input", () => {
+    assert.deepEqual(DEFAULT_ROUTER_MODELS, ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash"]);
+    assert.deepEqual(resolveRequestedRouterModels(), DEFAULT_ROUTER_MODELS);
+    assert.deepEqual(resolveRequestedRouterModels(["qwen/qwen3.8-flash", "qwen/qwen3.8-flash"]), ["qwen/qwen3.8-flash"]);
+    assert.deepEqual(resolveRequestedRouterModels(undefined, "z-ai/glm-4.7-flash"), ["z-ai/glm-4.7-flash"]);
+    for (const value of [[], null, "z-ai/glm-5.3-flash", [42], ["unknown"], Array(7).fill("z-ai/glm-5.3-flash")]) {
+      assert.throws(() => resolveRequestedRouterModels(value));
+    }
+    assert.throws(() => resolveRequestedRouterModels([...DEFAULT_ROUTER_MODELS], "z-ai/glm-4.7-flash"));
   });
 
   it("uses the dedicated OpenRouter model only for semantic routing", () => {

@@ -1,0 +1,234 @@
+[
+  {
+    "model": "z-ai/glm-4.7-flash",
+    "n": 2,
+    "correct": 0,
+    "semantic": 0,
+    "strictJson": 0,
+    "domainCorrect": 0,
+    "operationCorrect": 0,
+    "accessCorrect": 0,
+    "readContamination": 0,
+    "recalled": 1,
+    "p50ms": 8004,
+    "p95ms": 8005,
+    "attempts": 2,
+    "reportedCost": 0,
+    "billedResponses": 0,
+    "failures": [
+      {
+        "caseId": "project-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": false,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-policy",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "qwen/qwen3.5-flash-02-23",
+    "n": 2,
+    "correct": 0,
+    "semantic": 2,
+    "strictJson": 0,
+    "domainCorrect": 2,
+    "operationCorrect": 1,
+    "accessCorrect": 0,
+    "readContamination": 1,
+    "recalled": 1,
+    "p50ms": 1917,
+    "p95ms": 2075,
+    "attempts": 2,
+    "reportedCost": 0.000205335,
+    "billedResponses": 2,
+    "failures": [
+      {
+        "caseId": "project-status",
+        "round": 0,
+        "semantic": true,
+        "recalled": false,
+        "domainCorrect": true,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-policy",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "deepseek/deepseek-v4-flash",
+    "n": 2,
+    "correct": 1,
+    "semantic": 1,
+    "strictJson": 1,
+    "domainCorrect": 1,
+    "operationCorrect": 1,
+    "accessCorrect": 1,
+    "readContamination": 0,
+    "recalled": 1,
+    "p50ms": 4575,
+    "p95ms": 8012,
+    "attempts": 2,
+    "reportedCost": 0.00031402,
+    "billedResponses": 1,
+    "failures": [
+      {
+        "caseId": "project-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": false,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "z-ai/glm-5.3-flash",
+    "n": 2,
+    "correct": 1,
+    "semantic": 1,
+    "strictJson": 1,
+    "domainCorrect": 1,
+    "operationCorrect": 1,
+    "accessCorrect": 1,
+    "readContamination": 0,
+    "recalled": 1,
+    "p50ms": 2931,
+    "p95ms": 8005,
+    "attempts": 2,
+    "reportedCost": 0.0002269,
+    "billedResponses": 1,
+    "failures": [
+      {
+        "caseId": "project-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": false,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "qwen/qwen3.8-flash",
+    "n": 2,
+    "correct": 0,
+    "semantic": 0,
+    "strictJson": 0,
+    "domainCorrect": 0,
+    "operationCorrect": 0,
+    "accessCorrect": 0,
+    "readContamination": 0,
+    "recalled": 1,
+    "p50ms": 8003,
+    "p95ms": 8004,
+    "attempts": 2,
+    "reportedCost": 0,
+    "billedResponses": 0,
+    "failures": [
+      {
+        "caseId": "project-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": false,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-policy",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "deepseek/deepseek-v4.1-flash",
+    "n": 2,
+    "correct": 0,
+    "semantic": 1,
+    "strictJson": 0,
+    "domainCorrect": 0,
+    "operationCorrect": 0,
+    "accessCorrect": 0,
+    "readContamination": 0,
+    "recalled": 2,
+    "p50ms": 2993,
+    "p95ms": 8001,
+    "attempts": 3,
+    "reportedCost": 0.001992636,
+    "billedResponses": 2,
+    "failures": [
+      {
+        "caseId": "project-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-policy",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "xiaomi/mimo-v2.6-flash",
+    "n": 2,
+    "correct": 1,
+    "semantic": 1,
+    "strictJson": 1,
+    "domainCorrect": 1,
+    "operationCorrect": 1,
+    "accessCorrect": 1,
+    "readContamination": 0,
+    "recalled": 1,
+    "p50ms": 3267,
+    "p95ms": 8005,
+    "attempts": 2,
+    "reportedCost": 0.00020986,
+    "billedResponses": 1,
+    "failures": [
+      {
+        "caseId": "project-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": false,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      }
+    ]
+  }
+]

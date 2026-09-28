@@ -370,7 +370,7 @@ curl -sS https://oa-agent.rwkvos.com/v1/sessions \
 }
 ```
 
-message 去掉首尾空白后必须非空。provider/model 可省略，按服务端默认值解析并验证白名单；可选 developerMode（boolean）及 routerModel（路由模型白名单）。建议外部集成显式指定 provider/model，避免默认模型升级影响重试的参数摘要。
+message 去掉首尾空白后必须非空。provider/model 可省略，按服务端默认值解析并验证白名单；可选 developerMode（boolean）及 routerModels（1–6 个路由模型 ID 的数组，去重后并发竞速）。省略路由配置时默认使用 GLM 5.3 Flash 与 DeepSeek V4.1 Flash，先返回有效结果的胜出并取消其余请求；全部失败才安全降级。兼容旧的 routerModel 单模型字符串，但不能与 routerModels 同时指定。建议外部集成显式指定 provider/model，避免默认模型升级影响重试的参数摘要。
 
 ```bash
 curl -N "https://oa-agent.rwkvos.com/v1/sessions/$RECORD_ID/messages/stream" \

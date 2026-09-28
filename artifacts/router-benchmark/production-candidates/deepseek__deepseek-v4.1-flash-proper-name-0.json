@@ -1,0 +1,90 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "proper-name",
+  "round": 0,
+  "ms": 1322,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "uploadKnowledgeBaseAttachment",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "update_user_salary_ai_report_user_salary_put",
+        "upload_avatar_files_upload_avatar_post",
+        "upload_file_files_upload_post",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "update_user_profile_user_user_put",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_post"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1476,
+        "completion_tokens": 62,
+        "total_tokens": 1538,
+        "cost": 0.000404304,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 384,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000404304,
+          "upstream_inference_prompt_cost": 0.000329904,
+          "upstream_inference_completions_cost": 0.0000744
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"项目 员工手册 状态\",\"project status 员工手册\",\"查询项目状态\",\"project progress 员工手册\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1317,
+      "text": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"项目 员工手册 状态\",\"project status 员工手册\",\"查询项目状态\",\"project progress 员工手册\"]}"
+    }
+  ]
+}

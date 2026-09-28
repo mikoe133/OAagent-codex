@@ -1,0 +1,158 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "project-status",
+  "round": 0,
+  "ms": 8001,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": false,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型超时（8 秒）"
+  },
+  "finalOperationIds": [
+    "projects_projects_project_put",
+    "projects_projects_project_delete",
+    "projects_projects_project_post",
+    "issue_projects_issue_post",
+    "milestones_projects_milestones_post",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1370,
+        "completion_tokens": 512,
+        "total_tokens": 1882,
+        "cost": 0.0010254,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0010254,
+          "upstream_inference_prompt_cost": 0.000411,
+          "upstream_inference_completions_cost": 0.0006144
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 512,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Parasail",
+      "finishReason": "length",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "reasoning": "We need answer only JSON matching output schema. Need infer. User asks Chinese: \"请查一下项目28目前的状态和负责人。\" = Please check project 28's current status and owner. Need route. Catalog oa for structured OA records project state. Need select catalogs, tags, operationIds, search terms. Need determine operations. Available oa tag projects operations. Need read? But operation list only has write operations? Let's inspect: projects_projects_project_put, delete, post; issue etc. No GET project status. Hmm operationGroups only include these. Need select one to three exact catalogs, tags, operationIds. For lookup project status and owner, likely need oa projects. But no read operation for project details. Maybe operationId projects_projects_project_put? No, that's update. But task asks status and负责人. Could be project state in OA. There is no GET. Maybe use projects_projects_project_put? No, write. But instruction: Choose read for lookup, search, status, history, summaries, or reports. Choose write only explicit mutation. Here no explicit mutation. But available operations don't include read. Maybe we must select operationIds that best match? Could select none? Output schema likely requires operationIds array 1-8? It says select one to eight exact operationIds. Need maybe choose projects_projects_project_put? But that's write, not appropriate. Maybe there is no read operation, but we can still route to catalog/tag and operation? Hmm.\n\nNeed understand semantic router. It returns JSON with catalogs, tags, operationIds, searchTerms. We need classify request. If no exact operation, maybe choose closest? But \"Do not call tools...\" Only classify. Need maybe select catalog=oa, tag=projects, operationIds maybe projects_projects_project_put? But that operation is PUT /projects/project summary Projects, parameters project_id, alias, requestBodyFields project_name, describe, markdown, people. It could return project? But method PUT is update. Not read. The user asks status and负责人. Maybe project status and owner are fields in project record. To retrieve, maybe there is no GET in provided groups. But maybe operationId \"projects_projects_project_put\" is the only project operation. However, selecting write for read violates. Could select no operation? But schema says one to eight exact operationIds. Maybe we can include operationId that is not exact? No.\n\nLet's parse",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "We need answer only JSON matching output schema. Need infer. User asks Chinese: \"请查一下项目28目前的状态和负责人。\" = Please check project 28's current status and owner. Need route. Catalog oa for structured OA records project state. Need select catalogs, tags, operationIds, search terms. Need determine operations. Available oa tag projects operations. Need read? But operation list only has write operations? Let's inspect: projects_projects_project_put, delete, post; issue etc. No GET project status. Hmm operationGroups only include these. Need select one to three exact catalogs, tags, operationIds. For lookup project status and owner, likely need oa projects. But no read operation for project details. Maybe operationId projects_projects_project_put? No, that's update. But task asks status and负责人. Could be project state in OA. There is no GET. Maybe use projects_projects_project_put? No, write. But instruction: Choose read for lookup, search, status, history, summaries, or reports. Choose write only explicit mutation. Here no explicit mutation. But available operations don't include read. Maybe we must select operationIds that best match? Could select none? Output schema likely requires operationIds array 1-8? It says select one to eight exact operationIds. Need maybe choose projects_projects_project_put? But that's write, not appropriate. Maybe there is no read operation, but we can still route to catalog/tag and operation? Hmm.\n\nNeed understand semantic router. It returns JSON with catalogs, tags, operationIds, searchTerms. We need classify request. If no exact operation, maybe choose closest? But \"Do not call tools...\" Only classify. Need maybe select catalog=oa, tag=projects, operationIds maybe projects_projects_project_put? But that operation is PUT /projects/project summary Projects, parameters project_id, alias, requestBodyFields project_name, describe, markdown, people. It could return project? But method PUT is update. Not read. The user asks status and负责人. Maybe project status and owner are fields in project record. To retrieve, maybe there is no GET in provided groups. But maybe operationId \"projects_projects_project_put\" is the only project operation. However, selecting write for read violates. Could select no operation? But schema says one to eight exact operationIds. Maybe we can include operationId that is not exact? No.\n\nLet's parse",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "ms": 4447,
+      "text": "We need answer only JSON matching output schema. Need infer. User asks Chinese: \"请查一下项目28目前的状态和负责人。\" = Please check project 28's current status and owner. Need route. Catalog oa for structured OA records project state. Need select catalogs, tags, operationIds, search terms. Need determine operations. Available oa tag projects operations. Need read? But operation list only has write operations? Let's inspect: projects_projects_project_put, delete, post; issue etc. No GET project status. Hmm operationGroups only include these. Need select one to three exact catalogs, tags, operationIds. For lookup project status and owner, likely need oa projects. But no read operation for project details. Maybe operationId projects_projects_project_put? No, that's update. But task asks status and负责人. Could be project state in OA. There is no GET. Maybe use projects_projects_project_put? No, write. But instruction: Choose read for lookup, search, status, history, summaries, or reports. Choose write only explicit mutation. Here no explicit mutation. But available operations don't include read. Maybe we must select operationIds that best match? Could select none? Output schema likely requires operationIds array 1-8? It says select one to eight exact operationIds. Need maybe choose projects_projects_project_put? But that's write, not appropriate. Maybe there is no read operation, but we can still route to catalog/tag and operation? Hmm.\n\nNeed understand semantic router. It returns JSON with catalogs, tags, operationIds, searchTerms. We need classify request. If no exact operation, maybe choose closest? But \"Do not call tools...\" Only classify. Need maybe select catalog=oa, tag=projects, operationIds maybe projects_projects_project_put? But that operation is PUT /projects/project summary Projects, parameters project_id, alias, requestBodyFields project_name, describe, markdown, people. It could return project? But method PUT is update. Not read. The user asks status and负责人. Maybe project status and owner are fields in project record. To retrieve, maybe there is no GET in provided groups. But maybe operationId \"projects_projects_project_put\" is the only project operation. However, selecting write for read violates. Could select no operation? But schema says one to eight exact operationIds. Maybe we can include operationId that is not exact? No.\n\nLet's parse"
+    },
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete",
+        "issue_status_projects_change_issue_status_put",
+        "milestones_projects_milestones__milestone_id__delete",
+        "milestones_projects_milestones__milestone_id__put",
+        "public_projects_public_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      },
+      "status": 200,
+      "error": {
+        "name": "TimeoutError"
+      },
+      "ms": 3548
+    }
+  ]
+}

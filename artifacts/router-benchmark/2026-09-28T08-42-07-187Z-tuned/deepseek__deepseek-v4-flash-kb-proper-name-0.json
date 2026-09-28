@@ -1,0 +1,97 @@
+{
+  "model": "deepseek/deepseek-v4-flash",
+  "caseId": "kb-proper-name",
+  "round": 0,
+  "ms": 3158,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "searchKnowledgeBase",
+    "getAgentCapabilities",
+    "getKnowledgeBasePage",
+    "getPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "listPageRevisions"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1509,
+        "completion_tokens": 58,
+        "total_tokens": 1567,
+        "cost": 0.0001372224,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001372224,
+          "upstream_inference_prompt_cost": 0.0001260574,
+          "upstream_inference_completions_cost": 0.000011165
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Venice",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"searchKnowledgeBase\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"搜索知识库页面\", \"标题包含项目周报\"]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 3157,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"searchKnowledgeBase\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"搜索知识库页面\", \"标题包含项目周报\"]\n}"
+    }
+  ]
+}

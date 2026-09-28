@@ -1,0 +1,98 @@
+{
+  "model": "qwen/qwen3.5-flash-02-23",
+  "caseId": "rwkv-status",
+  "round": 1,
+  "ms": 1097,
+  "semantic": true,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read",
+    "searchKnowledgeBase",
+    "listKnowledgeBasePages",
+    "getAgentCapabilities",
+    "getKnowledgeBasePage",
+    "getPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listPageBacklinks",
+    "listPageRevisions"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1738,
+        "completion_tokens": 94,
+        "total_tokens": 1832,
+        "cost": 0.00013741,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00013741,
+          "upstream_inference_prompt_cost": 0.00011297,
+          "upstream_inference_completions_cost": 0.00002444
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Alibaba",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\n    \"oa\",\n    \"knowledge_base_read\"\n  ],\n  \"tags\": [\n    \"projects\",\n    \"untagged\"\n  ],\n  \"operationIds\": [\n    \"oa_database_read\",\n    \"searchKnowledgeBase\",\n    \"listKnowledgeBasePages\"\n  ],\n  \"searchTerms\": \"RWKV Chat project recent progress updates status history\"\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1097,
+      "text": "{\n  \"catalogs\": [\n    \"oa\",\n    \"knowledge_base_read\"\n  ],\n  \"tags\": [\n    \"projects\",\n    \"untagged\"\n  ],\n  \"operationIds\": [\n    \"oa_database_read\",\n    \"searchKnowledgeBase\",\n    \"listKnowledgeBasePages\"\n  ],\n  \"searchTerms\": \"RWKV Chat project recent progress updates status history\"\n}"
+    }
+  ]
+}

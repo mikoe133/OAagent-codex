@@ -1,0 +1,98 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "rwkv-status",
+  "round": 0,
+  "ms": 2499,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": false,
+  "operationCorrect": true,
+  "accessCorrect": false,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read",
+    "searchKnowledgeBase",
+    "listKnowledgeBasePages",
+    "projects_projects_project_delete",
+    "projects_projects_project_post",
+    "projects_projects_project_put",
+    "issue_status_projects_change_issue_status_put",
+    "issue_projects_change_issue_priority_put",
+    "issue_projects_issue_post"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1715,
+        "completion_tokens": 100,
+        "total_tokens": 1815,
+        "cost": 0.0001437575,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001437575,
+          "upstream_inference_prompt_cost": 0.0001037575,
+          "upstream_inference_completions_cost": 0.00004
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Cloudflare",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_read\", \"oa\"],\n  \"tags\": [\"RWKV\", \"projects\"],\n  \"operationIds\": [\"searchKnowledgeBase\", \"listKnowledgeBasePages\", \"oa_database_read\"],\n  \"accessMode\": \"mixed\",\n  \"searchTerms\": [\n    \"RWKV project progress\",\n    \"RWKV project status\",\n    \"RWKV project updates\",\n    \"RWKV project history\",\n    \"RWKV project summary\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2498,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_read\", \"oa\"],\n  \"tags\": [\"RWKV\", \"projects\"],\n  \"operationIds\": [\"searchKnowledgeBase\", \"listKnowledgeBasePages\", \"oa_database_read\"],\n  \"accessMode\": \"mixed\",\n  \"searchTerms\": [\n    \"RWKV project progress\",\n    \"RWKV project status\",\n    \"RWKV project updates\",\n    \"RWKV project history\",\n    \"RWKV project summary\"\n  ]\n}"
+    }
+  ]
+}

@@ -30,7 +30,7 @@ test("renders developer mode before providers and reveals router configuration o
   assert.match(siderSource, />\s*开启\s*<\/DropdownMenuRadioItem>/)
 })
 
-test("shows the selected router and fixed fallback models as checked together", () => {
+test("shows a true multi-select router menu with a one-model minimum", () => {
   const routerMenuStart = siderSource.indexOf("路由模型配置")
   const routerMenuEnd = siderSource.indexOf("</DropdownMenuSub>", routerMenuStart)
   const routerSubmenu = routerMenuStart >= 0 && routerMenuEnd >= 0
@@ -39,21 +39,21 @@ test("shows the selected router and fixed fallback models as checked together", 
 
   assert.ok(routerSubmenu, "expected the router model submenu")
   assert.match(routerSubmenu, /<DropdownMenuCheckboxItem/)
-  assert.match(routerSubmenu, /const isDefaultFallback = model\.id === DEFAULT_ROUTER_MODEL/)
-  assert.match(routerSubmenu, /const isChecked = isDefaultFallback \|\| model\.id === selectedRouterModel/)
-  assert.match(routerSubmenu, /disabled=\{providerSwitchDisabled \|\| isDefaultFallback\}/)
+  assert.match(routerSubmenu, /selectedRouterModels\.includes\(model\.id\)/)
+  assert.match(routerSubmenu, /isChecked && selectedRouterModels\.length === 1/)
+  assert.match(routerSubmenu, /onSelect=\{\(event\) => event\.preventDefault\(\)\}/)
   assert.doesNotMatch(routerSubmenu, /<DropdownMenuRadioGroup/)
 })
 
 test("defaults developer mode to disabled and persists developer preferences", () => {
   assert.match(chatShellSource, /const \[developerMode, setDeveloperMode\] = useState\(false\)/)
   assert.match(chatShellSource, /localStorage\.getItem\(DEVELOPER_MODE_STORAGE_KEY\) === "enabled"/)
-  assert.match(chatShellSource, /localStorage\.setItem\(ROUTER_MODEL_STORAGE_KEY, model\)/)
+  assert.match(chatShellSource, /localStorage\.setItem\(ROUTER_MODELS_STORAGE_KEY, JSON\.stringify\(selection\)\)/)
 })
 
 test("keeps the selected router model active after developer mode is disabled", () => {
-  assert.match(chatShellSource, /developerMode,\s*routerModel:\s*selectedRouterModel,/)
-  assert.doesNotMatch(chatShellSource, /developerMode\s*\?\s*\{\s*routerModel:/)
+  assert.match(chatShellSource, /developerMode,\s*routerModels:\s*selectedRouterModels,/)
+  assert.doesNotMatch(chatShellSource, /developerMode\s*\?\s*\{\s*routerModels:/)
 })
 
 test("centers the user-menu expand icon inside its trigger", () => {

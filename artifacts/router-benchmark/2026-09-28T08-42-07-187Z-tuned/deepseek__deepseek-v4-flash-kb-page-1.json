@@ -1,0 +1,97 @@
+{
+  "model": "deepseek/deepseek-v4-flash",
+  "caseId": "kb-page",
+  "round": 1,
+  "ms": 3066,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "getKnowledgeBasePage",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "searchKnowledgeBase"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1497,
+        "completion_tokens": 53,
+        "total_tokens": 1550,
+        "cost": 0.0001351007,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001351007,
+          "upstream_inference_prompt_cost": 0.0001248982,
+          "upstream_inference_completions_cost": 0.0000102025
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Venice",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"getKnowledgeBasePage\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"读取知识库页面正文\"]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 3065,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"getKnowledgeBasePage\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"读取知识库页面正文\"]\n}"
+    }
+  ]
+}

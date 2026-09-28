@@ -1,5 +1,7 @@
 "use client"
 
+import { fetchChatWithDiagnostics, redirectToChatLogin, logChatDiagnostic, traceId, TRACE_HEADER } from "@/lib/chat-diagnostics"
+
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react"
 import { PanelLeftClose, PanelLeftOpen, SquarePen } from "lucide-react"
 import { gsap } from "gsap"
@@ -12,12 +14,13 @@ import Sider, {
   type SessionIndicatorState,
 } from "@/components/siderbar/Sider"
 import {
-  DEFAULT_ROUTER_MODEL,
+  DEFAULT_ROUTER_MODELS,
   DEFAULT_MODEL_PROVIDER,
   getDefaultModel,
   isModelForProvider,
   isModelProvider,
-  isRouterModel,
+  isRouterModelSelection,
+  readStoredRouterModels,
   type AIModel,
   type ModelProvider,
   type RouterModel,
@@ -72,7 +75,7 @@ const STORAGE_KEY = "chat-messages"
 const MODEL_STORAGE_KEY = "chat-selected-model"
 const MODEL_PROVIDER_STORAGE_KEY = "chat-model-provider"
 const DEVELOPER_MODE_STORAGE_KEY = "chat-developer-mode"
-const ROUTER_MODEL_STORAGE_KEY = "chat-router-model"
+const ROUTER_MODELS_STORAGE_KEY = "chat-router-models-v2"
 const AGENT_SESSION_STORAGE_KEY = "chat-agent-session-id"
 const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
 const SIDEBAR_WIDTH = 320
@@ -189,18 +192,16 @@ function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
-async function createChatSession(sessionId: string): Promise<ChatSessionRecord | null> {
-  const response = await fetch("/api/chat/sessions", {
+async function createChatSession(sessionId: string, requestTraceId = traceId()): Promise<ChatSessionRecord | null> {
+  const response = await fetchChatWithDiagnostics("/api/chat/sessions", {
     method: "POST",
     credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ sessionId }),
+    headers: { "Content-Type": "application/json", [TRACE_HEADER]: requestTraceId },
   })
 
   if (response.status === 401) {
-    window.location.assign(`/login?next=${encodeURIComponent("/chat")}`)
+    redirectToChatLogin(response, "/api/chat/sessions")
     return null
   }
 
@@ -212,7 +213,7 @@ async function createChatSession(sessionId: string): Promise<ChatSessionRecord |
   return payload.session || null
 }
 
-async function loadChatSession(session: ChatSessionListItem): Promise<ChatSessionRecord | null> {
+async function loadChatSession(session: ChatSessionListItem, requestTraceId = traceId()): Promise<ChatSessionRecord | null> {
   const searchParams = new URLSearchParams()
   if (session.recordId) {
     searchParams.set("recordId", String(session.recordId))
@@ -220,14 +221,15 @@ async function loadChatSession(session: ChatSessionListItem): Promise<ChatSessio
     searchParams.set("sessionId", session.sessionId)
   }
 
-  const response = await fetch(`/api/chat/sessions?${searchParams.toString()}`, {
+  const response = await fetchChatWithDiagnostics(`/api/chat/sessions?${searchParams.toString()}`, {
     method: "GET",
     credentials: "same-origin",
     cache: "no-store",
+    headers: { [TRACE_HEADER]: requestTraceId },
   })
 
   if (response.status === 401) {
-    window.location.assign(`/login?next=${encodeURIComponent("/chat")}`)
+    redirectToChatLogin(response, "/api/chat/sessions")
     throw new Error("请重新登录后发送消息")
   }
 
@@ -245,7 +247,7 @@ async function saveChatSession(input: {
   recordId: string | number | null
   messages: Message[]
 }): Promise<ChatSessionRecord | null> {
-  const response = await fetch("/api/chat/sessions", {
+  const response = await fetchChatWithDiagnostics("/api/chat/sessions", {
     method: "PATCH",
     credentials: "same-origin",
     headers: {
@@ -259,7 +261,7 @@ async function saveChatSession(input: {
   })
 
   if (response.status === 401) {
-    window.location.assign(`/login?next=${encodeURIComponent("/chat")}`)
+    redirectToChatLogin(response, "/api/chat/sessions")
     return null
   }
 
@@ -272,7 +274,7 @@ async function saveChatSession(input: {
 }
 
 async function deleteChatSession(session: ChatSessionListItem): Promise<void> {
-  const response = await fetch("/api/chat/sessions", {
+  const response = await fetchChatWithDiagnostics("/api/chat/sessions", {
     method: "DELETE",
     credentials: "same-origin",
     headers: {
@@ -282,7 +284,7 @@ async function deleteChatSession(session: ChatSessionListItem): Promise<void> {
   })
 
   if (response.status === 401) {
-    window.location.assign(`/login?next=${encodeURIComponent("/chat")}`)
+    redirectToChatLogin(response, "/api/chat/sessions")
     throw new Error("Authentication required")
   }
 
@@ -458,7 +460,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [selectedProvider, setSelectedProvider] = useState<ModelProvider>(DEFAULT_MODEL_PROVIDER)
   const [selectedModel, setSelectedModel] = useState<AIModel>(() => getDefaultModel(DEFAULT_MODEL_PROVIDER))
   const [developerMode, setDeveloperMode] = useState(false)
-  const [selectedRouterModel, setSelectedRouterModel] = useState<RouterModel>(DEFAULT_ROUTER_MODEL)
+  const [selectedRouterModels, setSelectedRouterModels] = useState<RouterModel[]>(() => [...DEFAULT_ROUTER_MODELS])
   const preparingSessionRef = useRef(false)
   const [agentSessionId, setAgentSessionId] = useState("")
   const [activeRecordId, setActiveRecordId] = useState<string | number | null>(null)
@@ -506,12 +508,9 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         localStorage.setItem(MODEL_STORAGE_KEY, defaultModel)
       }
       setDeveloperMode(localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) === "enabled")
-      const savedRouterModel = localStorage.getItem(ROUTER_MODEL_STORAGE_KEY)
-      if (isRouterModel(savedRouterModel)) {
-        setSelectedRouterModel(savedRouterModel)
-      } else {
-        localStorage.setItem(ROUTER_MODEL_STORAGE_KEY, DEFAULT_ROUTER_MODEL)
-      }
+      const savedRouterModels = readStoredRouterModels(localStorage.getItem(ROUTER_MODELS_STORAGE_KEY))
+      setSelectedRouterModels(savedRouterModels)
+      localStorage.setItem(ROUTER_MODELS_STORAGE_KEY, JSON.stringify(savedRouterModels))
       const currentSessionId = getOrCreateAgentSessionId()
       activeSessionIdRef.current = currentSessionId
       sessionMessagesRef.current.set(currentSessionId, storedMessages)
@@ -693,12 +692,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     localStorage.setItem(DEVELOPER_MODE_STORAGE_KEY, enabled ? "enabled" : "disabled")
   }, [])
 
-  const handleRouterModelChange = useCallback((model: RouterModel) => {
-    if (!isRouterModel(model)) {
-      return
-    }
-    setSelectedRouterModel(model)
-    localStorage.setItem(ROUTER_MODEL_STORAGE_KEY, model)
+  const handleRouterModelsChange = useCallback((models: RouterModel[]) => {
+    if (!isRouterModelSelection(models)) return
+    const selection = [...new Set(models)]
+    setSelectedRouterModels(selection)
+    localStorage.setItem(ROUTER_MODELS_STORAGE_KEY, JSON.stringify(selection))
   }, [])
 
   const persistMessages = useCallback(
@@ -721,7 +719,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
               setActiveRecordId(session.recordId)
             }
           } catch (saveError) {
-            console.error("Failed to save chat session:", saveError)
+            console.warn("Failed to save chat session: See [oa-chat] diagnostics.")
           } finally {
             setSessionListRefreshKey((value) => value + 1)
           }
@@ -814,14 +812,15 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       let currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
       if (activeSessionRunsRef.current.has(currentAgentSessionId)) return false
       preparingSessionRef.current = true
+      const preparationTraceId = traceId()
       const originalSessionId = currentAgentSessionId
       try {
         currentAgentSessionId = await prepareChatSession({
           sessionId: originalSessionId,
           hasMessages: messagesRef.current.length > 0,
-          load: () => loadChatSession({ sessionId: originalSessionId, recordId: originalSessionId }),
+          load: () => loadChatSession({ sessionId: originalSessionId, recordId: originalSessionId }, preparationTraceId),
           create: async () => {
-            const session = await createChatSession(originalSessionId)
+            const session = await createChatSession(originalSessionId, preparationTraceId)
             if (!session?.recordId) throw new Error("创建 OA 会话失败")
             return String(session.recordId)
           },
@@ -835,6 +834,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         setActiveRecordId(currentAgentSessionId)
         persistAgentSessionId(currentAgentSessionId)
       } catch (error) {
+        logChatDiagnostic({ scope: "browser", route: "/api/chat/sessions", traceId: preparationTraceId, event: "prepare_failed" })
         if (activeSessionIdRef.current === originalSessionId) {
           setError(error instanceof Error ? error.message : "读取 OA 会话失败")
         }
@@ -846,6 +846,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
       setError(null)
       const responseStartedAt = performance.now()
+      const messageTraceId = traceId()
       const conversationMessages = messagesRef.current
 
       const requestId = retryRequestId || generateId()
@@ -910,10 +911,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
 
       try {
-        const response = await fetch("/api/chat", {
+        const response = await fetchChatWithDiagnostics("/api/chat", {
           method: "POST",
           credentials: "same-origin",
           headers: {
+            [TRACE_HEADER]: messageTraceId,
             Accept: "text/event-stream",
             "Content-Type": "application/json",
           },
@@ -928,13 +930,13 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             provider: selectedProvider,
             model: selectedModel,
             developerMode,
-            routerModel: selectedRouterModel,
+            routerModels: selectedRouterModels,
           }),
           signal: controller.signal,
         })
 
         if (response.status === 401) {
-          window.location.assign(`/login?next=${encodeURIComponent("/chat")}`)
+          redirectToChatLogin(response, "/api/chat")
           throw new Error("Please sign in again.")
         }
 
@@ -1212,10 +1214,12 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           ),
         ]
 
+        logChatDiagnostic({ scope: "browser", route: "/api/chat", traceId: messageTraceId, event: "stream_completed", durationMs: performance.now() - responseStartedAt })
         publishSessionMessages(completedMessages)
 
         setSessionListRefreshKey((value) => value + 1)
       } catch (e) {
+        logChatDiagnostic({ scope: "browser", route: "/api/chat", traceId: messageTraceId, event: controller.signal.aborted ? "aborted" : "stream_failed", durationMs: performance.now() - responseStartedAt })
         cancelPendingTypewriter()
 
         const wasStopped = e instanceof Error && e.name === "AbortError"
@@ -1244,7 +1248,6 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
         publishSessionMessages(terminalMessages)
         if (!wasStopped && activeSessionIdRef.current === currentAgentSessionId && isCurrentSessionRun()) {
-          console.error("Error sending message:", e)
           setError(errorMessage)
         }
 
@@ -1266,7 +1269,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       selectedProvider,
       selectedModel,
       developerMode,
-      selectedRouterModel,
+      selectedRouterModels,
       agentSessionId,
       activeRecordId,
       persistMessages,
@@ -1298,7 +1301,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const stopStreaming = useCallback(() => {
     const run = activeSessionRunsRef.current.get(agentSessionId)
     if (!run) return
-    void fetch(`/api/chat/requests?recordId=${encodeURIComponent(agentSessionId)}&requestId=${encodeURIComponent(run.requestId)}&action=cancel`, {
+    void fetchChatWithDiagnostics(`/api/chat/requests?recordId=${encodeURIComponent(agentSessionId)}&requestId=${encodeURIComponent(run.requestId)}&action=cancel`, {
       method: "POST", credentials: "same-origin",
     }).then(async response => {
       if (!response.ok) throw new Error("取消请求失败")
@@ -1440,7 +1443,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         if (activeSessionIdRef.current !== session.sessionId) {
           return
         }
-        console.error("Failed to load chat session:", error)
+        console.warn("Failed to load chat session: See [oa-chat] diagnostics.")
         if (!cachedMessages) {
           messagesRef.current = []
           setMessages([])
@@ -1553,8 +1556,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         onProviderChange={handleProviderChange}
         developerMode={developerMode}
         onDeveloperModeChange={handleDeveloperModeChange}
-        selectedRouterModel={selectedRouterModel}
-        onRouterModelChange={handleRouterModelChange}
+        selectedRouterModels={selectedRouterModels}
+        onRouterModelsChange={handleRouterModelsChange}
         providerSwitchDisabled={isStreaming}
         sessionIndicatorStates={sessionIndicatorStates}
       />

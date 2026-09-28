@@ -1,0 +1,99 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "kb-children",
+  "round": 0,
+  "ms": 2131,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "getKnowledgeBasePage",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "getPageRevision",
+    "searchKnowledgeBase",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "listSystemImages"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "oa_database_read",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1360,
+        "completion_tokens": 69,
+        "total_tokens": 1429,
+        "cost": 0.000377904,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 384,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000377904,
+          "upstream_inference_prompt_cost": 0.000295104,
+          "upstream_inference_completions_cost": 0.0000828
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"listKnowledgeBasePageChildren\"],\"accessMode\":\"read\",\"searchTerms\":[\"list direct child pages of knowledge base directory\",\"browse immediate subpages under a page\",\"knowledge base page children non-recursive\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2127,
+      "text": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"listKnowledgeBasePageChildren\"],\"accessMode\":\"read\",\"searchTerms\":[\"list direct child pages of knowledge base directory\",\"browse immediate subpages under a page\",\"knowledge base page children non-recursive\"]}"
+    }
+  ]
+}

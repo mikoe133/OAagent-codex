@@ -1,0 +1,87 @@
+{
+  "model": "qwen/qwen3.5-flash-02-23",
+  "caseId": "project-status",
+  "round": 0,
+  "ms": 2075,
+  "semantic": true,
+  "strictJson": false,
+  "domainCorrect": true,
+  "operationCorrect": false,
+  "accessCorrect": false,
+  "correct": false,
+  "readContamination": true,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "none"
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1238,
+        "completion_tokens": 76,
+        "total_tokens": 1314,
+        "cost": 0.00010023,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00010023,
+          "upstream_inference_prompt_cost": 0.00008047,
+          "upstream_inference_completions_cost": 0.00001976
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Alibaba",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalog\": [\n    \"oa\"\n  ],\n  \"tags\": [\n    \"projects\"\n  ],\n  \"operationIds\": [\n    \"projects_projects_project_put\",\n    \"projects_projects_project_post\"\n  ],\n  \"searchTerms\": \"get project status and assignee for project 28\"\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2072,
+      "text": "{\n  \"catalog\": [\n    \"oa\"\n  ],\n  \"tags\": [\n    \"projects\"\n  ],\n  \"operationIds\": [\n    \"projects_projects_project_put\",\n    \"projects_projects_project_post\"\n  ],\n  \"searchTerms\": \"get project status and assignee for project 28\"\n}"
+    }
+  ]
+}

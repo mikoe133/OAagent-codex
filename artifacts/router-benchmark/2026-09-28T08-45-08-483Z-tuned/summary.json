@@ -1,0 +1,20 @@
+[
+  {
+    "model": "z-ai/glm-5.3-flash",
+    "n": 48,
+    "correct": 48,
+    "semantic": 48,
+    "strictJson": 48,
+    "domainCorrect": 48,
+    "operationCorrect": 48,
+    "accessCorrect": 48,
+    "readContamination": 0,
+    "recalled": 48,
+    "p50ms": 1724,
+    "p95ms": 2604,
+    "attempts": 49,
+    "reportedCost": 0.007812510000000002,
+    "billedResponses": 49,
+    "failures": []
+  }
+]

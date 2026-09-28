@@ -1,0 +1,68 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "kb-policy",
+  "round": 0,
+  "ms": 8006,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型超时（8 秒）"
+  },
+  "finalOperationIds": [
+    "update_weekly_report_days_holiday_weekly_report_days_holiday_put",
+    "oa_database_read",
+    "skill_user_skills_delete",
+    "skill_user_skills_post",
+    "skill_user_skills_put",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "oa_database_read",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "update_weekly_report_days_holiday_weekly_report_days_holiday_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      },
+      "status": 200,
+      "error": {
+        "name": "TimeoutError"
+      },
+      "ms": 8000
+    }
+  ]
+}

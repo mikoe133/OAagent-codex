@@ -16,11 +16,17 @@ export const ROUTER_MODELS = [
   { id: "z-ai/glm-4.7-flash", name: "GLM 4.7 Flash" },
   { id: "qwen/qwen3.5-flash-02-23", name: "Qwen 3.5 Flash" },
   { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+  { id: "z-ai/glm-5.3-flash", name: "GLM 5.3 Flash" },
+  { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+  { id: "qwen/qwen3.8-flash", name: "Qwen 3.8 Flash" },
 ] as const
 
 export type RouterModel = (typeof ROUTER_MODELS)[number]["id"]
 
-export const DEFAULT_ROUTER_MODEL: RouterModel = "z-ai/glm-4.7-flash"
+export const DEFAULT_ROUTER_MODELS = [
+  "z-ai/glm-5.3-flash",
+  "deepseek/deepseek-v4.1-flash",
+] as const satisfies readonly RouterModel[]
 
 export const MODELS_BY_PROVIDER = {
   nexttoken: [
@@ -83,4 +89,21 @@ export function isAIModel(value: unknown): value is AIModel {
 
 export function isRouterModel(value: unknown): value is RouterModel {
   return typeof value === "string" && ROUTER_MODELS.some((model) => model.id === value)
+}
+
+export function isRouterModelSelection(value: unknown): value is RouterModel[] {
+  return Array.isArray(value) && value.length > 0 && value.length <= ROUTER_MODELS.length && value.every(isRouterModel)
+}
+
+export function readStoredRouterModels(value: string | null): RouterModel[] {
+  try {
+    const parsed: unknown = value ? JSON.parse(value) : null
+    if (isRouterModelSelection(parsed)) return [...new Set(parsed)]
+  } catch { /* Invalid or legacy values use the new defaults. */ }
+  return [...DEFAULT_ROUTER_MODELS]
+}
+
+export function toggleRouterModel(models: readonly RouterModel[], model: RouterModel): RouterModel[] {
+  if (!models.includes(model)) return [...models, model]
+  return models.length > 1 ? models.filter(selected => selected !== model) : [...models]
 }

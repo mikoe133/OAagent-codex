@@ -1,0 +1,51 @@
+{
+  "startedAt": "2026-09-28T08:40:54.812Z",
+  "mode": "native",
+  "rounds": 1,
+  "concurrency": 3,
+  "models": [
+    "z-ai/glm-4.7-flash",
+    "qwen/qwen3.5-flash-02-23",
+    "deepseek/deepseek-v4-flash",
+    "z-ai/glm-5.3-flash",
+    "qwen/qwen3.8-flash",
+    "deepseek/deepseek-v4.1-flash",
+    "xiaomi/mimo-v2.6-flash"
+  ],
+  "databaseMode": true,
+  "operationCount": 167,
+  "oaContractSha256": "72aea07bb7675e78171f2a987dc8abb7d724ca69ba1f76d4a06558ac00e5055d",
+  "cases": [
+    {
+      "id": "project-status",
+      "task": "请查一下项目28目前的状态和负责人。",
+      "catalogs": [
+        "oa"
+      ],
+      "access": [
+        "read"
+      ],
+      "groups": [
+        [
+          "oa_database_read"
+        ]
+      ]
+    },
+    {
+      "id": "kb-policy",
+      "task": "在公司知识库中查找请假制度，告诉我年假怎么申请。",
+      "catalogs": [
+        "knowledge_base_read"
+      ],
+      "access": [
+        "read"
+      ],
+      "groups": [
+        [
+          "searchKnowledgeBase"
+        ]
+      ]
+    }
+  ],
+  "note": "Synthetic cases; local contracts; real production prompt, candidate retrieval, decoder and 8s deadline. No business API calls. Tuned changes only reasoning.enabled=false and provider.require_parameters=true."
+}

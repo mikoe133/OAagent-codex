@@ -6,6 +6,16 @@ import test from "node:test"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
+test("isolates OA business database secrets between test and production deployments", async () => {
+  const workflow = await readFile(path.join(repoRoot, '.github/workflows/ci-cd.yml'), 'utf8')
+  for (const [job, secret] of [['deploy-test', 'DATABASE_URL_READ_TEST'], ['deploy-production', 'DATABASE_URL_READ']]) {
+    const section = workflow.split(`  ${job}:\n`)[1].split(/\n  [a-z-]+:\n/)[0]
+    const mapping = section.match(/^      DATABASE_URL_READ: (.+)$/m)?.[1]
+    assert.equal(mapping, '${{ secrets.' + secret + ' }}')
+    assert.match(section, /^      DATABASE_URL: \$\{\{ secrets\.DATABASE_URL \}\}$/m)
+  }
+})
+
 test("reserves time for both image transfers, imports, and deployment health checks", async () => {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
   for (const job of ["deploy-test", "deploy-production"]) {

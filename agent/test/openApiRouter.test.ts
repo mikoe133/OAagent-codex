@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { AppConfig } from "../src/config/config.js";
+import { DEFAULT_ROUTER_MODELS, ROUTER_MODEL_CATALOG } from "../src/config/modelCatalog.js";
 import {
   buildOpenApiIndex,
   mergeOpenApiIndexes,
@@ -10,6 +11,7 @@ import {
   routeOpenApiCandidates,
   routeOpenApiRequest,
   routeOpenApiRequestWithFallback,
+  routeOpenApiRequestRace,
 } from "../src/infrastructure/oa/openApiRouter.js";
 
 describe("OpenAPI semantic router", () => {
@@ -673,7 +675,8 @@ describe("OpenAPI semantic router", () => {
     await router("route this request");
 
     const body = JSON.parse(String(requestInit?.body)) as Record<string, unknown>;
-    assert.deepEqual(body.reasoning, { effort: "none" });
+    assert.deepEqual(body.reasoning, { enabled: false });
+    assert.deepEqual(body.provider, { require_parameters: true });
   });
 
   it("accepts reasoning-only JSON returned by reasoning-capable router models", async () => {
@@ -823,6 +826,101 @@ describe("OpenAPI semantic router", () => {
       result.candidates[0]?.operationId,
       "github_commit_summaries_projects_github_commit_summaries_get",
     );
+  });
+});
+
+
+describe("selected router model races", () => {
+  const validRoute = JSON.stringify({ catalogs: ["oa"], tags: ["projects"], operationIds: ["projects_projects_project_get"], accessMode: "read", searchTerms: ["project status"] });
+  const index = buildOpenApiIndex(createContract());
+
+  it("uses the measured parameters for every selectable OpenRouter model", async () => {
+    for (const model of ROUTER_MODEL_CATALOG) {
+      let body: any;
+      const router = createOpenApiSemanticRouter({ ...createConfig(), modelProvider: "openrouter", model,
+        modelProviders: { ...createConfig().modelProviders, openrouter: { name: "OpenRouter", apiKey: "test", baseUrl: "https://openrouter.test/v1", envKey: "OPENROUTER_API_KEY" } },
+      }, async (_url, init) => {
+        body = JSON.parse(String(init?.body));
+        return Response.json({ choices: [{ message: { content: validRoute } }] });
+      });
+      await router("test");
+      assert.equal(body.model, model);
+      assert.deepEqual(body.reasoning, model === "z-ai/glm-5.3-flash" ? { effort: "low" } : { enabled: false });
+      assert.deepEqual(body.provider, { require_parameters: true });
+      assert.equal(body.response_format.json_schema.strict, true);
+    }
+  });
+
+  for (const winner of [0, 1]) {
+    it(`starts the default pair together and cancels the loser when model ${winner} wins`, async () => {
+      const started: string[] = [];
+      let release!: () => void;
+      const allStarted = new Promise<void>(resolve => { release = resolve; });
+      let loserAborted = false;
+      const result = await routeOpenApiRequestRace(createConfig(), index, { task: "项目状态" }, DEFAULT_ROUTER_MODELS.map((model, position) => ({
+        model,
+        router: async (_prompt, options) => {
+          started.push(model);
+          if (started.length === 2) release();
+          await allStarted;
+          if (position === winner) return validRoute;
+          return new Promise<string>((_resolve, reject) => {
+            options!.signal!.addEventListener("abort", () => { loserAborted = true; reject(new Error("aborted")); }, { once: true });
+          });
+        },
+      })));
+      assert.deepEqual(started, DEFAULT_ROUTER_MODELS);
+      assert.equal(loserAborted, true);
+      assert.equal(result.diagnostics.strategy, "semantic");
+      if (result.diagnostics.strategy === "semantic") assert.equal(result.diagnostics.winningModel, DEFAULT_ROUTER_MODELS[winner]);
+    });
+  }
+
+  it("does not let a fast invalid response beat a valid third selected model", async () => {
+    const result = await routeOpenApiRequestRace(createConfig(), index, { task: "项目状态" }, [
+      { model: "invalid", router: async () => "invalid" },
+      { model: "failed", router: async () => { throw new Error("503"); } },
+      { model: "valid", router: async () => { await new Promise(resolve => setTimeout(resolve, 10)); return validRoute; } },
+    ]);
+    assert.equal(result.diagnostics.strategy, "semantic");
+    if (result.diagnostics.strategy === "semantic") {
+      assert.equal(result.diagnostics.winningModel, "valid");
+      assert.equal(result.diagnostics.racedModelCount, 3);
+    }
+  });
+
+  it("runs only a single explicitly selected model", async () => {
+    let calls = 0;
+    const result = await routeOpenApiRequestRace(createConfig(), index, { task: "项目状态" }, [{ model: "single", router: async () => { calls++; return validRoute; } }]);
+    assert.equal(calls, 1);
+    assert.deepEqual(result.diagnostics, { strategy: "semantic", winningModel: "single", racedModelCount: 1 });
+  });
+
+  it("uses safe fallback only after all racers fail without launching an extra model", async () => {
+    const calls = [0, 0, 0];
+    const result = await routeOpenApiRequestRace(createConfig(), index, { task: "项目状态" }, calls.map((_value, i) => ({
+      router: async () => { calls[i]!++; throw new Error("503"); },
+    })));
+    assert.equal(result.diagnostics.strategy, "fallback");
+    assert.deepEqual(calls, [2, 2, 2]);
+    assert.ok(result.candidates.every(operation => operation.method === "GET"));
+    assert.ok(!result.catalogs.includes("knowledge_base_write"));
+  });
+
+  it("cancels every pending racer when the parent request is cancelled", async () => {
+    const parent = new AbortController();
+    let started = 0;
+    let aborted = 0;
+    const result = routeOpenApiRequestRace(createConfig(), index, { task: "项目状态", signal: parent.signal }, DEFAULT_ROUTER_MODELS.map(model => ({
+      model,
+      router: async (_prompt, options) => new Promise<string>((_resolve, reject) => {
+        options!.signal!.addEventListener("abort", () => { aborted++; reject(new Error("aborted")); }, { once: true });
+        if (++started === 2) parent.abort();
+      }),
+    })));
+    assert.equal((await result).diagnostics.strategy, "fallback");
+    assert.equal(started, 2);
+    assert.equal(aborted, 2);
   });
 });
 

@@ -1,0 +1,111 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "proper-name",
+  "round": 0,
+  "ms": 6,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型服务暂时不可用"
+  },
+  "finalOperationIds": [
+    "update_user_profile_user_user_put",
+    "oa_database_read",
+    "user_skill_user_user_skill_delete",
+    "user_skill_user_user_skill_put",
+    "user_images_user_image_delete",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "uploadKnowledgeBaseAttachment",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "update_user_salary_ai_report_user_salary_put",
+        "upload_avatar_files_upload_avatar_post",
+        "upload_file_files_upload_post",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "update_user_profile_user_user_put",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_post"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      }
+    },
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "uploadKnowledgeBaseAttachment",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "update_user_salary_ai_report_user_salary_put",
+        "user_salary_import_preview_ai_report_user_salary_import_preview_post",
+        "upload_avatar_files_upload_avatar_post",
+        "upload_file_files_upload_post",
+        "upload_avatar_upload_desktop_software_post",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "user_task_tasks_user_task_delete",
+        "user_task_tasks_user_task_put",
+        "user_task_tasks_user_task_post",
+        "update_user_profile_user_user_put",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      }
+    }
+  ]
+}

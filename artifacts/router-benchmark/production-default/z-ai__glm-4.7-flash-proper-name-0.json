@@ -1,0 +1,68 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "proper-name",
+  "round": 0,
+  "ms": 8006,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型超时（8 秒）"
+  },
+  "finalOperationIds": [
+    "update_user_profile_user_user_put",
+    "oa_database_read",
+    "user_skill_user_user_skill_delete",
+    "user_skill_user_user_skill_put",
+    "user_images_user_image_delete",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "uploadKnowledgeBaseAttachment",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "update_user_salary_ai_report_user_salary_put",
+        "upload_avatar_files_upload_avatar_post",
+        "upload_file_files_upload_post",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "update_user_profile_user_user_put",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_post"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      },
+      "status": 200,
+      "error": {
+        "name": "TimeoutError"
+      },
+      "ms": 7998
+    }
+  ]
+}

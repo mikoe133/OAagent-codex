@@ -1,0 +1,97 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "kb-rename",
+  "round": 0,
+  "ms": 1521,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "applyPageContentDraft",
+    "updateKnowledgeBaseNodeMetadata",
+    "createKnowledgeBaseNode",
+    "createPageContentDraft",
+    "moveKnowledgeBaseNode",
+    "uploadKnowledgeBaseAttachment",
+    "discardPageContentDraft",
+    "replacePageContentDraft"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "oa_database_read",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1281,
+        "completion_tokens": 54,
+        "total_tokens": 1335,
+        "cost": 0.00018075,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 320,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00018075,
+          "upstream_inference_prompt_cost": 0.00015375,
+          "upstream_inference_completions_cost": 0.000027
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_write\"],\"tags\":[\"untagged\"],\"operationIds\":[\"applyPageContentDraft\"],\"accessMode\":\"write\",\"searchTerms\":[\"rename knowledge base page 123 title to 新版报销指南 keep body unchanged\",\"update page title expense guide\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1516,
+      "text": "{\"catalogs\":[\"knowledge_base_write\"],\"tags\":[\"untagged\"],\"operationIds\":[\"applyPageContentDraft\"],\"accessMode\":\"write\",\"searchTerms\":[\"rename knowledge base page 123 title to 新版报销指南 keep body unchanged\",\"update page title expense guide\"]}"
+    }
+  ]
+}

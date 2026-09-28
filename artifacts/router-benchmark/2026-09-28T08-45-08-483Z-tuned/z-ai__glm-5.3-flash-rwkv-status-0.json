@@ -1,0 +1,98 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "rwkv-status",
+  "round": 0,
+  "ms": 1796,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1722,
+        "completion_tokens": 61,
+        "total_tokens": 1783,
+        "cost": 0.00025808,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00025808,
+          "upstream_inference_prompt_cost": 0.00022758,
+          "upstream_inference_completions_cost": 0.0000305
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 10,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"RWKV Chat 项目最近进展\",\"项目进展 周报 汇总\",\"RWKV Chat 项目状态\"]}",
+        "refusal": null,
+        "reasoning": "Read query about project progress → oa_database_read.",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "Read query about project progress → oa_database_read.",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "ms": 1795,
+      "text": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"RWKV Chat 项目最近进展\",\"项目进展 周报 汇总\",\"RWKV Chat 项目状态\"]}"
+    }
+  ]
+}

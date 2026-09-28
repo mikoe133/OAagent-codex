@@ -1,0 +1,90 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "member-count",
+  "round": 0,
+  "ms": 3529,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "announcement_ann_hr_announcement_delete",
+        "announcement_ann_hr_announcement_post",
+        "announcement_ann_hr_announcement_put",
+        "announcement_ensure_ann_user_announcement_put",
+        "assets_assets_asset_delete",
+        "copilot_record_create_copilot_record_post",
+        "copilot_record_update_copilot_record_patch",
+        "oa_database_read",
+        "add_question_tag_qa_question_tags_post",
+        "answer_reaction_qa_answer_reaction_delete",
+        "answer_reaction_qa_answer_reaction_post",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post",
+        "user_skill_user_user_skill_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1482,
+        "completion_tokens": 73,
+        "total_tokens": 1555,
+        "cost": 0.000419304,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 384,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000419304,
+          "upstream_inference_prompt_cost": 0.000331704,
+          "upstream_inference_completions_cost": 0.0000876
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"在职员工人数 按部门 统计\",\"部门 在职成员 数量 汇总\",\"employee headcount by department\",\"active employees count by department\",\"department member statistics\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 3523,
+      "text": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"在职员工人数 按部门 统计\",\"部门 在职成员 数量 汇总\",\"employee headcount by department\",\"active employees count by department\",\"department member statistics\"]}"
+    }
+  ]
+}

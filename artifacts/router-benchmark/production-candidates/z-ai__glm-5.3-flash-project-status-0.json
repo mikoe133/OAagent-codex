@@ -1,0 +1,169 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "project-status",
+  "round": 0,
+  "ms": 8007,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型超时（8 秒）"
+  },
+  "finalOperationIds": [
+    "projects_projects_project_put",
+    "projects_projects_project_delete",
+    "projects_projects_project_post",
+    "issue_projects_issue_post",
+    "milestones_projects_milestones_post",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1222,
+        "completion_tokens": 512,
+        "total_tokens": 1734,
+        "cost": 0.00040858,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00040858,
+          "upstream_inference_prompt_cost": 0.00015258,
+          "upstream_inference_completions_cost": 0.000256
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 446,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "length",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"searchKnowledgeBase\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"project 28 current status\", \"project 28 owner responsible person\", \"project 28 state and assignee",
+        "refusal": null,
+        "reasoning": "No read operation for project status exists in oa... only write ops. Hmm. The user asks to look up project 28 status and owner. Available oa ops are all writes. Maybe route to oa with... no read. Perhaps use searchKnowledgeBase? No—project status is OA data. Best: catalog oa, tag projects, but no read op. Maybe pick projects_projects_project_put? No, that's write. The instruction: choose read for lookup. Since no read op exists, maybe still route to oa with the closest? Perhaps route to knowledge_base_read searchKnowledgeBase as fallback? Hmm. The schema requires operationIds. I'll route to oa tag projects with... Actually maybe the intended answer: no suitable read op; use searchKnowledgeBase? Project status is transactional OA data. I'll pick oa/projects with projects_projects_project_put? That's wrong. Better to return searchKnowledgeBase as read lookup? The rule says use oa for project state. Given no read op, maybe the router should still select the closest: none. But schema demands 1-8 operationIds. I'll choose oa, projects, and the put op? No—choose read for lookup; the only read available is searchKnowledgeBase. I'll go with knowledge_base_read/searchKnowledgeBase? That contradicts \"never substitute an OA operation when that catalog is unavailable\" — reverse case. Hmm.\n\nI think the pragmatic answer: catalog oa, tag projects, operationId projects_projects_project_put is a write — bad. Given constraints, I'll select oa/projects with the put? No.\n\nActually maybe the intended design: the router returns best-effort; since only write ops exist for projects, route to oa anyway with the closest metadata op. I'll pick projects_projects_project_put as it returns project info? It's PUT. Alternatively return empty? Schema requires 1-8. I'll go with oa, projects, [\"projects_projects_project_put\"]? That would mutate. Risky.\n\nGiven \"Choose read for lookup... otherwise choose mixed\" — no mutation requested, so read. Only read op is searchKnowledgeBase. I'll route there with search terms about project 28 status and owner. That seems safest.",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "No read operation for project status exists in oa... only write ops. Hmm. The user asks to look up project 28 status and owner. Available oa ops are all writes. Maybe route to oa with... no read. Perhaps use searchKnowledgeBase? No—project status is OA data. Best: catalog oa, tag projects, but no read op. Maybe pick projects_projects_project_put? No, that's write. The instruction: choose read for lookup. Since no read op exists, maybe still route to oa with the closest? Perhaps route to knowledge_base_read searchKnowledgeBase as fallback? Hmm. The schema requires operationIds. I'll route to oa tag projects with... Actually maybe the intended answer: no suitable read op; use searchKnowledgeBase? Project status is transactional OA data. I'll pick oa/projects with projects_projects_project_put? That's wrong. Better to return searchKnowledgeBase as read lookup? The rule says use oa for project state. Given no read op, maybe the router should still select the closest: none. But schema demands 1-8 operationIds. I'll choose oa, projects, and the put op? No—choose read for lookup; the only read available is searchKnowledgeBase. I'll go with knowledge_base_read/searchKnowledgeBase? That contradicts \"never substitute an OA operation when that catalog is unavailable\" — reverse case. Hmm.\n\nI think the pragmatic answer: catalog oa, tag projects, operationId projects_projects_project_put is a write — bad. Given constraints, I'll select oa/projects with the put? No.\n\nActually maybe the intended design: the router returns best-effort; since only write ops exist for projects, route to oa anyway with the closest metadata op. I'll pick projects_projects_project_put as it returns project info? It's PUT. Alternatively return empty? Schema requires 1-8. I'll go with oa, projects, [\"projects_projects_project_put\"]? That would mutate. Risky.\n\nGiven \"Choose read for lookup... otherwise choose mixed\" — no mutation requested, so read. Only read op is searchKnowledgeBase. I'll route there with search terms about project 28 status and owner. That seems safest.",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "ms": 7321,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"searchKnowledgeBase\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"project 28 current status\", \"project 28 owner responsible person\", \"project 28 state and assignee"
+    },
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete",
+        "issue_status_projects_change_issue_status_put",
+        "milestones_projects_milestones__milestone_id__delete",
+        "milestones_projects_milestones__milestone_id__put",
+        "public_projects_public_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "error": {
+        "name": "TimeoutError"
+      },
+      "ms": 679
+    }
+  ]
+}

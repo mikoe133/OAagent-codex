@@ -1,0 +1,96 @@
+{
+  "model": "qwen/qwen3.8-flash",
+  "caseId": "issue-priority",
+  "round": 0,
+  "ms": 3476,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "issue_projects_change_issue_priority_put",
+    "issue_status_projects_change_issue_status_put",
+    "issue_projects_issue_post",
+    "projects_projects_project_delete",
+    "projects_projects_project_post",
+    "projects_projects_project_put",
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1416,
+        "completion_tokens": 93,
+        "total_tokens": 1509,
+        "cost": 0.000221806,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000221806,
+          "upstream_inference_prompt_cost": 0.000178096,
+          "upstream_inference_completions_cost": 0.00004371
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Alibaba",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\n    \"oa\"\n  ],\n  \"tags\": [\n    \"projects\"\n  ],\n  \"operationIds\": [\n    \"issue_projects_change_issue_priority_put\"\n  ],\n  \"accessMode\": \"write\",\n  \"searchTerms\": [\n    \"change issue priority\",\n    \"update project task priority\",\n    \"set high priority\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 3475,
+      "text": "{\n  \"catalogs\": [\n    \"oa\"\n  ],\n  \"tags\": [\n    \"projects\"\n  ],\n  \"operationIds\": [\n    \"issue_projects_change_issue_priority_put\"\n  ],\n  \"accessMode\": \"write\",\n  \"searchTerms\": [\n    \"change issue priority\",\n    \"update project task priority\",\n    \"set high priority\"\n  ]\n}"
+    }
+  ]
+}

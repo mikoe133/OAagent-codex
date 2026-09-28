@@ -1,0 +1,113 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "read-and-write",
+  "round": 0,
+  "ms": 2092,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "issue_projects_change_issue_priority_put",
+    "issue_status_projects_change_issue_status_put",
+    "issue_milestones_projects_issue_milestones_delete",
+    "issue_milestones_projects_issue_milestones_post",
+    "issue_assignees_projects_issue_assignees_delete",
+    "issue_assignees_projects_issue_assignees_post",
+    "issue_comments_projects_issue_comments_delete",
+    "issue_comments_projects_issue_comments_post",
+    "issue_comments_projects_issue_comments_put",
+    "issue_label_projects_issue_label_delete",
+    "issue_label_projects_issue_label_post",
+    "issue_projects_issue_delete",
+    "issue_projects_issue_post",
+    "milestones_projects_milestones__milestone_id__delete",
+    "milestones_projects_milestones__milestone_id__put",
+    "milestones_projects_milestones_post"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1229,
+        "completion_tokens": 83,
+        "total_tokens": 1312,
+        "cost": 0.00019513,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00019513,
+          "upstream_inference_prompt_cost": 0.00015363,
+          "upstream_inference_completions_cost": 0.0000415
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 32,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\"],\"tags\":[\"projects\"],\"operationIds\":[\"issue_projects_change_issue_priority_put\"],\"accessMode\":\"mixed\",\"searchTerms\":[\"query current status of project 28\",\"set priority of issue 123 to high\",\"change issue priority\"]}",
+        "refusal": null,
+        "reasoning": "Query project status: no read op for project status in oa... only write ops. Still route to oa projects tag with issue priority change op. Search terms.",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "Query project status: no read op for project status in oa... only write ops. Still route to oa projects tag with issue priority change op. Search terms.",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "ms": 2088,
+      "text": "{\"catalogs\":[\"oa\"],\"tags\":[\"projects\"],\"operationIds\":[\"issue_projects_change_issue_priority_put\"],\"accessMode\":\"mixed\",\"searchTerms\":[\"query current status of project 28\",\"set priority of issue 123 to high\",\"change issue priority\"]}"
+    }
+  ]
+}

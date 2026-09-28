@@ -1,0 +1,104 @@
+{
+  "model": "xiaomi/mimo-v2.6-flash",
+  "caseId": "cross-domain",
+  "round": 0,
+  "ms": 1451,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": false,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read",
+    "searchKnowledgeBase",
+    "projects_projects_project_delete",
+    "projects_projects_project_post",
+    "projects_projects_project_put",
+    "issue_status_projects_change_issue_status_put",
+    "issue_projects_change_issue_priority_put",
+    "issue_projects_issue_post",
+    "getAgentCapabilities",
+    "getKnowledgeBasePage",
+    "getPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "listPageRevisions"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1407,
+        "completion_tokens": 49,
+        "total_tokens": 1456,
+        "cost": 0.0001755768,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001755768,
+          "upstream_inference_prompt_cost": 0.0001618568,
+          "upstream_inference_completions_cost": 0.00001372
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "DeepInfra",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\",\"knowledge_base_read\"],\"tags\":[\"projects\",\"untagged\"],\"operationIds\":[\"oa_database_read\",\"searchKnowledgeBase\"],\"accessMode\":\"mixed\",\"searchTerms\":[\"project 28 current status\",\"project acceptance specification\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1450,
+      "text": "{\"catalogs\":[\"oa\",\"knowledge_base_read\"],\"tags\":[\"projects\",\"untagged\"],\"operationIds\":[\"oa_database_read\",\"searchKnowledgeBase\"],\"accessMode\":\"mixed\",\"searchTerms\":[\"project 28 current status\",\"project acceptance specification\"]}"
+    }
+  ]
+}

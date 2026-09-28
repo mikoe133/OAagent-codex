@@ -1,0 +1,68 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "weekly-summary",
+  "round": 0,
+  "ms": 8005,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型超时（8 秒）"
+  },
+  "finalOperationIds": [
+    "update_weekly_report_days_holiday_weekly_report_days_holiday_put",
+    "create_ai_report_batch_ai_report_ai_report_batch_post",
+    "create_ai_report_compare_ai_report_ai_report_compare_post",
+    "create_personal_ai_report_ai_report_personal_ai_report_post",
+    "create_user_salary_ai_report_user_salary_post",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "create_ai_report_batch_ai_report_ai_report_batch_post",
+        "create_ai_report_compare_ai_report_ai_report_compare_post",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "update_user_salary_ai_report_user_salary_put",
+        "user_salary_import_preview_ai_report_user_salary_import_preview_post",
+        "oa_database_read",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "update_weekly_report_days_holiday_weekly_report_days_holiday_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      },
+      "status": 200,
+      "error": {
+        "name": "TimeoutError"
+      },
+      "ms": 7996
+    }
+  ]
+}

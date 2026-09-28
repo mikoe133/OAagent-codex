@@ -1,0 +1,165 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "policy-not-write",
+  "round": 0,
+  "ms": 4595,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "listKnowledgeBasePages",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePageChildren",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "getPageContentDraft",
+    "getAgentCapabilities"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1391,
+        "completion_tokens": 110,
+        "total_tokens": 1501,
+        "cost": 0.0001281555,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001281555,
+          "upstream_inference_prompt_cost": 0.0000841555,
+          "upstream_inference_completions_cost": 0.000044
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Cloudflare",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"制度\", \"流程\", \"规定\"],\n  \"operationIds\": [\"searchKnowledgeBase\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"site:knowledge_base_read \\\"删除流程\\\" OR \\\"删除规定\\\" OR \\\"删除制度\\\" OR \\\"删除操作\\\" OR \\\"删除规范\\\" OR \\\"删除流程\\\" OR \\\"删除规定\\\" OR \\\"删除制度\\\" OR \\\"删除操作\\\" OR \\\"删除规范\\\"\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2337,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"制度\", \"流程\", \"规定\"],\n  \"operationIds\": [\"searchKnowledgeBase\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"site:knowledge_base_read \\\"删除流程\\\" OR \\\"删除规定\\\" OR \\\"删除制度\\\" OR \\\"删除操作\\\" OR \\\"删除规范\\\" OR \\\"删除流程\\\" OR \\\"删除规定\\\" OR \\\"删除制度\\\" OR \\\"删除操作\\\" OR \\\"删除规范\\\"\"\n  ]\n}"
+    },
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1412,
+        "completion_tokens": 77,
+        "total_tokens": 1489,
+        "cost": 0.000116226,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000116226,
+          "upstream_inference_prompt_cost": 0.000085426,
+          "upstream_inference_completions_cost": 0.0000308
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Cloudflare",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"searchKnowledgeBase\", \"listKnowledgeBasePages\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"page deletion process policy procedure\",\n    \"delete page workflow rules guidelines\",\n    \"knowledge base page removal policy\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2256,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"searchKnowledgeBase\", \"listKnowledgeBasePages\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"page deletion process policy procedure\",\n    \"delete page workflow rules guidelines\",\n    \"knowledge base page removal policy\"\n  ]\n}"
+    }
+  ]
+}

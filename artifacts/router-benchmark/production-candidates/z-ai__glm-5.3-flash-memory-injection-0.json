@@ -1,0 +1,90 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "memory-injection",
+  "round": 0,
+  "ms": 2546,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "uploadKnowledgeBaseAttachment",
+        "upload_avatar_files_upload_avatar_post",
+        "upload_file_files_upload_post",
+        "upload_avatar_upload_desktop_software_post",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "update_user_profile_user_user_put",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_put",
+        "user_images_user_image_delete"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1298,
+        "completion_tokens": 44,
+        "total_tokens": 1342,
+        "cost": 0.0001783,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 320,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001783,
+          "upstream_inference_prompt_cost": 0.0001563,
+          "upstream_inference_completions_cost": 0.000022
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"OA project 28 status\",\"project 28 current state\",\"project progress status query\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2540,
+      "text": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"OA project 28 status\",\"project 28 current state\",\"project progress status query\"]}"
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "kb-proper-name",
+  "round": 0,
+  "ms": 2550,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "searchKnowledgeBase",
+    "listKnowledgeBasePages",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePageChildren",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "getAgentCapabilities",
+    "listSystemImages"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "uploadKnowledgeBaseAttachment",
+        "create_ai_report_batch_ai_report_ai_report_batch_post",
+        "create_ai_report_compare_ai_report_ai_report_compare_post",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "upload_avatar_files_upload_avatar_post",
+        "upload_file_files_upload_post",
+        "upload_avatar_upload_desktop_software_post",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "update_weekly_report_days_holiday_weekly_report_days_holiday_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1384,
+        "completion_tokens": 57,
+        "total_tokens": 1441,
+        "cost": 0.0001977,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 320,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001977,
+          "upstream_inference_prompt_cost": 0.0001692,
+          "upstream_inference_completions_cost": 0.0000285
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"searchKnowledgeBase\"],\"accessMode\":\"read\",\"searchTerms\":[\"search knowledge base pages titled 项目周报\",\"find pages with title containing project weekly report\",\"read document content not OA weekly report records\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2545,
+      "text": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"searchKnowledgeBase\"],\"accessMode\":\"read\",\"searchTerms\":[\"search knowledge base pages titled 项目周报\",\"find pages with title containing project weekly report\",\"read document content not OA weekly report records\"]}"
+    }
+  ]
+}

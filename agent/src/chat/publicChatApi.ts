@@ -3,7 +3,7 @@ import type { ChatLatencyTrace } from '../infrastructure/observability/chatLaten
 import type { AppConfig } from '../config/config.js';
 import type { AgentService, SendMessageInput } from '../application/agentService.js';
 import type { SessionStore } from '../infrastructure/persistence/sessionStore.js';
-import { getDefaultModel, resolveRequestedModel, resolveRequestedProvider, resolveRequestedRouterModel, ROUTER_MODEL_CATALOG } from '../config/modelCatalog.js';
+import { getDefaultModel, resolveRequestedModel, resolveRequestedProvider, resolveRequestedRouterModel, resolveRequestedRouterModels } from '../config/modelCatalog.js';
 import { ChatError, ChatScheduler } from './chatScheduler.js';
 import { CopilotClient, type CopilotRecord } from './copilotClient.js';
 import { RequestStore, fingerprint, type RequestRecord } from './requestStore.js';
@@ -308,8 +308,10 @@ function selection(config: AppConfig, body: Record<string, any>): Omit<SendMessa
   if (body.developerMode !== undefined && typeof body.developerMode !== 'boolean') throw new ChatError(400, 'invalid_developer_mode', 'developerMode 必须为布尔值');
   try {
     const provider = resolveRequestedProvider(body.provider, config.modelProvider);
+    const routerModels = resolveRequestedRouterModels(body.routerModels, body.routerModel);
     return { message: body.message.trim(), provider, model: resolveRequestedModel(provider, body.model, provider === config.modelProvider ? config.model : getDefaultModel(provider)),
       developerMode: body.developerMode === true,
-      routerModel: body.routerModel !== undefined ? resolveRequestedRouterModel(body.routerModel) : body.developerMode ? ROUTER_MODEL_CATALOG[0] : null };
+      routerModel: body.routerModel !== undefined ? resolveRequestedRouterModel(body.routerModel) : null,
+      ...(body.routerModel === undefined ? { routerModels } : {}) };
   } catch { throw new ChatError(400, 'invalid_model', '模型不在白名单内'); }
 }

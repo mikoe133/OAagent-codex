@@ -1,0 +1,97 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "kb-history",
+  "round": 1,
+  "ms": 1332,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "listPageRevisions",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "getKnowledgeBasePage",
+    "getPageContentDraft",
+    "getAgentCapabilities",
+    "searchKnowledgeBase"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1392,
+        "completion_tokens": 47,
+        "total_tokens": 1439,
+        "cost": 0.0000787,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 1280,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0000787,
+          "upstream_inference_prompt_cost": 0.0000552,
+          "upstream_inference_completions_cost": 0.0000235
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"listPageRevisions\"],\"accessMode\":\"read\",\"searchTerms\":[\"知识库页面123 正文历史版本列表\",\"page 123 revision history list\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1332,
+      "text": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"listPageRevisions\"],\"accessMode\":\"read\",\"searchTerms\":[\"知识库页面123 正文历史版本列表\",\"page 123 revision history list\"]}"
+    }
+  ]
+}

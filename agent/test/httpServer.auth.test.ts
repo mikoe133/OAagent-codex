@@ -564,6 +564,26 @@ test("forwards only approved router models regardless of developer mode", async 
     assert.equal(rejectedWithoutDeveloperMode.status, 400);
     assert.match(rejectedWithoutDeveloperMode.body, /模型/);
     assert.equal(inputs.length, 2);
+
+    const defaults = await requestStream(address.port, "/v1/sessions/1/messages/stream", "valid-token", { message: "default routers" });
+    assert.equal(defaults.status, 200);
+    assert.deepEqual(inputs[2]?.routerModels, ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash"]);
+
+    const selected = await requestStream(address.port, "/v1/sessions/1/messages/stream", "valid-token", {
+      message: "selected routers", developerMode: false,
+      routerModels: ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-flash"],
+    });
+    assert.equal(selected.status, 200);
+    assert.deepEqual(inputs[3]?.routerModels, ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-flash"]);
+    for (const selection of [
+      { routerModels: [] }, { routerModels: null }, { routerModels: ["unknown"] },
+      { routerModels: "z-ai/glm-5.3-flash" }, { routerModels: [42] },
+      { routerModels: ["z-ai/glm-5.3-flash"], routerModel: "z-ai/glm-4.7-flash" },
+    ]) {
+      const response = await requestStream(address.port, "/v1/sessions/1/messages/stream", "valid-token", { message: "invalid", ...selection });
+      assert.equal(response.status, 400);
+    }
+    assert.equal(inputs.length, 4);
   } finally {
     globalThis.fetch = originalFetch;
     await new Promise<void>((resolve, reject) =>

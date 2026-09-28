@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import test from "node:test"
 
 import {
-  DEFAULT_ROUTER_MODEL,
+  DEFAULT_ROUTER_MODELS,
   DEFAULT_MODEL_PROVIDER,
   MODEL_PROVIDERS,
   ROUTER_MODELS,
@@ -12,6 +12,9 @@ import {
   isModelForProvider,
   isModelProvider,
   isRouterModel,
+  isRouterModelSelection,
+  readStoredRouterModels,
+  toggleRouterModel,
 } from "./model-catalog"
 
 test("defaults to OpenRouter while exposing both provider choices", () => {
@@ -27,13 +30,16 @@ test("defaults to OpenRouter while exposing both provider choices", () => {
 })
 
 test("exposes the dedicated lightweight router model choices", () => {
-  assert.equal(DEFAULT_ROUTER_MODEL, "z-ai/glm-4.7-flash")
+  assert.deepEqual(DEFAULT_ROUTER_MODELS, ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash"])
   assert.deepEqual(
     ROUTER_MODELS.map((model) => model.id),
     [
       "z-ai/glm-4.7-flash",
       "qwen/qwen3.5-flash-02-23",
       "deepseek/deepseek-v4-flash",
+      "z-ai/glm-5.3-flash",
+      "deepseek/deepseek-v4.1-flash",
+      "qwen/qwen3.8-flash",
     ],
   )
   assert.equal(isRouterModel("qwen/qwen3.5-flash-02-23"), true)
@@ -115,4 +121,23 @@ test("uses a local Moonshot AI icon for Kimi K3", () => {
 
 test("ships the official Z.ai icon as a local frontend asset", () => {
   assert.equal(existsSync(new URL("../public/images/z-ai.svg", import.meta.url)), true)
+})
+
+
+test("restores multi-selection and migrates missing, invalid or legacy storage to the new default pair", () => {
+  for (const stored of [null, "invalid", "z-ai/glm-4.7-flash", '"z-ai/glm-4.7-flash"', "[]", '["unknown"]']) {
+    assert.deepEqual(readStoredRouterModels(stored), DEFAULT_ROUTER_MODELS)
+  }
+  assert.deepEqual(readStoredRouterModels('["qwen/qwen3.8-flash","qwen/qwen3.8-flash"]'), ["qwen/qwen3.8-flash"])
+  assert.equal(isRouterModelSelection(null), false)
+  assert.equal(isRouterModelSelection([]), false)
+  assert.equal(isRouterModelSelection(["qwen/qwen3.8-flash", "unknown"]), false)
+})
+
+test("allows adding and removing every router while retaining at least one", () => {
+  const next = toggleRouterModel(DEFAULT_ROUTER_MODELS, "qwen/qwen3.8-flash")
+  assert.deepEqual(next, [...DEFAULT_ROUTER_MODELS, "qwen/qwen3.8-flash"])
+  assert.deepEqual(toggleRouterModel(next, "z-ai/glm-5.3-flash"), ["deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-flash"])
+  assert.deepEqual(toggleRouterModel(["qwen/qwen3.8-flash"], "qwen/qwen3.8-flash"), ["qwen/qwen3.8-flash"])
+  assert.deepEqual(DEFAULT_ROUTER_MODELS, ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash"])
 })

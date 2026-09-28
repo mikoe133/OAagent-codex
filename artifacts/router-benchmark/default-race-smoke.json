@@ -1,0 +1,23 @@
+{
+  "verifiedAt": "2026-09-28T09:21:09.927470+00:00",
+  "started": [
+    "z-ai/glm-5.3-flash",
+    "deepseek/deepseek-v4.1-flash"
+  ],
+  "cancelled": [
+    "z-ai/glm-5.3-flash"
+  ],
+  "ms": 2001,
+  "diagnostics": {
+    "strategy": "semantic",
+    "usedFallbackModel": true,
+    "winningModel": "deepseek/deepseek-v4.1-flash",
+    "racedModelCount": 2
+  },
+  "catalogs": [
+    "knowledge_base_read"
+  ],
+  "requiredOperation": "searchKnowledgeBase",
+  "requiredOperationPresent": true,
+  "note": "Real OpenRouter call using production request parameters and race implementation; synthetic request, local knowledge-base contract; no business API called."
+}

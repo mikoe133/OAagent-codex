@@ -39,6 +39,8 @@ Repository Secrets:
 | `NEXTTOKEN_API_KEY` | Agent 模型服务凭证 |
 | `OPENROUTER_API_KEY` | OpenRouter 模型服务凭证 |
 | `OA_KNOWLEDGE_BASE_API_KEY` | 测试和生产共用的知识库服务端凭证；只配置一次 |
+| `DATABASE_URL_READ` | 生产 OA 业务只读 MySQL 连接串 |
+| `DATABASE_URL_READ_TEST` | OA 业务测试库 MySQL 连接串；测试部署映射为运行时 `DATABASE_URL_READ` |
 | `PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` | GitHub App 私钥 PEM 完整内容；部署时写入服务器只读文件 |
 
 Repository Variables:

@@ -1,0 +1,97 @@
+{
+  "model": "qwen/qwen3.5-flash-02-23",
+  "caseId": "kb-memory",
+  "round": 0,
+  "ms": 1303,
+  "semantic": true,
+  "strictJson": false,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePageChildren",
+    "getPageContentDraft",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "searchKnowledgeBase",
+    "getAgentCapabilities"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1416,
+        "completion_tokens": 69,
+        "total_tokens": 1485,
+        "cost": 0.00010998,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00010998,
+          "upstream_inference_prompt_cost": 0.00009204,
+          "upstream_inference_completions_cost": 0.00001794
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Alibaba",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\n    \"knowledge_base_read\"\n  ],\n  \"tags\": [\n    \"untagged\"\n  ],\n  \"operationIds\": [\n    \"getKnowledgeBasePage\"\n  ],\n  \"searchTerms\": \"read knowledge base page body content by ID\"\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1302,
+      "text": "{\n  \"catalogs\": [\n    \"knowledge_base_read\"\n  ],\n  \"tags\": [\n    \"untagged\"\n  ],\n  \"operationIds\": [\n    \"getKnowledgeBasePage\"\n  ],\n  \"searchTerms\": \"read knowledge base page body content by ID\"\n}"
+    }
+  ]
+}

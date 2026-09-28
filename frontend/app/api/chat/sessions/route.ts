@@ -1,3 +1,4 @@
+import { observeChatRoute, type ChatRequestDiagnostics } from "@/lib/server/chat-diagnostics"
 import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
 import { readSessionToken } from '@/lib/server/session-cookie'
 
@@ -10,7 +11,7 @@ function normalize(value: any) {
   return { ...value, sessionId: String(value.recordId), recordId: String(value.recordId),
     createdAt: timestamp(value.createdAt), updatedAt: timestamp(value.updatedAt), summary: value.summary || value.title || 'New Section' }
 }
-async function handle(request: Request) {
+async function handleRequest(request: Request, diagnostics: ChatRequestDiagnostics) {
   const credential = readSessionToken(request)
   if (!credential) return json({ error: 'Authentication required' }, 401)
   try {
@@ -19,7 +20,7 @@ async function handle(request: Request) {
     const body = method === 'GET' ? {} : await request.json()
     const recordId = query.get('recordId') || query.get('sessionId') || body.recordId || body.sessionId
     const call = async (pathname: string, verb = 'GET', payload?: unknown) => {
-      const response = await fetch(new URL(pathname, base()), { method: verb,
+      const response = await diagnostics.fetch(new URL(pathname, base()), { method: verb,
         headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
         body: payload === undefined ? undefined : JSON.stringify(payload), cache: 'no-store', signal: request.signal })
       if (!response.ok) throw response
@@ -58,9 +59,11 @@ async function handle(request: Request) {
     return json({ error: 'Method not allowed' }, 405)
   } catch (error) {
     if (error instanceof Response) return new Response(await error.text(), { status: error.status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+    diagnostics.log('handler_failed')
     return json({ error: 'Agent session service unavailable' }, 502)
   }
 }
+const handle = observeChatRoute('/api/chat/sessions', handleRequest)
 export const GET = handle
 export const POST = handle
 export const PATCH = handle

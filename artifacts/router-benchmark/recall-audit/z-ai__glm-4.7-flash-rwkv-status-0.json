@@ -1,0 +1,111 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "rwkv-status",
+  "round": 0,
+  "ms": 3,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型服务暂时不可用"
+  },
+  "finalOperationIds": [
+    "projects_projects_project_put",
+    "projects_projects_project_delete",
+    "projects_projects_project_post",
+    "issue_projects_issue_post",
+    "milestones_projects_milestones_post",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "max_tokens": 512
+      }
+    },
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "applyPageContentDraft",
+        "message_reaction_chat_message_reaction_delete",
+        "message_reaction_chat_message_reaction_post",
+        "messages_chat_messages_delete",
+        "messages_chat_messages_post",
+        "messages_chat_messages_put",
+        "room_users_categories_chat_room_categories_put",
+        "rooms_chat_room_users_delete",
+        "rooms_chat_room_users_post",
+        "rooms_chat_room_users_put",
+        "rooms_chat_rooms_delete",
+        "rooms_chat_rooms_post",
+        "rooms_chat_rooms_put",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "issue_assignees_projects_issue_assignees_delete",
+        "issue_assignees_projects_issue_assignees_post",
+        "issue_comments_projects_issue_comments_delete",
+        "issue_comments_projects_issue_comments_post",
+        "issue_comments_projects_issue_comments_put",
+        "issue_label_projects_issue_label_delete",
+        "issue_label_projects_issue_label_post",
+        "issue_milestones_projects_issue_milestones_delete",
+        "issue_milestones_projects_issue_milestones_post",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_delete",
+        "issue_status_projects_change_issue_status_put",
+        "milestones_projects_milestones__milestone_id__delete",
+        "milestones_projects_milestones__milestone_id__put",
+        "public_projects_public_post"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      }
+    }
+  ]
+}

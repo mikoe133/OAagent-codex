@@ -6,7 +6,8 @@ import {
   getDefaultModel,
   resolveRequestedModel,
   resolveRequestedProvider,
-  ROUTER_MODEL_CATALOG,
+  DEFAULT_ROUTER_MODELS,
+  resolveRequestedRouterModels,
   type ModelProviderId,
   type RouterModelId,
 } from "../config/modelCatalog.js";
@@ -28,7 +29,7 @@ import type {
 import { prepareOaChatAccess, hasOaAdminAccess, finishOaChatAccessTurn } from "../infrastructure/oa/oaChatAccess.js";
 import { resolveOpenApiContract } from "../infrastructure/oa/openApiContract.js";
 import {
-  routeOpenApiRequestWithFallback,
+  routeOpenApiRequestRace,
   createOpenApiSemanticRouter,
   type OpenApiRouteResult,
 } from "../infrastructure/oa/openApiRouter.js";
@@ -57,6 +58,7 @@ export type SendMessageInput = {
   model?: string | null;
   developerMode?: boolean;
   routerModel?: RouterModelId | null;
+  routerModels?: RouterModelId[];
   oaApiToken?: string | null;
   oaUserId?: string | null;
   latency?: ChatLatencyTrace;
@@ -274,7 +276,7 @@ export class AgentService {
       session.summary,
       undefined,
       input.latency,
-      input.routerModel,
+      resolveRequestedRouterModels(input.routerModels, input.routerModel),
       undefined,
       hasOaAdminAccess(input.sessionId, this.sessions.getOaToken(input.sessionId) ?? ""),
     );
@@ -363,7 +365,7 @@ export class AgentService {
     await emit({ type: "run.started", sessionId: input.sessionId });
 
     const stageProgress = input.developerMode
-      ? createLatencyStageProgress(input.sessionId, emit, input.routerModel)
+      ? createLatencyStageProgress(input.sessionId, emit, resolveRequestedRouterModels(input.routerModels, input.routerModel))
       : undefined;
 
     input.latency?.mark("routing_started");
@@ -386,7 +388,7 @@ export class AgentService {
           session.summary,
           signal,
           input.latency,
-          input.routerModel,
+          resolveRequestedRouterModels(input.routerModels, input.routerModel),
           stageProgress,
           hasOaAdminAccess(input.sessionId, this.sessions.getOaToken(input.sessionId) ?? ""),
         );
@@ -954,7 +956,7 @@ async function resolveRunConfig(
   conversationMemory: string | null,
   signal?: AbortSignal,
   latency?: ChatLatencyTrace,
-  routerModel?: RouterModelId | null,
+  routerModels: readonly RouterModelId[] = DEFAULT_ROUTER_MODELS,
   stageProgress?: LatencyStageProgress,
   allowAdmin = false,
 ) {
@@ -977,25 +979,18 @@ async function resolveRunConfig(
     knowledgeBase.read.index,
     ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
   ]);
-  const primaryRouterConfig = resolveRouterConfig(runConfig, routerModel);
-  const fallbackRouterModel = ROUTER_MODEL_CATALOG[0];
-  const fallbackRouterConfig = resolveRouterConfig(
-    runConfig,
-    fallbackRouterModel,
-  );
-  const fallbackRouter =
-    primaryRouterConfig.model === fallbackRouterConfig.model
-      ? undefined
-      : createOpenApiSemanticRouter(fallbackRouterConfig);
+  const routers = routerModels.map(model => ({
+    model,
+    router: createOpenApiSemanticRouter(resolveRouterConfig(runConfig, model)),
+  }));
   const route = await measureLatencyStage(
     latency,
     "semantic_route",
-    () => routeOpenApiRequestWithFallback(
-      primaryRouterConfig,
+    () => routeOpenApiRequestRace(
+      runConfig,
       routingIndex,
       { task, conversationMemory, signal, allowAdmin },
-      createOpenApiSemanticRouter(primaryRouterConfig),
-      fallbackRouter,
+      routers,
     ),
     stageProgress,
     formatSemanticRouteTraceMessage,
@@ -1056,14 +1051,12 @@ async function measureLatencyStage<T>(
 function createLatencyStageProgress(
   sessionId: string,
   emit: AgentStreamEmit,
-  routerModel?: RouterModelId | null,
+  routerModels: readonly RouterModelId[] = DEFAULT_ROUTER_MODELS,
 ): LatencyStageProgress {
   const stageNames: Partial<Record<ChatLatencyStage, string>> = {
     session_prepare: "准备会话上下文",
     contracts: "准备 OA 与知识库接口契约",
-    semantic_route: routerModel
-      ? `使用 ${routerModel} 分析请求`
-      : "分析请求并选择业务接口",
+    semantic_route: `使用 ${routerModels.join("、")} ${routerModels.length > 1 ? "并发路由" : "分析请求"}`,
     codex_startup: "启动正式回答模型",
     model_inference: "等待模型生成首段回复",
   };
@@ -1091,6 +1084,12 @@ export function formatSemanticRouteTraceMessage(
   const catalogs = route.catalogs.map(formatRouteCatalog).join("、");
   if (route.diagnostics.strategy === "fallback") {
     return `路由模型失败，已启用安全降级；原因：${route.diagnostics.failureReason}；最终接口域：${catalogs}`;
+  }
+  if (route.diagnostics.winningModel) {
+    const outcome = (route.diagnostics.racedModelCount ?? 1) > 1
+      ? `路由竞速完成：${route.diagnostics.winningModel} 先返回有效结果，已取消其余请求`
+      : `路由模型 ${route.diagnostics.winningModel} 选择完成`;
+    return `${outcome}；最终接口域：${catalogs}`;
   }
   if (route.diagnostics.usedFallbackModel) {
     if (!route.diagnostics.primaryFailureReason) {

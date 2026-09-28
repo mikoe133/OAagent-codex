@@ -1,7 +1,8 @@
+import { observeChatRoute, type ChatRequestDiagnostics } from "@/lib/server/chat-diagnostics"
 import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
 import { readSessionToken } from '@/lib/server/session-cookie'
 export const runtime = 'nodejs'
-async function handle(request: Request) {
+async function handleRequest(request: Request, diagnostics: ChatRequestDiagnostics) {
   const token = readSessionToken(request)
   if (!token) return Response.json({ error: 'Authentication required' }, { status: 401 })
   const query = new URL(request.url).searchParams
@@ -10,9 +11,10 @@ async function handle(request: Request) {
     return Response.json({ error: 'Invalid request' }, { status: 400 })
   try {
     const url = new URL(`/v1/sessions/${recordId}/requests/${requestId}${action ? `/${action}` : ''}`, getAgentApiBaseUrl())
-    const response = await fetch(url, { method: request.method, headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: request.signal })
+    const response = await diagnostics.fetch(url, { method: request.method, headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: request.signal })
     return new Response(await response.text(), { status: response.status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
   } catch { return Response.json({ error: 'Agent unavailable' }, { status: 503 }) }
 }
+const handle = observeChatRoute('/api/chat/requests', handleRequest)
 export const GET = handle
 export const POST = handle

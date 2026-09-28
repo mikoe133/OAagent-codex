@@ -1,0 +1,169 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "kb-draft",
+  "round": 0,
+  "ms": 2906,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": false,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "createPageContentDraft",
+    "getPageContentDraft",
+    "getKnowledgeBasePage",
+    "applyPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "createKnowledgeBaseNode",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "moveKnowledgeBaseNode",
+    "updateKnowledgeBaseNodeMetadata",
+    "searchKnowledgeBase",
+    "getAgentCapabilities"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1510,
+        "completion_tokens": 90,
+        "total_tokens": 1600,
+        "cost": 0.000485736,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000485736,
+          "upstream_inference_prompt_cost": 0.000377736,
+          "upstream_inference_completions_cost": 0.000108
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_write\",\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"createPageContentDraft\",\"getPageContentDraft\",\"getKnowledgeBasePage\"],\"accessMode\":\"write\",\"searchTerms\":[\"create content draft for knowledge base page\",\"TipTap content draft preview link\",\"page content draft preview\",\"knowledge base page body revision\",\"draft content for page 123\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1433
+    },
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1532,
+        "completion_tokens": 113,
+        "total_tokens": 1645,
+        "cost": 0.000519936,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000519936,
+          "upstream_inference_prompt_cost": 0.000384336,
+          "upstream_inference_completions_cost": 0.0001356
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_write\", \"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\n    \"createPageContentDraft\",\n    \"getPageContentDraft\",\n    \"getKnowledgeBasePage\"\n  ],\n  \"accessMode\": \"write\",\n  \"searchTerms\": [\n    \"create content draft for knowledge base page\",\n    \"page content draft preview\",\n    \"TipTap content draft\",\n    \"knowledge base page body revision\",\n    \"draft preview link\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1472,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_write\", \"knowledge_base_read\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\n    \"createPageContentDraft\",\n    \"getPageContentDraft\",\n    \"getKnowledgeBasePage\"\n  ],\n  \"accessMode\": \"write\",\n  \"searchTerms\": [\n    \"create content draft for knowledge base page\",\n    \"page content draft preview\",\n    \"TipTap content draft\",\n    \"knowledge base page body revision\",\n    \"draft preview link\"\n  ]\n}"
+    }
+  ]
+}

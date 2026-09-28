@@ -1,0 +1,111 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "kb-rename",
+  "round": 0,
+  "ms": 5,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": false,
+  "correct": false,
+  "readContamination": false,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型服务暂时不可用"
+  },
+  "finalOperationIds": [
+    "oa_database_read",
+    "skill_user_skills_delete",
+    "skill_user_skills_post",
+    "skill_user_skills_put",
+    "update_user_profile_user_user_put",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "oa_database_read",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "max_tokens": 512
+      }
+    },
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "create_ai_report_batch_ai_report_ai_report_batch_post",
+        "create_ai_report_compare_ai_report_ai_report_compare_post",
+        "announcement_ann_hr_announcement_delete",
+        "announcement_ann_hr_announcement_post",
+        "announcement_ann_hr_announcement_put",
+        "announcement_ensure_ann_user_announcement_put",
+        "assets_assets_asset_delete",
+        "assets_assets_asset_post",
+        "assets_assets_asset_put",
+        "change_password_auth_change_password_post",
+        "copilot_record_create_copilot_record_post",
+        "copilot_record_delete_copilot_record_delete",
+        "copilot_record_update_copilot_record_patch",
+        "create_dataset_category_relations_dataset_relations_post",
+        "change_docker_folder_docs_folder_put",
+        "change_docs_docs_docs_put",
+        "oa_database_read",
+        "add_question_tag_qa_question_tags_post",
+        "answer_reaction_qa_answer_reaction_delete",
+        "answer_reaction_qa_answer_reaction_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post",
+        "user_skill_user_user_skill_put"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "max_tokens": 512
+      }
+    }
+  ]
+}

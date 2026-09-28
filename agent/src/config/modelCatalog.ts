@@ -42,9 +42,17 @@ export const ROUTER_MODEL_CATALOG = [
   "z-ai/glm-4.7-flash",
   "qwen/qwen3.5-flash-02-23",
   "deepseek/deepseek-v4-flash",
+  "z-ai/glm-5.3-flash",
+  "deepseek/deepseek-v4.1-flash",
+  "qwen/qwen3.8-flash",
 ] as const;
 
 export type RouterModelId = (typeof ROUTER_MODEL_CATALOG)[number];
+
+export const DEFAULT_ROUTER_MODELS = [
+  "z-ai/glm-5.3-flash",
+  "deepseek/deepseek-v4.1-flash",
+] as const satisfies readonly RouterModelId[];
 
 export const MODEL_CATALOG_VERSION = `sha256:${createHash("sha256")
   .update(JSON.stringify(MODEL_CATALOG))
@@ -124,6 +132,27 @@ export function resolveRequestedRouterModel(
     );
   }
   return normalized as RouterModelId;
+}
+
+export function resolveRequestedRouterModels(
+  requestedModels?: unknown,
+  legacyModel?: string | null,
+): RouterModelId[] {
+  if (requestedModels !== undefined) {
+    if (legacyModel !== undefined && legacyModel !== null) {
+      throw new Error("routerModels 与 routerModel 不能同时指定。");
+    }
+    if (!Array.isArray(requestedModels) || requestedModels.length < 1 || requestedModels.length > ROUTER_MODEL_CATALOG.length) {
+      throw new Error(`路由模型必须选择 1-${ROUTER_MODEL_CATALOG.length} 个。`);
+    }
+    return [...new Set(requestedModels.map((model: unknown) => {
+      if (typeof model !== "string") throw new Error("路由模型必须是字符串。");
+      return resolveRequestedRouterModel(model);
+    }))];
+  }
+  return legacyModel != null
+    ? [resolveRequestedRouterModel(legacyModel)]
+    : [...DEFAULT_ROUTER_MODELS];
 }
 
 export function resolveAutomationModelSelection(

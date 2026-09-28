@@ -1,0 +1,68 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "kb-proper-name",
+  "round": 0,
+  "ms": 8005,
+  "semantic": false,
+  "strictJson": false,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "fallback",
+    "failureReason": "路由模型超时（8 秒）"
+  },
+  "finalOperationIds": [
+    "update_weekly_report_days_holiday_weekly_report_days_holiday_put",
+    "oa_database_read",
+    "projects_projects_project_put",
+    "create_ai_report_batch_ai_report_ai_report_batch_post",
+    "create_ai_report_compare_ai_report_ai_report_compare_post",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "getPageRevision",
+    "listPageBacklinks"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "uploadKnowledgeBaseAttachment",
+        "create_ai_report_batch_ai_report_ai_report_batch_post",
+        "create_ai_report_compare_ai_report_ai_report_compare_post",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "upload_avatar_files_upload_avatar_post",
+        "upload_file_files_upload_post",
+        "upload_avatar_upload_desktop_software_post",
+        "oa_database_read",
+        "projects_projects_project_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "issue_projects_issue_post",
+        "milestones_projects_milestones_post",
+        "public_projects_public_delete",
+        "update_weekly_report_days_holiday_weekly_report_days_holiday_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "max_tokens": 512
+      },
+      "status": 200,
+      "error": {
+        "name": "TimeoutError"
+      },
+      "ms": 7997
+    }
+  ]
+}

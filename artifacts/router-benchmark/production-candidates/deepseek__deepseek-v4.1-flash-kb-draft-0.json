@@ -1,0 +1,105 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "kb-draft",
+  "round": 0,
+  "ms": 1778,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "applyPageContentDraft",
+    "getKnowledgeBasePage",
+    "createPageContentDraft",
+    "discardPageContentDraft",
+    "replacePageContentDraft",
+    "getPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "createKnowledgeBaseNode",
+    "moveKnowledgeBaseNode",
+    "updateKnowledgeBaseNodeMetadata",
+    "uploadKnowledgeBaseAttachment",
+    "getPageRevision",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "searchKnowledgeBase"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "announcement_ann_hr_announcement_delete",
+        "announcement_ann_hr_announcement_post",
+        "announcement_ann_hr_announcement_put",
+        "announcement_ensure_ann_user_announcement_put",
+        "oa_database_read",
+        "add_question_tag_qa_question_tags_post",
+        "answer_reaction_qa_answer_reaction_delete",
+        "answer_reaction_qa_answer_reaction_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post",
+        "user_skill_user_user_skill_put"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1434,
+        "completion_tokens": 89,
+        "total_tokens": 1523,
+        "cost": 0.000424104,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 384,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000424104,
+          "upstream_inference_prompt_cost": 0.000317304,
+          "upstream_inference_completions_cost": 0.0001068
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_write\",\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"applyPageContentDraft\",\"getKnowledgeBasePage\"],\"accessMode\":\"write\",\"searchTerms\":[\"create content draft for knowledge base page\",\"edit knowledge base page body draft\",\"preview knowledge base page content draft\",\"apply page content draft after confirmation\",\"knowledge base page 123 content modification draft\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1774,
+      "text": "{\"catalogs\":[\"knowledge_base_write\",\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"applyPageContentDraft\",\"getKnowledgeBasePage\"],\"accessMode\":\"write\",\"searchTerms\":[\"create content draft for knowledge base page\",\"edit knowledge base page body draft\",\"preview knowledge base page content draft\",\"apply page content draft after confirmation\",\"knowledge base page 123 content modification draft\"]}"
+    }
+  ]
+}

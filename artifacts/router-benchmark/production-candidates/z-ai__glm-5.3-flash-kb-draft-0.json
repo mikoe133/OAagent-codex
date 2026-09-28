@@ -1,0 +1,105 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "kb-draft",
+  "round": 0,
+  "ms": 3754,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "applyPageContentDraft",
+    "createPageContentDraft",
+    "discardPageContentDraft",
+    "replacePageContentDraft",
+    "createKnowledgeBaseNode",
+    "updateKnowledgeBaseNodeMetadata",
+    "moveKnowledgeBaseNode",
+    "uploadKnowledgeBaseAttachment"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "announcement_ann_hr_announcement_delete",
+        "announcement_ann_hr_announcement_post",
+        "announcement_ann_hr_announcement_put",
+        "announcement_ensure_ann_user_announcement_put",
+        "oa_database_read",
+        "add_question_tag_qa_question_tags_post",
+        "answer_reaction_qa_answer_reaction_delete",
+        "answer_reaction_qa_answer_reaction_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post",
+        "user_skill_user_user_skill_put"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1291,
+        "completion_tokens": 188,
+        "total_tokens": 1479,
+        "cost": 0.00024925,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 320,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00024925,
+          "upstream_inference_prompt_cost": 0.00015525,
+          "upstream_inference_completions_cost": 0.000094
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 111,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"knowledge_base_write\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"applyPageContentDraft\"],\n  \"accessMode\": \"write\",\n  \"searchTerms\": [\"create content draft for knowledge base page 123\", \"draft page body update with test description\", \"generate preview of page content draft for user confirmation\"]\n}",
+        "refusal": null,
+        "reasoning": "Create draft for page 123 — but only applyPageContentDraft exists (apply after confirmation). User wants to create draft + preview. No create-draft op available; closest is applyPageContentDraft? That's applying after user confirmation — user says \"生成预览供我确认\" so not yet confirmed. Still, knowledge_base_write is the right catalog; only op available is applyPageContentDraft. Include it? The draft creation isn't listed; maybe route to write with applyPageContentDraft as the eventual op. I'll include it.",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "Create draft for page 123 — but only applyPageContentDraft exists (apply after confirmation). User wants to create draft + preview. No create-draft op available; closest is applyPageContentDraft? That's applying after user confirmation — user says \"生成预览供我确认\" so not yet confirmed. Still, knowledge_base_write is the right catalog; only op available is applyPageContentDraft. Include it? The draft creation isn't listed; maybe route to write with applyPageContentDraft as the eventual op. I'll include it.",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "ms": 3749,
+      "text": "{\n  \"catalogs\": [\"knowledge_base_write\"],\n  \"tags\": [\"untagged\"],\n  \"operationIds\": [\"applyPageContentDraft\"],\n  \"accessMode\": \"write\",\n  \"searchTerms\": [\"create content draft for knowledge base page 123\", \"draft page body update with test description\", \"generate preview of page content draft for user confirmation\"]\n}"
+    }
+  ]
+}

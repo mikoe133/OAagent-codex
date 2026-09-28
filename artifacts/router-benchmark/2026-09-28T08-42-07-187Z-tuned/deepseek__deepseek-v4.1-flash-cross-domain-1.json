@@ -1,0 +1,98 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "cross-domain",
+  "round": 1,
+  "ms": 1593,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read",
+    "searchKnowledgeBase",
+    "getKnowledgeBasePage",
+    "getAgentCapabilities",
+    "getPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "listPageRevisions"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1505,
+        "completion_tokens": 84,
+        "total_tokens": 1589,
+        "cost": 0.000138348,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 1408,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000138348,
+          "upstream_inference_prompt_cost": 0.000037548,
+          "upstream_inference_completions_cost": 0.0001008
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\",\"knowledge_base_read\"],\"tags\":[\"oa\",\"untagged\"],\"operationIds\":[\"oa_database_read\",\"searchKnowledgeBase\",\"getKnowledgeBasePage\"],\"accessMode\":\"read\",\"searchTerms\":[\"项目28 当前状态\",\"项目进展 状态 查询\",\"项目验收规范\",\"验收规范 文档\",\"project status\",\"acceptance specification\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1593,
+      "text": "{\"catalogs\":[\"oa\",\"knowledge_base_read\"],\"tags\":[\"oa\",\"untagged\"],\"operationIds\":[\"oa_database_read\",\"searchKnowledgeBase\",\"getKnowledgeBasePage\"],\"accessMode\":\"read\",\"searchTerms\":[\"项目28 当前状态\",\"项目进展 状态 查询\",\"项目验收规范\",\"验收规范 文档\",\"project status\",\"acceptance specification\"]}"
+    }
+  ]
+}

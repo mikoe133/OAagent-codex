@@ -141,9 +141,10 @@ Idempotency-Key: req-001
 | model | 否 | 对应 provider 的白名单模型；省略使用默认模型 |
 | requestId | 条件 | 不使用 Idempotency-Key 请求头时在此提供；两处同时提供必须完全相同 |
 | developerMode | 否 | boolean，默认 false，通常无需设置 |
-| routerModel | 否 | 指定语义路由模型，通常无需设置；当前白名单见下文 |
+| routerModels | 否 | 1–6 个路由模型 ID 的数组；默认 GLM 5.3 Flash 与 DeepSeek V4.1 Flash 并发竞速 |
+| routerModel | 否 | 兼容旧请求的单模型字符串；仅调用该模型，不能与 routerModels 同时提供 |
 
-当前 routerModel 白名单为 `z-ai/glm-4.7-flash`、`qwen/qwen3.5-flash-02-23`、`deepseek/deepseek-v4-flash`，与正式回答模型的 `/models` 白名单不是同一用途。普通接入建议省略这两个高级参数。
+路由模型白名单为 `z-ai/glm-4.7-flash`、`qwen/qwen3.5-flash-02-23`、`deepseek/deepseek-v4-flash`、`z-ai/glm-5.3-flash`、`deepseek/deepseek-v4.1-flash`、`qwen/qwen3.8-flash`，与正式回答模型的 `/models` 白名单不是同一用途。`routerModels` 去重后并发执行，先返回有效路由的胜出并取消其余请求，全部失败才安全降级。省略路由配置时无论是否开启开发模式，均使用默认双模型。普通接入可省略这些高级参数。
 
 推荐显式指定 provider/model，使默认模型升级不影响重试的参数一致性。只传本轮用户消息；多轮上下文由 Agent 维护，不提交 messages 数组。
 

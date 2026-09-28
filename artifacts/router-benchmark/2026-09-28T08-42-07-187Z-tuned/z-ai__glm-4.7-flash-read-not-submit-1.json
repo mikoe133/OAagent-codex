@@ -1,0 +1,158 @@
+{
+  "model": "z-ai/glm-4.7-flash",
+  "caseId": "read-not-submit",
+  "round": 1,
+  "ms": 7805,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1388,
+        "completion_tokens": 71,
+        "total_tokens": 1459,
+        "cost": 0.000112374,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000112374,
+          "upstream_inference_prompt_cost": 0.000083974,
+          "upstream_inference_completions_cost": 0.0000284
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Cloudflare",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"oa\", \"knowledge_base_read\"],\n  \"tags\": [\"weekly_report\", \"submitted\", \"history\"],\n  \"operationIds\": [\"oa_database_read\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"submitted weekly reports\", \"history of weekly reports\", \"view submitted weekly reports\"]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 4967,
+      "text": "{\n  \"catalogs\": [\"oa\", \"knowledge_base_read\"],\n  \"tags\": [\"weekly_report\", \"submitted\", \"history\"],\n  \"operationIds\": [\"oa_database_read\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\"submitted weekly reports\", \"history of weekly reports\", \"view submitted weekly reports\"]\n}"
+    },
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1409,
+        "completion_tokens": 65,
+        "total_tokens": 1474,
+        "cost": 0.0001112445,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001112445,
+          "upstream_inference_prompt_cost": 0.0000852445,
+          "upstream_inference_completions_cost": 0.000026
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Cloudflare",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"oa\"],\n  \"tags\": [\"projects\"],\n  \"operationIds\": [\"oa_database_read\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"view submitted weekly reports\",\n    \"list weekly reports status\",\n    \"retrieve weekly report history\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2836,
+      "text": "{\n  \"catalogs\": [\"oa\"],\n  \"tags\": [\"projects\"],\n  \"operationIds\": [\"oa_database_read\"],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"view submitted weekly reports\",\n    \"list weekly reports status\",\n    \"retrieve weekly report history\"\n  ]\n}"
+    }
+  ]
+}

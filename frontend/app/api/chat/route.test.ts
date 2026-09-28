@@ -316,3 +316,42 @@ test("POST streams request routing progress to the browser unchanged", async () 
     globalThis.fetch = originalFetch
   }
 })
+
+
+test("POST forwards router multi-selection without requiring developer mode", async () => {
+  const originalFetch = globalThis.fetch
+  let forwardedBody: any
+  globalThis.fetch = async (_url, init) => {
+    forwardedBody = JSON.parse(String(init?.body))
+    return new Response('event: run.completed\ndata: {"type":"run.completed","result":{"finalResponse":"ok"}}\n\n', { headers: { "content-type": "text/event-stream" } })
+  }
+  try {
+    const response = await POST(new Request("http://localhost/api/chat", {
+      method: "POST", headers: { "content-type": "application/json", cookie: "sessionid=test" },
+      body: JSON.stringify({ recordId: "1", requestId: "multi", messages: [{ role: "user", content: "hello" }],
+        routerModels: ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-flash", "qwen/qwen3.8-flash"] }),
+    }))
+    assert.equal(response.status, 200)
+    await response.text()
+    assert.deepEqual(forwardedBody.routerModels, ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-flash"])
+    assert.equal(forwardedBody.routerModel, undefined)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test("POST rejects invalid or ambiguous router arrays before forwarding", async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls++; return new Response(null, { status: 500 }) }
+  try {
+    for (const selection of [{ routerModels: [] }, { routerModels: null }, { routerModels: ["unknown"] },
+      { routerModels: [42] }, { routerModels: "z-ai/glm-5.3-flash" },
+      { routerModels: ["z-ai/glm-5.3-flash"], routerModel: "z-ai/glm-4.7-flash" }]) {
+      const response = await POST(new Request("http://localhost/api/chat", {
+        method: "POST", headers: { "content-type": "application/json", cookie: "sessionid=test" },
+        body: JSON.stringify({ recordId: "1", requestId: "invalid-selection", messages: [{ role: "user", content: "hello" }], ...selection }),
+      }))
+      assert.equal(response.status, 400)
+    }
+    assert.equal(calls, 0)
+  } finally { globalThis.fetch = originalFetch }
+})

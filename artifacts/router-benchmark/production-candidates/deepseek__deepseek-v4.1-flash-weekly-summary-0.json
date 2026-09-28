@@ -1,0 +1,177 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "weekly-summary",
+  "round": 0,
+  "ms": 3533,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "create_ai_report_batch_ai_report_ai_report_batch_post",
+        "create_ai_report_compare_ai_report_ai_report_compare_post",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "update_user_salary_ai_report_user_salary_put",
+        "user_salary_import_preview_ai_report_user_salary_import_preview_post",
+        "oa_database_read",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "update_weekly_report_days_holiday_weekly_report_days_holiday_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1515,
+        "completion_tokens": 109,
+        "total_tokens": 1624,
+        "cost": 0.000472404,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 384,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000472404,
+          "upstream_inference_prompt_cost": 0.000341604,
+          "upstream_inference_completions_cost": 0.0001308
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\"oa\"],\n  \"tags\": [\"oa\", \"ai-report\"],\n  \"operationIds\": [\n    \"oa_database_read\",\n    \"create_ai_report_batch_ai_report_ai_report_batch_post\"\n  ],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"上周周报汇总\",\n    \"成员周报列表\",\n    \"批量周报汇总\",\n    \"weekly report summary by member\",\n    \"last week weekly reports\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1971
+    },
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "create_ai_report_batch_ai_report_ai_report_batch_post",
+        "create_ai_report_compare_ai_report_ai_report_compare_post",
+        "create_personal_ai_report_ai_report_personal_ai_report_post",
+        "create_user_salary_ai_report_user_salary_post",
+        "delete_user_salary_ai_report_user_salary_delete",
+        "import_user_salary_ai_report_user_salary_import_post",
+        "update_user_salary_ai_report_user_salary_put",
+        "user_salary_import_preview_ai_report_user_salary_import_preview_post",
+        "announcement_ann_hr_announcement_delete",
+        "announcement_ann_hr_announcement_post",
+        "announcement_ann_hr_announcement_put",
+        "announcement_ensure_ann_user_announcement_put",
+        "assets_assets_asset_delete",
+        "assets_assets_asset_post",
+        "assets_assets_asset_put",
+        "change_password_auth_change_password_post",
+        "copilot_record_create_copilot_record_post",
+        "copilot_record_update_copilot_record_patch",
+        "copilot_record_delete_copilot_record_delete",
+        "create_dataset_category_relations_dataset_relations_post",
+        "change_docker_folder_docs_folder_put",
+        "change_docs_docs_docs_put",
+        "create_docs_docs_docs_post",
+        "oa_database_read",
+        "add_question_tag_qa_question_tags_post",
+        "answer_reaction_qa_answer_reaction_delete",
+        "answer_reaction_qa_answer_reaction_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post",
+        "user_skill_user_user_skill_put",
+        "update_weekly_report_days_holiday_weekly_report_days_holiday_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 2613,
+        "completion_tokens": 70,
+        "total_tokens": 2683,
+        "cost": 0.000792636,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000792636,
+          "upstream_inference_prompt_cost": 0.000708636,
+          "upstream_inference_completions_cost": 0.000084
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"weekly reports submitted by all members last week\",\"list weekly reports by member\",\"aggregate team weekly report submissions\",\"weekly report summary by employee\",\"last week weekly report history\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1551,
+      "text": "{\"catalogs\":[\"oa\"],\"tags\":[\"oa\"],\"operationIds\":[\"oa_database_read\"],\"accessMode\":\"read\",\"searchTerms\":[\"weekly reports submitted by all members last week\",\"list weekly reports by member\",\"aggregate team weekly report submissions\",\"weekly report summary by employee\",\"last week weekly report history\"]}"
+    }
+  ]
+}

@@ -1,0 +1,620 @@
+[
+  {
+    "model": "z-ai/glm-4.7-flash",
+    "n": 48,
+    "correct": 39,
+    "semantic": 43,
+    "strictJson": 44,
+    "domainCorrect": 42,
+    "operationCorrect": 44,
+    "accessCorrect": 44,
+    "readContamination": 1,
+    "recalled": 48,
+    "p50ms": 2509,
+    "p95ms": 8002,
+    "attempts": 52,
+    "reportedCost": 0.005458970499999999,
+    "billedResponses": 48,
+    "failures": [
+      {
+        "caseId": "read-not-submit",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "cross-domain",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-children",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "memory-injection",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-memory",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-history",
+        "round": 1,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "cross-domain",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "qwen/qwen3.5-flash-02-23",
+    "n": 48,
+    "correct": 26,
+    "semantic": 46,
+    "strictJson": 0,
+    "domainCorrect": 46,
+    "operationCorrect": 44,
+    "accessCorrect": 34,
+    "readContamination": 4,
+    "recalled": 48,
+    "p50ms": 1406,
+    "p95ms": 2614,
+    "attempts": 50,
+    "reportedCost": 0.00564239,
+    "billedResponses": 50,
+    "failures": [
+      {
+        "caseId": "issue-status",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-create",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-rename",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "project-create",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-move",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "proper-name",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-draft",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "issue-priority",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "memory-injection",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "read-and-write",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-create",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "issue-status",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-rename",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "project-create",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-move",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "proper-name",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-draft",
+        "round": 1,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "issue-priority",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "memory-injection",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "read-and-write",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      }
+    ]
+  },
+  {
+    "model": "deepseek/deepseek-v4-flash",
+    "n": 48,
+    "correct": 41,
+    "semantic": 45,
+    "strictJson": 45,
+    "domainCorrect": 43,
+    "operationCorrect": 43,
+    "accessCorrect": 47,
+    "readContamination": 2,
+    "recalled": 48,
+    "p50ms": 3055,
+    "p95ms": 8004,
+    "attempts": 50,
+    "reportedCost": 0.005669206940000002,
+    "billedResponses": 47,
+    "failures": [
+      {
+        "caseId": "issue-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "weekly-summary",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "member-count",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "proper-name",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "proper-name",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      }
+    ]
+  },
+  {
+    "model": "qwen/qwen3.8-flash",
+    "n": 48,
+    "correct": 46,
+    "semantic": 47,
+    "strictJson": 47,
+    "domainCorrect": 46,
+    "operationCorrect": 47,
+    "accessCorrect": 47,
+    "readContamination": 0,
+    "recalled": 48,
+    "p50ms": 3057,
+    "p95ms": 6965,
+    "attempts": 53,
+    "reportedCost": 0.008471218,
+    "billedResponses": 51,
+    "failures": [
+      {
+        "caseId": "issue-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      }
+    ]
+  },
+  {
+    "model": "deepseek/deepseek-v4.1-flash",
+    "n": 48,
+    "correct": 46,
+    "semantic": 48,
+    "strictJson": 48,
+    "domainCorrect": 46,
+    "operationCorrect": 48,
+    "accessCorrect": 48,
+    "readContamination": 0,
+    "recalled": 48,
+    "p50ms": 1601,
+    "p95ms": 2893,
+    "attempts": 49,
+    "reportedCost": 0.014674320000000003,
+    "billedResponses": 49,
+    "failures": [
+      {
+        "caseId": "kb-draft",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-draft",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      }
+    ]
+  },
+  {
+    "model": "xiaomi/mimo-v2.6-flash",
+    "n": 48,
+    "correct": 34,
+    "semantic": 38,
+    "strictJson": 38,
+    "domainCorrect": 36,
+    "operationCorrect": 38,
+    "accessCorrect": 43,
+    "readContamination": 0,
+    "recalled": 48,
+    "p50ms": 3160,
+    "p95ms": 8004,
+    "attempts": 50,
+    "reportedCost": 0.005832685600000001,
+    "billedResponses": 40,
+    "failures": [
+      {
+        "caseId": "issue-status",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "kb-page",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "proper-name",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-draft",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "cross-domain",
+        "round": 0,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "policy-not-write",
+        "round": 0,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-page",
+        "round": 1,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "member-count",
+        "round": 1,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "kb-history",
+        "round": 1,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "proper-name",
+        "round": 1,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "rwkv-status",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": true,
+        "accessCorrect": true
+      },
+      {
+        "caseId": "cross-domain",
+        "round": 1,
+        "semantic": true,
+        "recalled": true,
+        "domainCorrect": true,
+        "operationCorrect": true,
+        "accessCorrect": false
+      },
+      {
+        "caseId": "read-and-write",
+        "round": 1,
+        "semantic": false,
+        "recalled": true,
+        "domainCorrect": false,
+        "operationCorrect": false,
+        "accessCorrect": false
+      }
+    ]
+  }
+]

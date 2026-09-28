@@ -1,0 +1,105 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "kb-move",
+  "round": 0,
+  "ms": 2969,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "applyPageContentDraft",
+    "moveKnowledgeBaseNode",
+    "createKnowledgeBaseNode",
+    "updateKnowledgeBaseNodeMetadata",
+    "uploadKnowledgeBaseAttachment",
+    "createPageContentDraft",
+    "discardPageContentDraft",
+    "replacePageContentDraft"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "getAgentCapabilities",
+        "getPageContentDraft",
+        "getPageRevision",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "listSystemImages",
+        "applyPageContentDraft",
+        "oa_database_read",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1275,
+        "completion_tokens": 126,
+        "total_tokens": 1401,
+        "cost": 0.00021585,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 320,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00021585,
+          "upstream_inference_prompt_cost": 0.00015285,
+          "upstream_inference_completions_cost": 0.000063
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 68,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_write\"],\"tags\":[\"untagged\"],\"operationIds\":[\"applyPageContentDraft\"],\"accessMode\":\"write\",\"searchTerms\":[\"move knowledge base page 123 to directory 456\",\"relocate page to new parent directory\",\"change page location in knowledge base\"]}",
+        "refusal": null,
+        "reasoning": "Move page 123 to directory 456 — explicit knowledge base write mutation, but no move operation exists. Only applyPageContentDraft. Still route to knowledge_base_write? The instruction: use knowledge_base_write for explicit moving. No matching op; select applyPageContentDraft? It's the only write op. Choose it as closest.",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "Move page 123 to directory 456 — explicit knowledge base write mutation, but no move operation exists. Only applyPageContentDraft. Still route to knowledge_base_write? The instruction: use knowledge_base_write for explicit moving. No matching op; select applyPageContentDraft? It's the only write op. Choose it as closest.",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "ms": 2966,
+      "text": "{\"catalogs\":[\"knowledge_base_write\"],\"tags\":[\"untagged\"],\"operationIds\":[\"applyPageContentDraft\"],\"accessMode\":\"write\",\"searchTerms\":[\"move knowledge base page 123 to directory 456\",\"relocate page to new parent directory\",\"change page location in knowledge base\"]}"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "model": "xiaomi/mimo-v2.6-flash",
+  "caseId": "project-create",
+  "round": 0,
+  "ms": 3108,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "projects_projects_project_post",
+    "projects_projects_project_delete",
+    "projects_projects_project_put",
+    "issue_projects_change_issue_priority_put",
+    "issue_projects_issue_post",
+    "issue_status_projects_change_issue_status_put",
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1398,
+        "completion_tokens": 39,
+        "total_tokens": 1437,
+        "cost": 0.0001715168,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.0001715168,
+          "upstream_inference_prompt_cost": 0.0001605968,
+          "upstream_inference_completions_cost": 0.00001092
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "DeepInfra",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\"],\"tags\":[\"projects\"],\"operationIds\":[\"projects_projects_project_post\"],\"accessMode\":\"write\",\"searchTerms\":[\"create OA project\",\"add new project\",\"project creation\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 3107,
+      "text": "{\"catalogs\":[\"oa\"],\"tags\":[\"projects\"],\"operationIds\":[\"projects_projects_project_post\"],\"accessMode\":\"write\",\"searchTerms\":[\"create OA project\",\"add new project\",\"project creation\"]}"
+    }
+  ]
+}

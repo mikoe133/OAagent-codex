@@ -1,0 +1,164 @@
+{
+  "model": "qwen/qwen3.8-flash",
+  "caseId": "kb-children",
+  "round": 1,
+  "ms": 7011,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "listKnowledgeBasePageChildren",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "getPageContentDraft",
+    "searchKnowledgeBase",
+    "getAgentCapabilities"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1415,
+        "completion_tokens": 104,
+        "total_tokens": 1519,
+        "cost": 0.00008961,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 1280,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00008961,
+          "upstream_inference_prompt_cost": 0.00004073,
+          "upstream_inference_completions_cost": 0.00004888
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Alibaba",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\n    \"knowledge_base_read\"\n  ],\n  \"tags\": [\n    \"untagged\"\n  ],\n  \"operationIds\": [\n    \"listKnowledgeBasePageChildren\"\n  ],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"list direct children of knowledge base directory\",\n    \"browse subpages of catalog node\",\n    \"get child pages by parent id\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 3510
+    },
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1437,
+        "completion_tokens": 104,
+        "total_tokens": 1541,
+        "cost": 0.000230126,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000230126,
+          "upstream_inference_prompt_cost": 0.000181246,
+          "upstream_inference_completions_cost": 0.00004888
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Alibaba",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\n    \"knowledge_base_read\"\n  ],\n  \"tags\": [\n    \"untagged\"\n  ],\n  \"operationIds\": [\n    \"listKnowledgeBasePageChildren\"\n  ],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"list direct children of knowledge base directory\",\n    \"browse subpages of catalog node\",\n    \"get child pages for specific ID\"\n  ]\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 3500,
+      "text": "{\n  \"catalogs\": [\n    \"knowledge_base_read\"\n  ],\n  \"tags\": [\n    \"untagged\"\n  ],\n  \"operationIds\": [\n    \"listKnowledgeBasePageChildren\"\n  ],\n  \"accessMode\": \"read\",\n  \"searchTerms\": [\n    \"list direct children of knowledge base directory\",\n    \"browse subpages of catalog node\",\n    \"get child pages for specific ID\"\n  ]\n}"
+    }
+  ]
+}

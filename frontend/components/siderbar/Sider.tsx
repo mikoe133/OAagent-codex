@@ -1,5 +1,7 @@
 "use client"
 
+import { fetchChatWithDiagnostics } from "@/lib/chat-diagnostics"
+
 import { forwardRef, useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
 import { ChevronsUpDown, Clock, Code2, LogOut, Network, Pin, Route, Search, SquarePen, SunMoon, Trash2, Type, UserRound, X } from "lucide-react"
 import { useTheme } from "next-themes"
@@ -25,9 +27,8 @@ import {
 import {
   MODEL_PROVIDERS,
   ROUTER_MODELS,
-  DEFAULT_ROUTER_MODEL,
+  toggleRouterModel,
   isModelProvider,
-  isRouterModel,
   type ModelProvider,
   type RouterModel,
 } from "@/lib/model-catalog"
@@ -89,8 +90,8 @@ type SiderProps = {
   onProviderChange: (provider: ModelProvider) => void
   developerMode: boolean
   onDeveloperModeChange: (enabled: boolean) => void
-  selectedRouterModel: RouterModel
-  onRouterModelChange: (model: RouterModel) => void
+  selectedRouterModels: RouterModel[]
+  onRouterModelsChange: (models: RouterModel[]) => void
   providerSwitchDisabled?: boolean
   sessionIndicatorStates: ReadonlyMap<string, SessionIndicatorState>
   refreshKey?: number
@@ -207,8 +208,8 @@ const UserInfo = ({
   onProviderChange,
   developerMode,
   onDeveloperModeChange,
-  selectedRouterModel,
-  onRouterModelChange,
+  selectedRouterModels,
+  onRouterModelsChange,
   providerSwitchDisabled = false,
 }: {
   user: SiderUser
@@ -217,8 +218,8 @@ const UserInfo = ({
   onProviderChange: (provider: ModelProvider) => void
   developerMode: boolean
   onDeveloperModeChange: (enabled: boolean) => void
-  selectedRouterModel: RouterModel
-  onRouterModelChange: (model: RouterModel) => void
+  selectedRouterModels: RouterModel[]
+  onRouterModelsChange: (models: RouterModel[]) => void
   providerSwitchDisabled?: boolean
 }) => (
   <div className="flex w-full items-center gap-3 px-6 py-4 text-left">
@@ -285,20 +286,17 @@ const UserInfo = ({
               sideOffset={8}
               className="z-[10000] w-52 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
             >
+              <div className="px-2 py-1.5 text-xs text-slate-500 theme-dark:text-zinc-400">可多选，先返回有效结果的模型胜出</div>
               {ROUTER_MODELS.map((model) => {
-                const isDefaultFallback = model.id === DEFAULT_ROUTER_MODEL
-                const isChecked = isDefaultFallback || model.id === selectedRouterModel
+                const isChecked = selectedRouterModels.includes(model.id)
 
                 return (
                   <DropdownMenuCheckboxItem
                     key={model.id}
                     checked={isChecked}
-                    disabled={providerSwitchDisabled || isDefaultFallback}
-                    onCheckedChange={() => {
-                      if (!isDefaultFallback && isRouterModel(model.id)) {
-                        onRouterModelChange(model.id)
-                      }
-                    }}
+                    disabled={providerSwitchDisabled || (isChecked && selectedRouterModels.length === 1)}
+                    onSelect={(event) => event.preventDefault()}
+                    onCheckedChange={() => onRouterModelsChange(toggleRouterModel(selectedRouterModels, model.id))}
                     className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
                   >
                     {model.name}
@@ -627,8 +625,8 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       onProviderChange,
       developerMode,
       onDeveloperModeChange,
-      selectedRouterModel,
-      onRouterModelChange,
+      selectedRouterModels,
+      onRouterModelsChange,
       providerSwitchDisabled = false,
       sessionIndicatorStates,
       refreshKey = 0,
@@ -739,7 +737,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
 
       async function syncCurrentUser() {
         try {
-          const response = await fetch("/api/auth/me", {
+          const response = await fetchChatWithDiagnostics("/api/auth/me", {
             method: "GET",
             credentials: "same-origin",
             cache: "no-store",
@@ -779,7 +777,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
 
       async function loadSessions() {
         try {
-          const response = await fetch("/api/chat/sessions", {
+          const response = await fetchChatWithDiagnostics("/api/chat/sessions", {
             method: "GET",
             credentials: "same-origin",
             cache: "no-store",
@@ -961,8 +959,8 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             onProviderChange={onProviderChange}
             developerMode={developerMode}
             onDeveloperModeChange={onDeveloperModeChange}
-            selectedRouterModel={selectedRouterModel}
-            onRouterModelChange={onRouterModelChange}
+            selectedRouterModels={selectedRouterModels}
+            onRouterModelsChange={onRouterModelsChange}
             providerSwitchDisabled={providerSwitchDisabled}
           />
         </div>

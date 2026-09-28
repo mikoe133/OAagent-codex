@@ -1,0 +1,97 @@
+{
+  "model": "deepseek/deepseek-v4.1-flash",
+  "caseId": "kb-proper-name",
+  "round": 0,
+  "ms": 1682,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": true,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "getKnowledgeBasePage",
+    "searchKnowledgeBase",
+    "listKnowledgeBasePages",
+    "listKnowledgeBasePageChildren",
+    "listPageBacklinks",
+    "listPageRevisions",
+    "getPageContentDraft",
+    "getAgentCapabilities"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1509,
+        "completion_tokens": 76,
+        "total_tokens": 1585,
+        "cost": 0.000468636,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000468636,
+          "upstream_inference_prompt_cost": 0.000377436,
+          "upstream_inference_completions_cost": 0.0000912
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"searchKnowledgeBase\",\"getKnowledgeBasePage\"],\"accessMode\":\"read\",\"searchTerms\":[\"knowledge base page title contains 项目周报\",\"search knowledge base pages by title\",\"read knowledge base document content\",\"项目周报 knowledge base page\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1681,
+      "text": "{\"catalogs\":[\"knowledge_base_read\"],\"tags\":[\"untagged\"],\"operationIds\":[\"searchKnowledgeBase\",\"getKnowledgeBasePage\"],\"accessMode\":\"read\",\"searchTerms\":[\"knowledge base page title contains 项目周报\",\"search knowledge base pages by title\",\"read knowledge base document content\",\"项目周报 knowledge base page\"]}"
+    }
+  ]
+}

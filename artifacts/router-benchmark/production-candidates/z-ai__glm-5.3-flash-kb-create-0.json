@@ -1,0 +1,113 @@
+{
+  "model": "z-ai/glm-5.3-flash",
+  "caseId": "kb-create",
+  "round": 0,
+  "ms": 2243,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": false,
+  "operationCorrect": false,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": false,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "applyPageContentDraft",
+    "searchKnowledgeBase",
+    "createPageContentDraft",
+    "getKnowledgeBasePage",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "createKnowledgeBaseNode",
+    "discardPageContentDraft",
+    "replacePageContentDraft",
+    "getPageContentDraft",
+    "moveKnowledgeBaseNode",
+    "updateKnowledgeBaseNodeMetadata",
+    "uploadKnowledgeBaseAttachment",
+    "getPageRevision",
+    "listPageRevisions"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "searchKnowledgeBase",
+        "getKnowledgeBasePage",
+        "applyPageContentDraft",
+        "announcement_ann_hr_announcement_delete",
+        "announcement_ann_hr_announcement_post",
+        "announcement_ann_hr_announcement_put",
+        "announcement_ensure_ann_user_announcement_put",
+        "oa_database_read",
+        "add_question_tag_qa_question_tags_post",
+        "answer_reaction_qa_answer_reaction_delete",
+        "answer_reaction_qa_answer_reaction_post",
+        "skill_user_skills_delete",
+        "skill_user_skills_post",
+        "skill_user_skills_put",
+        "update_user_profile_user_user_put",
+        "user_images_user_image_delete",
+        "user_images_user_image_post",
+        "user_skill_user_user_skill_delete",
+        "user_skill_user_user_skill_post",
+        "user_skill_user_user_skill_put"
+      ],
+      "recalled": false,
+      "requestParameters": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1284,
+        "completion_tokens": 128,
+        "total_tokens": 1412,
+        "cost": 0.00022588,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 256,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00022588,
+          "upstream_inference_prompt_cost": 0.00016188,
+          "upstream_inference_completions_cost": 0.000064
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 56,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Together",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"knowledge_base_read\",\"knowledge_base_write\"],\"tags\":[\"untagged\"],\"operationIds\":[\"searchKnowledgeBase\",\"applyPageContentDraft\"],\"accessMode\":\"write\",\"searchTerms\":[\"create empty page titled 入职指南 in knowledge base directory 42\",\"find directory 42 in knowledge base\",\"apply page content draft for new onboarding guide page\"]}",
+        "refusal": null,
+        "reasoning": "Create empty page in knowledge base directory 42. Only write op is applyPageContentDraft. Include searchKnowledgeBase to find directory? Maybe just write. Include read to identify directory 42? Creating page — apply draft. I'll include both read (search) and write.",
+        "reasoning_details": [
+          {
+            "type": "reasoning.text",
+            "text": "Create empty page in knowledge base directory 42. Only write op is applyPageContentDraft. Include searchKnowledgeBase to find directory? Maybe just write. Include read to identify directory 42? Creating page — apply draft. I'll include both read (search) and write.",
+            "format": "unknown",
+            "index": 0
+          }
+        ]
+      },
+      "ms": 2236,
+      "text": "{\"catalogs\":[\"knowledge_base_read\",\"knowledge_base_write\"],\"tags\":[\"untagged\"],\"operationIds\":[\"searchKnowledgeBase\",\"applyPageContentDraft\"],\"accessMode\":\"write\",\"searchTerms\":[\"create empty page titled 入职指南 in knowledge base directory 42\",\"find directory 42 in knowledge base\",\"apply page content draft for new onboarding guide page\"]}"
+    }
+  ]
+}

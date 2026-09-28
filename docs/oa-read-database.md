@@ -32,7 +32,7 @@ node agent/dist/runtime/oaMetadataSync.js
 
 该命令只读取数据库结构及验证可查询性，不创建表、视图或修改授权。无需模型 API key。服务启动会执行一次同步，然后按配置间隔检查。未配置连接时保留旧版 API 模式；配置后元数据未发布或验证失败会明确拒绝查询，而不会回退 API。
 
-Compose 只给 Agent 服务注入只读连接，状态目录位于持久卷 `/app/.context/oa-read`。GitHub Actions 的对应 `test` / `production` Environment 需要配置 `DATABASE_URL_READ` Secret；不能用 Repository 级公共生产凭据覆盖测试环境。新增变量已接入环境渲染脚本，凭据不会被提交到源码或传给 Codex 子进程。
+Compose 只给 Agent 服务注入只读连接，状态目录位于持久卷 `/app/.context/oa-read`。GitHub Actions 使用两个独立的 Repository Secret：`DATABASE_URL_READ_TEST` 保存 OA 业务测试库连接，`DATABASE_URL_READ` 保存生产只读库连接。测试部署仅读取前者，生产部署仅读取后者；两者都映射为 Agent 运行时的 `DATABASE_URL_READ`。它们与自动任务库 `DATABASE_URL` 独立，测试不会回退使用生产连接。新增变量已接入环境渲染脚本，凭据不会被提交到源码或传给 Codex 子进程。
 
 ## 后台自动检测（主要触发方式）
 

@@ -1,0 +1,90 @@
+{
+  "model": "qwen/qwen3.5-flash-02-23",
+  "caseId": "project-create",
+  "round": 0,
+  "ms": 1440,
+  "semantic": true,
+  "strictJson": false,
+  "domainCorrect": true,
+  "operationCorrect": true,
+  "accessCorrect": false,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1401,
+        "completion_tokens": 64,
+        "total_tokens": 1465,
+        "cost": 0.000107705,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.000107705,
+          "upstream_inference_prompt_cost": 0.000091065,
+          "upstream_inference_completions_cost": 0.00001664
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "Alibaba",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"catalogs\": [\n    \"oa\"\n  ],\n  \"tags\": [\n    \"projects\"\n  ],\n  \"operationIds\": [\n    \"projects_projects_project_post\"\n  ],\n  \"searchTerms\": \"create OA project named example project\"\n}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 1439,
+      "text": "{\n  \"catalogs\": [\n    \"oa\"\n  ],\n  \"tags\": [\n    \"projects\"\n  ],\n  \"operationIds\": [\n    \"projects_projects_project_post\"\n  ],\n  \"searchTerms\": \"create OA project named example project\"\n}"
+    }
+  ]
+}

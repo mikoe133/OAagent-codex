@@ -1,5 +1,5 @@
 import type { AppConfig } from "../../config/config.js";
-import type { RouterModelId } from "../../config/modelCatalog.js";
+import { ROUTER_MODEL_CATALOG } from "../../config/modelCatalog.js";
 import { isChatOpenApiOperationAllowed } from "./openApiChatPolicy.js";
 import {
   selectOpenApiCandidates,
@@ -15,7 +15,6 @@ import {
 
 const ROUTER_TIMEOUT_MS = 8_000;
 const ROUTER_MAX_OUTPUT_TOKENS = 512;
-const ROUTER_NO_REASONING_MODEL: RouterModelId = "qwen/qwen3.5-flash-02-23";
 const MAX_ROUTE_ATTEMPTS = 2;
 const MAX_ROUTED_TAGS = 3;
 const MAX_ROUTED_CATALOGS = 3;
@@ -65,6 +64,8 @@ export type OpenApiRouteDiagnostics =
       strategy: "semantic";
       usedFallbackModel?: boolean;
       primaryFailureReason?: string;
+      winningModel?: string;
+      racedModelCount?: number;
     }
   | { strategy: "fallback"; failureReason: string };
 
@@ -129,9 +130,7 @@ export function createOpenApiSemanticRouter(
         messages: [{ role: "user", content: prompt }],
         temperature: 0,
         max_tokens: ROUTER_MAX_OUTPUT_TOKENS,
-        ...(shouldDisableRouterReasoning(config)
-          ? { reasoning: { effort: "none" } }
-          : {}),
+        ...routerRequestParameters(config),
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -152,11 +151,12 @@ export function createOpenApiSemanticRouter(
   };
 }
 
-function shouldDisableRouterReasoning(config: AppConfig): boolean {
-  return (
-    config.modelProvider === "openrouter" &&
-    config.model === ROUTER_NO_REASONING_MODEL
-  );
+function routerRequestParameters(config: AppConfig) {
+  if (config.modelProvider !== "openrouter" || !ROUTER_MODEL_CATALOG.some(model => model === config.model)) return {};
+  return {
+    reasoning: config.model === "z-ai/glm-5.3-flash" ? { effort: "low" } : { enabled: false },
+    provider: { require_parameters: true },
+  };
 }
 
 function extractSemanticRouterContent(payload: unknown): string {
@@ -271,71 +271,50 @@ export async function routeOpenApiRequestWithFallback(
   semanticRouter: OpenApiSemanticRouter,
   fallbackSemanticRouter?: OpenApiSemanticRouter,
 ): Promise<OpenApiRouteResult> {
-  if (!fallbackSemanticRouter) {
-    return routeOpenApiRequest(config, index, input, semanticRouter);
-  }
+  return routeOpenApiRequestRace(config, index, input, [
+    { router: semanticRouter },
+    ...(fallbackSemanticRouter ? [{ router: fallbackSemanticRouter }] : []),
+  ]);
+}
 
-  const primaryController = new AbortController();
-  const fallbackController = new AbortController();
-  const primaryInput = withRaceSignal(input, primaryController.signal);
-  const fallbackInput = withRaceSignal(input, fallbackController.signal);
-  let primaryFailure: OpenApiRouteResult | undefined;
-  let fallbackFailure: OpenApiRouteResult | undefined;
-
-  const primary = routeOpenApiRequest(
-    config,
-    index,
-    primaryInput,
-    semanticRouter,
-  ).then((result) => {
-    if (result.diagnostics.strategy === "semantic") {
-      return { result, source: "primary" as const };
-    }
-    primaryFailure = result;
-    throw new Error(result.diagnostics.failureReason);
-  });
-  const fallback = routeOpenApiRequest(
-    config,
-    index,
-    fallbackInput,
-    fallbackSemanticRouter,
-  ).then((result) => {
-    if (result.diagnostics.strategy === "semantic") {
-      return { result, source: "fallback" as const };
-    }
-    fallbackFailure = result;
-    throw new Error(result.diagnostics.failureReason);
-  });
-
+export async function routeOpenApiRequestRace(
+  config: AppConfig,
+  index: OpenApiOperationIndex,
+  input: RouteInput,
+  entries: readonly { model?: string; router: OpenApiSemanticRouter }[],
+): Promise<OpenApiRouteResult> {
+  if (entries.length === 0) throw new Error("至少需要一个路由模型。");
+  const controllers = entries.map(() => new AbortController());
+  const failures: (OpenApiRouteResult | undefined)[] = [];
+  const contenders = entries.map((entry, position) =>
+    routeOpenApiRequest(config, index, withRaceSignal(input, controllers[position]!.signal), entry.router)
+      .then(result => {
+        if (result.diagnostics.strategy === "semantic") return { result, position };
+        failures[position] = result;
+        throw new Error(result.diagnostics.failureReason);
+      }),
+  );
   try {
-    const winner = await Promise.any([primary, fallback]);
-    if (winner.source === "primary") {
-      fallbackController.abort();
-      return winner.result;
-    }
-    primaryController.abort();
-    if (winner.result.diagnostics.strategy !== "semantic") {
-      return winner.result;
-    }
+    const { result, position } = await Promise.any(contenders);
+    for (const [i, controller] of controllers.entries()) if (i !== position) controller.abort();
+    const primaryFailure = failures[0]?.diagnostics;
+    const winningModel = entries[position]?.model;
     return {
-      ...winner.result,
+      ...result,
       diagnostics: {
         strategy: "semantic",
-        usedFallbackModel: true,
-        ...(primaryFailure?.diagnostics.strategy === "fallback"
-          ? { primaryFailureReason: primaryFailure.diagnostics.failureReason }
-          : {}),
+        ...(position > 0 ? {
+          usedFallbackModel: true,
+          ...(primaryFailure?.strategy === "fallback" ? { primaryFailureReason: primaryFailure.failureReason } : {}),
+        } : {}),
+        ...(winningModel ? { winningModel, racedModelCount: entries.length } : {}),
       },
     };
   } catch {
-    primaryController.abort();
-    fallbackController.abort();
-    return primaryFailure ?? fallbackFailure ?? routeOpenApiRequest(
-      config,
-      index,
-      input,
-      semanticRouter,
-    );
+    // Every contender has already produced a safe fallback. Never start another request.
+    return failures[0]!;
+  } finally {
+    for (const controller of controllers) controller.abort();
   }
 }
 
@@ -365,6 +344,7 @@ async function requestSemanticRoute(
   input: RouteInput,
   semanticRouter: OpenApiSemanticRouter,
 ): Promise<SemanticRoute> {
+  input.signal?.throwIfAborted();
   const deadline = Date.now() + ROUTER_TIMEOUT_MS;
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_ROUTE_ATTEMPTS; attempt += 1) {

@@ -1,0 +1,98 @@
+{
+  "model": "xiaomi/mimo-v2.6-flash",
+  "caseId": "rwkv-status",
+  "round": 0,
+  "ms": 2474,
+  "semantic": true,
+  "strictJson": true,
+  "domainCorrect": false,
+  "operationCorrect": true,
+  "accessCorrect": true,
+  "correct": false,
+  "readContamination": false,
+  "recalled": true,
+  "diagnostics": {
+    "strategy": "semantic"
+  },
+  "finalOperationIds": [
+    "oa_database_read",
+    "searchKnowledgeBase",
+    "getAgentCapabilities",
+    "getKnowledgeBasePage",
+    "getPageContentDraft",
+    "listKnowledgeBasePageChildren",
+    "listKnowledgeBasePages",
+    "listPageBacklinks",
+    "listPageRevisions"
+  ],
+  "attempts": [
+    {
+      "candidateIds": [
+        "getAgentCapabilities",
+        "getKnowledgeBasePage",
+        "getPageContentDraft",
+        "listKnowledgeBasePageChildren",
+        "listKnowledgeBasePages",
+        "listPageBacklinks",
+        "listPageRevisions",
+        "searchKnowledgeBase",
+        "applyPageContentDraft",
+        "createKnowledgeBaseNode",
+        "createPageContentDraft",
+        "moveKnowledgeBaseNode",
+        "updateKnowledgeBaseNodeMetadata",
+        "oa_database_read",
+        "issue_projects_change_issue_priority_put",
+        "issue_projects_issue_post",
+        "issue_status_projects_change_issue_status_put",
+        "projects_projects_project_delete",
+        "projects_projects_project_post",
+        "projects_projects_project_put"
+      ],
+      "recalled": true,
+      "requestParameters": {
+        "reasoning": {
+          "enabled": false
+        },
+        "provider": {
+          "require_parameters": true
+        },
+        "max_tokens": 512
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1733,
+        "completion_tokens": 59,
+        "total_tokens": 1792,
+        "cost": 0.00025914,
+        "is_byok": false,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "cache_write_tokens": 0,
+          "audio_tokens": 0,
+          "video_tokens": 0
+        },
+        "cost_details": {
+          "upstream_inference_cost": 0.00025914,
+          "upstream_inference_prompt_cost": 0.00024262,
+          "upstream_inference_completions_cost": 0.00001652
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "image_tokens": 0,
+          "audio_tokens": 0
+        }
+      },
+      "provider": "DeepInfra",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "{\"catalogs\":[\"oa\",\"knowledge_base_read\"],\"tags\":[\"oa\",\"untagged\"],\"operationIds\":[\"oa_database_read\",\"searchKnowledgeBase\"],\"accessMode\":\"read\",\"searchTerms\":[\"RWKV Chat 项目进展\",\"RWKV Chat recent updates\",\"RWKV Chat project status\"]}",
+        "refusal": null,
+        "reasoning": null
+      },
+      "ms": 2473,
+      "text": "{\"catalogs\":[\"oa\",\"knowledge_base_read\"],\"tags\":[\"oa\",\"untagged\"],\"operationIds\":[\"oa_database_read\",\"searchKnowledgeBase\"],\"accessMode\":\"read\",\"searchTerms\":[\"RWKV Chat 项目进展\",\"RWKV Chat recent updates\",\"RWKV Chat project status\"]}"
+    }
+  ]
+}
