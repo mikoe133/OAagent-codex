@@ -10,8 +10,14 @@ test("reserves time for both image transfers, imports, and deployment health che
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/ci-cd.yml"), "utf8")
   for (const job of ["deploy-test", "deploy-production"]) {
     const section = workflow.split(`  ${job}:\n`)[1].split(/\n  [a-z-]+:\n/)[0]
-    assert.match(section, /^    timeout-minutes: 75$/m)
-    assert.match(section, /name: Load deployment images on server\n        timeout-minutes: 60/)
+    const script = await readFile(path.join(repoRoot, 'scripts/load-deployment-images.sh'), 'utf8')
+    const transferBudget = Number(script.match(/^transfer_budget=(\d+)$/m)[1])
+    const loadBudget = Number(script.match(/^load_budget=(\d+)$/m)[1])
+    const stepMinutes = Number(section.match(/name: Load deployment images on server\n        timeout-minutes: (\d+)/)[1])
+    const jobMinutes = Number(section.match(/^    timeout-minutes: (\d+)$/m)[1])
+    // Two uploads and loads, plus checksum checks, preflight and cleanup.
+    assert.ok(stepMinutes * 60 >= 2 * (transferBudget + loadBudget + 180) + 60)
+    assert.ok(jobMinutes >= stepMinutes + 15)
   }
 })
 

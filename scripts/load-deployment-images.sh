@@ -11,9 +11,10 @@ ssh_options=(-i "$HOME/.ssh/id_ed25519" -p "$DEPLOY_PORT"
   -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=30
   -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 
-# Keep these budgets below the workflow's 60-minute step / 75-minute job limits.
+# Allow a ~210 MB archive to finish on observed 55-75 KB/s links.
+# Keep both images within the workflow's 200-minute step / 215-minute job limits.
 # SSH keepalives detect dead connections, not a stalled transfer or Docker daemon.
-transfer_budget=1200
+transfer_budget=5400
 load_budget=300
 for command in timeout rsync sha256sum; do
   command -v "$command" >/dev/null || { echo "Required runner command: $command" >&2; exit 1; }
@@ -74,9 +75,13 @@ for service in agent web; do
     else
       status=$?
     fi
+    if [[ "$status" -eq 124 ]]; then
+      echo "Upload budget exhausted for $service; partial archive retained for resume." >&2
+      exit 124
+    fi
     # Network/partial-transfer failures can resume. Other failures (e.g. rsync's
     # file-I/O exit code 11) should fail immediately.
-    if [[ ! "$status" =~ ^(10|12|23|30|35|124|255)$ || "$attempt" -eq 3 ]]; then
+    if [[ ! "$status" =~ ^(10|12|23|30|35|255)$ || "$attempt" -eq 3 ]]; then
       echo "Failed to upload $service (exit $status); partial archive retained at $remote_archive." >&2
       exit "$status"
     fi

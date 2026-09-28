@@ -36,8 +36,9 @@ destination="\${!#}"
 # --protect-args transmits the remote filename without shell interpretation.
 destination="\${destination#*:}"
 if [[ "$MODE" == disk ]]; then exit 11; fi
-if [[ "$MODE" == fail || ( "$MODE" == retry && "$count" -eq 1 ) || ( "$MODE" == stall && "$count" -eq 1 ) ]]; then
+if [[ "$MODE" == fail || "$MODE" == budget || ( "$MODE" == retry && "$count" -eq 1 ) || ( "$MODE" == stall && "$count" -eq 1 ) ]]; then
   head -c 10 "$source" > "$destination"
+  if [[ "$MODE" == budget ]]; then exit 124; fi
   if [[ "$MODE" == stall ]]; then exit 30; fi
   exit 255
 fi
@@ -87,7 +88,7 @@ for (const mode of ['success', 'retry', 'stall']) {
     const ssh = await readFile(path.join(f.dir, 'ssh-options'), 'utf8')
     for (const option of ['ServerAliveInterval=15', 'ServerAliveCountMax=4', 'StrictHostKeyChecking=yes']) assert.ok(ssh.includes(option))
     const timeouts = await readFile(path.join(f.dir, 'timeouts'), 'utf8')
-    assert.match(timeouts, /--kill-after=10s 1[12][0-9]{2}s rsync/)
+    assert.match(timeouts, /--kill-after=10s 5[34][0-9]{2}s rsync/)
     assert.match(timeouts, /--kill-after=10s 300s docker load --input/)
     assert.deepEqual(await readdir(path.join(f.deployPath, '.deployment-images')), [])
     assert.ok(result.stdout.indexOf('Uploading agent') < result.stdout.indexOf('Verifying agent'))
@@ -107,6 +108,17 @@ test('fails immediately on upload disk errors', async t => {
   const f = await fixture(t, 'disk')
   assert.equal(f.run().status, 11)
   assert.equal((await readFile(path.join(f.dir, 'count'), 'utf8')).trim(), '1')
+  await assert.rejects(readFile(path.join(f.dir, 'load-count')), { code: 'ENOENT' })
+})
+
+test('retains partial uploads on budget exhaustion without promising another retry', async t => {
+  const f = await fixture(t, 'budget')
+  const result = f.run()
+  assert.equal(result.status, 124)
+  assert.match(result.stderr, /Upload budget exhausted for agent/)
+  assert.doesNotMatch(result.stderr, /resuming in/)
+  assert.equal((await readFile(path.join(f.dir, 'count'), 'utf8')).trim(), '1')
+  assert.equal((await readdir(path.join(f.deployPath, '.deployment-images'))).length, 1)
   await assert.rejects(readFile(path.join(f.dir, 'load-count')), { code: 'ENOENT' })
 })
 
