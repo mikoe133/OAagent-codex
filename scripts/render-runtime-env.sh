@@ -279,8 +279,8 @@ trap 'rm -f "$temp_path"' EXIT
   printf 'NEXTTOKEN_API_BASE_URL=%s\n' "$nexttoken_api_base_url"
   printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   printf 'OPENROUTER_API_BASE_URL=%s\n' "$openrouter_api_base_url"
-  printf 'CODEX_MODEL_PROVIDER=nexttoken\n'
-  printf 'CODEX_MODEL=gpt-5.6-terra\n'
+  printf 'CODEX_MODEL_PROVIDER=openrouter\n'
+  printf 'CODEX_MODEL=deepseek/deepseek-v4-flash\n'
   printf 'OA_DOCKER_API_BASE_URL=%s\n' "$OA_DOCKER_API_BASE_URL"
   printf 'OA_KNOWLEDGE_API_BASE_URL=%s\n' "$oa_knowledge_api_base_url"
   printf 'OA_KNOWLEDGE_BASE_API_KEY=%s\n' "$OA_KNOWLEDGE_BASE_API_KEY"

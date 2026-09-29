@@ -1,0 +1,304 @@
+{
+  "model": "z-ai/glm-5.3",
+  "case": "project",
+  "round": 0,
+  "reasoning": "high",
+  "totalMs": 61588,
+  "firstActivityMs": 14879,
+  "firstTextMs": 14879,
+  "finalTextMs": 56638,
+  "commands": 3,
+  "answer": "Atlas 项目当前状态：进行中  \n负责人：赵宁  \n最后更新时间：2026-09-28 16:30:00",
+  "failure": null,
+  "usage": {
+    "input_tokens": 378732,
+    "cached_input_tokens": 189568,
+    "output_tokens": 527,
+    "reasoning_output_tokens": 70
+  },
+  "toolCalls": [
+    {
+      "input": {
+        "action": "catalog",
+        "sessionId": "project-0-z-ai_glm-5.3"
+      },
+      "result": {
+        "ok": true,
+        "version": "fixture-v1",
+        "publishedAt": "2026-09-29T00:00:00Z",
+        "rules": [
+          "所有数据均为测试样本。employee_type: regular=正式, intern=实习, unknown=身份未知。status: active=进行中, archived=归档。"
+        ],
+        "entities": [
+          {
+            "name": "members",
+            "description": "成员、部门、员工身份",
+            "scope": "authenticated"
+          },
+          {
+            "name": "projects",
+            "description": "项目当前状态、负责人、更新时间",
+            "scope": "authenticated"
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "action": "describe",
+        "entities": [
+          "projects",
+          "members"
+        ],
+        "sessionId": "project-0-z-ai_glm-5.3"
+      },
+      "result": {
+        "ok": true,
+        "version": "fixture-v1",
+        "entities": [
+          {
+            "name": "members",
+            "table": "user",
+            "description": "成员、部门、员工身份",
+            "access": "authenticated",
+            "columns": {
+              "id": {
+                "description": "成员 ID",
+                "type": "int"
+              },
+              "full_name": {
+                "description": "姓名",
+                "type": "varchar(255)"
+              },
+              "department": {
+                "description": "部门名称",
+                "type": "varchar(255)"
+              },
+              "employee_type": {
+                "description": "regular 正式; intern 实习; unknown 未知，不得计入正式或实习",
+                "type": "varchar(255)"
+              }
+            },
+            "filters": [],
+            "references": []
+          },
+          {
+            "name": "projects",
+            "table": "projects",
+            "description": "项目当前状态、负责人、更新时间",
+            "access": "authenticated",
+            "columns": {
+              "id": {
+                "description": "项目 ID",
+                "type": "int"
+              },
+              "project_name": {
+                "description": "项目名称",
+                "type": "varchar(255)"
+              },
+              "status": {
+                "description": "active 进行中; archived 归档",
+                "type": "varchar(255)"
+              },
+              "owner_id": {
+                "description": "负责人 ID",
+                "type": "int"
+              },
+              "updated_at": {
+                "description": "最后更新时间，Asia/Shanghai",
+                "type": "varchar(255)"
+              }
+            },
+            "filters": [],
+            "references": [
+              {
+                "column": "owner_id",
+                "entity": "members",
+                "targetColumn": "id"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "action": "query",
+        "version": "fixture-v1",
+        "query": {
+          "from": {
+            "entity": "projects",
+            "as": "p"
+          },
+          "joins": [
+            {
+              "entity": "members",
+              "as": "m",
+              "type": "left",
+              "on": {
+                "left": "p.owner_id",
+                "right": "m.id"
+              }
+            }
+          ],
+          "select": [
+            {
+              "field": "p.project_name",
+              "as": "project_name"
+            },
+            {
+              "field": "p.status",
+              "as": "status"
+            },
+            {
+              "field": "m.full_name",
+              "as": "owner_name"
+            },
+            {
+              "field": "p.updated_at",
+              "as": "updated_at"
+            }
+          ],
+          "where": [
+            {
+              "field": "p.project_name",
+              "op": "eq",
+              "value": "Atlas"
+            }
+          ],
+          "limit": 30
+        },
+        "sessionId": "project-0-z-ai_glm-5.3"
+      },
+      "result": {
+        "ok": true,
+        "version": "fixture-v1",
+        "durationMs": 0,
+        "rows": [
+          {
+            "project_name": "Atlas",
+            "status": "active",
+            "owner_name": "赵宁",
+            "updated_at": "2026-09-28 16:30:00"
+          }
+        ],
+        "returned": 1,
+        "hasMore": false,
+        "nextOffset": null,
+        "textLimit": 6000,
+        "coverage": "complete"
+      }
+    }
+  ],
+  "trace": [
+    {
+      "ms": 437,
+      "type": "thread.started",
+      "thread_id": "01a0ebdd-7bb0-7d62-99cc-2c573ef2d338"
+    },
+    {
+      "ms": 456,
+      "type": "turn.started"
+    },
+    {
+      "ms": 14879,
+      "type": "item.completed",
+      "item": {
+        "id": "item_0",
+        "type": "agent_message",
+        "text": "我先读取 OA 数据目录并定位项目相关实体。"
+      }
+    },
+    {
+      "ms": 14996,
+      "type": "item.started",
+      "item": {
+        "id": "item_1",
+        "type": "command_execution",
+        "command": "/bin/zsh -lc \"node scripts/queryOaDatabase.mjs --input '{\\\"action\\\":\\\"catalog\\\"}'\"",
+        "aggregated_output": "",
+        "exit_code": null,
+        "status": "in_progress"
+      }
+    },
+    {
+      "ms": 14996,
+      "type": "item.completed",
+      "item": {
+        "id": "item_1",
+        "type": "command_execution",
+        "command": "/bin/zsh -lc \"node scripts/queryOaDatabase.mjs --input '{\\\"action\\\":\\\"catalog\\\"}'\"",
+        "aggregated_output": "{\n  \"ok\": true,\n  \"version\": \"fixture-v1\",\n  \"publishedAt\": \"2026-09-29T00:00:00Z\",\n  \"rules\": [\n    \"所有数据均为测试样本。employee_type: regular=正式, intern=实习, unknown=身份未知。status: active=进行中, archived=归档。\"\n  ],\n  \"entities\": [\n    {\n      \"name\": \"members\",\n      \"description\": \"成员、部门、员工身份\",\n      \"scope\": \"authenticated\"\n    },\n    {\n      \"name\": \"projects\",\n      \"description\": \"项目当前状态、负责人、更新时间\",\n      \"scope\": \"authenticated\"\n    }\n  ]\n}\n",
+        "exit_code": 0,
+        "status": "completed"
+      }
+    },
+    {
+      "ms": 27839,
+      "type": "item.started",
+      "item": {
+        "id": "item_2",
+        "type": "command_execution",
+        "command": "/bin/zsh -lc \"node scripts/queryOaDatabase.mjs --input '{\\\"action\\\":\\\"describe\\\",\\\"entities\\\":[\\\"projects\\\",\\\"members\\\"]}'\"",
+        "aggregated_output": "",
+        "exit_code": null,
+        "status": "in_progress"
+      }
+    },
+    {
+      "ms": 27839,
+      "type": "item.completed",
+      "item": {
+        "id": "item_2",
+        "type": "command_execution",
+        "command": "/bin/zsh -lc \"node scripts/queryOaDatabase.mjs --input '{\\\"action\\\":\\\"describe\\\",\\\"entities\\\":[\\\"projects\\\",\\\"members\\\"]}'\"",
+        "aggregated_output": "{\n  \"ok\": true,\n  \"version\": \"fixture-v1\",\n  \"entities\": [\n    {\n      \"name\": \"members\",\n      \"table\": \"user\",\n      \"description\": \"成员、部门、员工身份\",\n      \"access\": \"authenticated\",\n      \"columns\": {\n        \"id\": {\n          \"description\": \"成员 ID\",\n          \"type\": \"int\"\n        },\n        \"full_name\": {\n          \"description\": \"姓名\",\n          \"type\": \"varchar(255)\"\n        },\n        \"department\": {\n          \"description\": \"部门名称\",\n          \"type\": \"varchar(255)\"\n        },\n        \"employee_type\": {\n          \"description\": \"regular 正式; intern 实习; unknown 未知，不得计入正式或实习\",\n          \"type\": \"varchar(255)\"\n        }\n      },\n      \"filters\": [],\n      \"references\": []\n    },\n    {\n      \"name\": \"projects\",\n      \"table\": \"projects\",\n      \"description\": \"项目当前状态、负责人、更新时间\",\n      \"access\": \"authenticated\",\n      \"columns\": {\n        \"id\": {\n          \"description\": \"项目 ID\",\n          \"type\": \"int\"\n        },\n        \"project_name\": {\n          \"description\": \"项目名称\",\n          \"type\": \"varchar(255)\"\n        },\n        \"status\": {\n          \"description\": \"active 进行中; archived 归档\",\n          \"type\": \"varchar(255)\"\n        },\n        \"owner_id\": {\n          \"description\": \"负责人 ID\",\n          \"type\": \"int\"\n        },\n        \"updated_at\": {\n          \"description\": \"最后更新时间，Asia/Shanghai\",\n          \"type\": \"varchar(255)\"\n        }\n      },\n      \"filters\": [],\n      \"references\": [\n        {\n          \"column\": \"owner_id\",\n          \"entity\": \"members\",\n          \"targetColumn\": \"id\"\n        }\n      ]\n    }\n  ]\n}\n",
+        "exit_code": 0,
+        "status": "completed"
+      }
+    },
+    {
+      "ms": 39051,
+      "type": "item.started",
+      "item": {
+        "id": "item_3",
+        "type": "command_execution",
+        "command": "/bin/zsh -lc \"node scripts/queryOaDatabase.mjs --input '{\\\"action\\\":\\\"query\\\",\\\"version\\\":\\\"fixture-v1\\\",\\\"query\\\":{\\\"from\\\":{\\\"entity\\\":\\\"projects\\\",\\\"as\\\":\\\"p\\\"},\\\"joins\\\":[{\\\"entity\\\":\\\"members\\\",\\\"as\\\":\\\"m\\\",\\\"type\\\":\\\"left\\\",\\\"on\\\":{\\\"left\\\":\\\"p.owner_id\\\",\\\"right\\\":\\\"m.id\\\"}}],\\\"select\\\":[{\\\"field\\\":\\\"p.project_name\\\",\\\"as\\\":\\\"project_name\\\"},{\\\"field\\\":\\\"p.status\\\",\\\"as\\\":\\\"status\\\"},{\\\"field\\\":\\\"m.full_name\\\",\\\"as\\\":\\\"owner_name\\\"},{\\\"field\\\":\\\"p.updated_at\\\",\\\"as\\\":\\\"updated_at\\\"}],\\\"where\\\":[{\\\"field\\\":\\\"p.project_name\\\",\\\"op\\\":\\\"eq\\\",\\\"value\\\":\\\"Atlas\\\"}],\\\"limit\\\":30}}'\"",
+        "aggregated_output": "",
+        "exit_code": null,
+        "status": "in_progress"
+      }
+    },
+    {
+      "ms": 39051,
+      "type": "item.completed",
+      "item": {
+        "id": "item_3",
+        "type": "command_execution",
+        "command": "/bin/zsh -lc \"node scripts/queryOaDatabase.mjs --input '{\\\"action\\\":\\\"query\\\",\\\"version\\\":\\\"fixture-v1\\\",\\\"query\\\":{\\\"from\\\":{\\\"entity\\\":\\\"projects\\\",\\\"as\\\":\\\"p\\\"},\\\"joins\\\":[{\\\"entity\\\":\\\"members\\\",\\\"as\\\":\\\"m\\\",\\\"type\\\":\\\"left\\\",\\\"on\\\":{\\\"left\\\":\\\"p.owner_id\\\",\\\"right\\\":\\\"m.id\\\"}}],\\\"select\\\":[{\\\"field\\\":\\\"p.project_name\\\",\\\"as\\\":\\\"project_name\\\"},{\\\"field\\\":\\\"p.status\\\",\\\"as\\\":\\\"status\\\"},{\\\"field\\\":\\\"m.full_name\\\",\\\"as\\\":\\\"owner_name\\\"},{\\\"field\\\":\\\"p.updated_at\\\",\\\"as\\\":\\\"updated_at\\\"}],\\\"where\\\":[{\\\"field\\\":\\\"p.project_name\\\",\\\"op\\\":\\\"eq\\\",\\\"value\\\":\\\"Atlas\\\"}],\\\"limit\\\":30}}'\"",
+        "aggregated_output": "{\n  \"ok\": true,\n  \"version\": \"fixture-v1\",\n  \"durationMs\": 0,\n  \"rows\": [\n    {\n      \"project_name\": \"Atlas\",\n      \"status\": \"active\",\n      \"owner_name\": \"赵宁\",\n      \"updated_at\": \"2026-09-28 16:30:00\"\n    }\n  ],\n  \"returned\": 1,\n  \"hasMore\": false,\n  \"nextOffset\": null,\n  \"textLimit\": 6000,\n  \"coverage\": \"complete\"\n}\n",
+        "exit_code": 0,
+        "status": "completed"
+      }
+    },
+    {
+      "ms": 56638,
+      "type": "item.completed",
+      "item": {
+        "id": "item_4",
+        "type": "agent_message",
+        "text": "Atlas 项目当前状态：进行中  \n负责人：赵宁  \n最后更新时间：2026-09-28 16:30:00"
+      }
+    },
+    {
+      "ms": 60511,
+      "type": "turn.completed",
+      "usage": {
+        "input_tokens": 378732,
+        "cached_input_tokens": 189568,
+        "output_tokens": 527,
+        "reasoning_output_tokens": 70
+      }
+    }
+  ]
+}

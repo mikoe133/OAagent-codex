@@ -62,7 +62,7 @@ export const MODEL_CATALOG_VERSION = `sha256:${createHash("sha256")
 
 const DEFAULT_MODELS = {
   nexttoken: "gpt-5.6-terra",
-  openrouter: "z-ai/glm-5.3",
+  openrouter: "deepseek/deepseek-v4-flash",
 } as const satisfies Record<ModelProviderId, string>;
 
 export function isModelProviderId(value: unknown): value is ModelProviderId {

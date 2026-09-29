@@ -15,7 +15,7 @@ import {
 
 const DEFAULT_NEXTTOKEN_BASE_URL = "https://next-token.cc/v1";
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const DEFAULT_MODEL_PROVIDER: ModelProviderId = "nexttoken";
+const DEFAULT_MODEL_PROVIDER: ModelProviderId = "openrouter";
 const DEFAULT_OPENAPI_URL = "https://api-oa.rwkvos.com/openapi_json";
 const DEFAULT_KNOWLEDGE_BASE_API_BASE_URL =
   "https://oa-kb.rwkvos.com/api/agent/v1";

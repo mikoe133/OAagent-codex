@@ -19,7 +19,7 @@ import {
 
 test("defaults to OpenRouter while exposing both provider choices", () => {
   assert.equal(DEFAULT_MODEL_PROVIDER, "openrouter")
-  assert.equal(getDefaultModel(DEFAULT_MODEL_PROVIDER), "z-ai/glm-5.3")
+  assert.equal(getDefaultModel(DEFAULT_MODEL_PROVIDER), "deepseek/deepseek-v4-flash")
   assert.deepEqual(
     MODEL_PROVIDERS.map((provider) => provider.id),
     ["nexttoken", "openrouter"],
@@ -48,7 +48,7 @@ test("exposes the dedicated lightweight router model choices", () => {
 
 test("keeps provider model lists isolated", () => {
   assert.equal(getDefaultModel("nexttoken"), "gpt-5.6-terra")
-  assert.equal(getDefaultModel("openrouter"), "z-ai/glm-5.3")
+  assert.equal(getDefaultModel("openrouter"), "deepseek/deepseek-v4-flash")
   assert.deepEqual(
     getModelsForProvider("openrouter").map((model) => model.id),
     [

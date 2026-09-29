@@ -18,6 +18,7 @@ import {
   resolveRequestedRouterModels,
   decodeAutomationModelParameters,
   getModelDisplayName,
+  getDefaultModel,
   resolveAutomationModelSelection,
   resolveRequestedProvider,
   resolveRequestedModel,
@@ -27,6 +28,10 @@ import { parseCodexSandboxMode } from "../src/config/config.js";
 import { createThreadOptions } from "../src/infrastructure/codex/codexClient.js";
 
 describe("model provider selection", () => {
+  it("uses DeepSeek V4 Flash as the default OpenRouter answer model", () => {
+    assert.equal(getDefaultModel("openrouter"), "deepseek/deepseek-v4-flash");
+    assert.equal(getDefaultModel("nexttoken"), "gpt-5.6-terra");
+  });
   it("isolates lightweight router models from answer models", () => {
     assert.deepEqual(ROUTER_MODEL_CATALOG, [
       "z-ai/glm-4.7-flash",

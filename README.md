@@ -8,6 +8,14 @@
 
 agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`)获取 OA 接口契约;远程请求失败、返回非 2xx 或内容不是合法 OpenAPI JSON 时,自动回退到 `agent/openapi/openapi.json`。公司制度、手册、规范、指南等文档内容问题则独立路由到 `agent/knowledgebaseapi/knowledgebaseapi.yaml`,不会与结构化 OA 接口混用。用户当前指令包含 `RWKV`（不区分大小写）时,服务会把 `rwkv_knowledge` 固定资料模块置于其他路由之前,同时保留语义路由选中的 OA 或知识库模块。选中的契约是接口能力的唯一事实来源,`rwkv_knowledge` 配置的固定链接是 RWKV 内容的补充事实来源;不引入额外 Skill、MCP、function tools 或多 agent 编排。
 
+### 默认对话模型与实测
+
+默认对话使用 OpenRouter 的 `deepseek/deepseek-v4-flash`,前端、后端和部署环境默认值保持一致。显式环境配置和浏览器已保存的手动选择仍优先;切换提供商但未指定模型时,使用该提供商自身的默认模型。轻量语义路由的双模型竞速不变。
+
+2026-09-29 使用现有系统提示词、Codex SDK、中继与数据库查询服务进行了两轮三场景实测。DeepSeek 的完整回答中位耗时 51.5 秒,GLM 5.3 为 64.0 秒;OA 查询/统计答案分别为 4/4、3/4 正确。GLM 首段可见文本更快,技术问答引用与简洁性更好;DeepSeek 的 RWKV 回答仍出现错误推断和缺失链接,不是全面优胜。选择依据、逐项结果与限制见 [测试报告](artifacts/chat-model-benchmark/2026-09-29T06-31-47-427Z/report.md)。
+
+可复测命令（会真实调用付费模型 API,仅使用合成 OA 数据,不连接生产数据库）：`npx tsx agent/src/benchmark/chatModels.ts --rounds=2`。需要 Node.js 22.17+、Python 3 和已配置的模型凭证;RWKV 资料缓存可先通过下方读取脚本预热。路由选择固定、数据库使用本地 SQLite 测试样本,因此结果用于比较模型执行链路,不是生产环境整体延迟承诺。
+
 ### RWKV 固定资料读取与运行依赖
 
 `agent-runtime` 镜像必装 `curl`、`ca-certificates`、`python3`、`jq`、`ripgrep` 和 `wget`,构建时检查命令与系统 CA 文件。工具在切换到 `USER node` 前安装,不依赖宿主机工具,也不需要模型在对话中临时安装。

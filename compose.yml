@@ -32,8 +32,8 @@ services:
       NEXTTOKEN_API_BASE_URL: ${NEXTTOKEN_API_BASE_URL:-https://next-token.cc}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENROUTER_API_BASE_URL: ${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}
-      CODEX_MODEL_PROVIDER: ${CODEX_MODEL_PROVIDER:-nexttoken}
-      CODEX_MODEL: ${CODEX_MODEL:-gpt-5.6-terra}
+      CODEX_MODEL_PROVIDER: ${CODEX_MODEL_PROVIDER:-openrouter}
+      CODEX_MODEL: ${CODEX_MODEL:-}
       OA_API_BASE_URL: ${OA_DOCKER_API_BASE_URL:-http://host.docker.internal:8010}
       OA_API_TOKEN_HEADER: ${OA_API_TOKEN_HEADER:-Cookie}
       OA_API_TOKEN_PREFIX: ${OA_API_TOKEN_PREFIX:-sessionid=}
