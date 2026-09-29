@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { attachmentTurn, attachmentUploadForm } from '../../attachments/attachmentContext.js';
+import { createHash, randomUUID } from "node:crypto";
 import type { AppConfig } from "../../config/config.js";
 import { normalizeJsonLineSeparators } from "../codex/jsonLineSafety.js";
 import type { OpenApiCatalog } from "../oa/openApiIndex.js";
@@ -11,6 +12,7 @@ export type KnowledgeBaseApiToolInput = {
   query?: unknown;
   body?: unknown;
   confirmed?: unknown;
+  attachmentId?: unknown;
 };
 
 export type KnowledgeBaseApiToolResult = {
@@ -148,6 +150,10 @@ export async function callKnowledgeBaseApiTool(
     );
   }
   const operation = operations[0]!;
+  const attachmentContext = typeof input.sessionId === 'string' ? attachmentTurn(input.sessionId) : undefined;
+  if (attachmentContext && operation.method !== 'get' && !['upload', 'both', 'ignore'].includes(attachmentContext.intent)) {
+    return toolError('attachment_write_not_authorized', '本轮仅分析附件或意图不明确，不能写入知识库。请明确要求上传并提供目标页面。');
+  }
   const validationError = validateOperationInput(operation, input);
   if (validationError) {
     return validationError;
@@ -189,14 +195,19 @@ export async function callKnowledgeBaseApiTool(
       );
     }
 
+    const requestBody = operation.operationId === 'uploadKnowledgeBaseAttachment'
+      ? await attachmentUploadForm(String(input.sessionId ?? ''), input.attachmentId)
+      : input.body;
     const { response, payload } = await requestKnowledgeBase(
       config,
       operation,
       renderedPath,
       query,
-      input.body,
+      requestBody,
       oaUserId,
       fetchImpl,
+      operation.operationId === 'uploadKnowledgeBaseAttachment'
+        ? createHash('sha256').update(JSON.stringify([oaUserId, input.sessionId, renderedPath, input.attachmentId])).digest('hex') : undefined,
     );
     const redactedPayload = redactValue(
       payload,
@@ -360,6 +371,7 @@ async function requestKnowledgeBase(
   bodyInput: unknown,
   oaUserId: string,
   fetchImpl: KnowledgeBaseFetch,
+  idempotencyKey?: string,
 ): Promise<{ response: Response; payload: unknown }> {
   const url = new URL(
     renderedPath.replace(/^\/+/, ""),
@@ -373,10 +385,10 @@ async function requestKnowledgeBase(
     [KNOWLEDGE_BASE_OA_USER_ID_HEADER]: oaUserId,
   });
   if (operation.catalog === "knowledge_base_write") {
-    headers.set(KNOWLEDGE_BASE_IDEMPOTENCY_KEY_HEADER, randomUUID());
+    headers.set(KNOWLEDGE_BASE_IDEMPOTENCY_KEY_HEADER, idempotencyKey ?? randomUUID());
   }
-  const body = bodyInput === undefined ? undefined : JSON.stringify(bodyInput);
-  if (body !== undefined) {
+  const body = bodyInput instanceof FormData ? bodyInput : bodyInput === undefined ? undefined : JSON.stringify(bodyInput);
+  if (body !== undefined && !(body instanceof FormData)) {
     headers.set("content-type", "application/json");
   }
   const response = await fetchImpl(url, {
@@ -664,7 +676,7 @@ function validateOperationInput(
     operation.operation.requestBody,
   );
   if (
-    requestBody?.required === true &&
+    operation.operationId !== 'uploadKnowledgeBaseAttachment' && requestBody?.required === true &&
     (input.body === undefined || input.body === null)
   ) {
     return toolError("missing_required_body", "缺少必填 request body。");

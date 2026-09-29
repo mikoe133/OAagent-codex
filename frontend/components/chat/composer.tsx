@@ -1,5 +1,6 @@
 "use client"
 
+import { ATTACHMENT_ACCEPT, modelSupportsImages, validateAttachmentFiles } from "@/lib/chat-attachments"
 import type React from "react"
 
 import { useState, useRef, useCallback, type KeyboardEvent, useEffect } from "react"
@@ -19,12 +20,12 @@ import { shouldSubmitComposerOnKeyDown } from "./composer-keyboard"
 import TextType from "@/components/text/TextType"
 import { getModelsForProvider, type AIModel, type ModelProvider } from "@/lib/model-catalog"
 
-// Keep the existing implementations available while these composer controls are temporarily disabled.
+// Voice input remains disabled; attachments use the authenticated upload API.
 const SHOW_VOICE_INPUT = false
-const SHOW_FILE_UPLOAD = false
+const SHOW_FILE_UPLOAD = true
 
 interface ComposerProps {
-  onSend: (content: string, imageData?: string) => void | boolean | Promise<void | boolean>
+  onSend: (content: string, files?: File[], onAdmitted?: () => void) => void | boolean | Promise<void | boolean>
   onStop: () => void
   isStreaming: boolean
   disabled?: boolean
@@ -107,8 +108,10 @@ export function Composer({
   const [isRecording, setIsRecording] = useState(false)
   const [isSpeechSupported, setIsSpeechSupported] = useState(true)
   const [speechError, setSpeechError] = useState<string | null>(null)
-  const [uploadedImage, setUploadedImage] = useState<string | null>(null)
-  const [showImageBounce, setShowImageBounce] = useState(false)
+  const [files, setFiles] = useState<File[]>([])
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  const [isSending, setIsSending] = useState(false)
+  const sendingRef = useRef(false)
   const [hasAnimated, setHasAnimated] = useState(false)
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -123,9 +126,28 @@ export function Composer({
     const textarea = textareaRef.current
     if (textarea) {
       textarea.style.height = "auto"
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`
+      textarea.style.height = `${textarea.scrollHeight}px`
     }
   }, [])
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    let width = textarea.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth !== width) {
+        width = textarea.clientWidth
+        handleInput()
+      }
+    })
+    observer.observe(textarea)
+    const fontObserver = new MutationObserver(handleInput)
+    fontObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-font-size"] })
+    return () => { observer.disconnect(); fontObserver.disconnect() }
+  }, [handleInput])
+
+  useEffect(handleInput, [value, handleInput])
+
 
   const stopMediaStream = useCallback(() => {
     if (mediaStreamRef.current) {
@@ -289,30 +311,44 @@ export function Composer({
     }
   }, [isRecording, playClickSound, startRecording, stopRecording])
 
-  const handleSend = useCallback(() => {
-    if ((!value.trim() && !uploadedImage) || isStreaming || disabled) return
+  const handleSend = useCallback(async () => {
+    if ((!value.trim() && !files.length) || isStreaming || disabled || sendingRef.current) return
+    sendingRef.current = true
+    setIsSending(true)
     playClickSound()
-
-    if (isRecording) {
-      stopRecording()
-    }
-    const submission = onSend(value || "Describe this image", uploadedImage || undefined)
-    // Restore a draft rejected before admission (for example, an expired OA session).
-    void Promise.resolve(submission).then((accepted) => {
-      if (accepted === false) {
-        setValue((current) => current || value)
-        setUploadedImage((current) => current || uploadedImage)
-      }
-    })
+    if (isRecording) stopRecording()
     setValue("")
-    setUploadedImage(null)
-    setSpeechError(null)
-    baseTextRef.current = ""
-    finalTranscriptsRef.current = ""
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto"
-    }
-  }, [value, uploadedImage, isStreaming, disabled, onSend, isRecording, playClickSound, stopRecording])
+    setFiles([])
+    let admitted = false
+    try {
+      const accepted = await onSend(value.trim() || "请问这些附件要如何处理？", files, () => {
+        admitted = true
+        sendingRef.current = false
+        setIsSending(false)
+        setAttachmentError(null)
+        setSpeechError(null)
+        baseTextRef.current = ""
+        finalTranscriptsRef.current = ""
+        if (textareaRef.current) textareaRef.current.style.height = "auto"
+      })
+      if (admitted) return
+      if (accepted === false) {
+        setValue(value)
+        setFiles(files)
+      } else {
+        setAttachmentError(null)
+        setSpeechError(null)
+        baseTextRef.current = ""
+        finalTranscriptsRef.current = ""
+        if (textareaRef.current) textareaRef.current.style.height = "auto"
+      }
+    } catch (error) {
+      if (admitted) return
+      setValue(value)
+      setFiles(files)
+      setAttachmentError(error instanceof Error ? error.message : "发送失败，请重试")
+    } finally { if (!admitted) { sendingRef.current = false; setIsSending(false) } }
+  }, [value, files, isStreaming, disabled, onSend, isRecording, playClickSound, stopRecording])
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -331,39 +367,24 @@ export function Composer({
     [handleSend],
   )
 
-  const handleFileSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      playClickSound()
-
-      const file = e.target.files?.[0]
-      if (file && file.type.startsWith("image/")) {
-        const reader = new FileReader()
-        reader.onload = (event) => {
-          setUploadedImage(event.target?.result as string)
-          setShowImageBounce(true)
-          setTimeout(() => setShowImageBounce(false), 400)
-        }
-        reader.readAsDataURL(file)
-      }
-      e.target.value = ""
-    },
-    [playClickSound],
-  )
-
-  const removeImage = useCallback(() => {
-    setUploadedImage(null)
-  }, [])
+  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const next = [...files, ...Array.from(event.target.files || [])]
+    event.target.value = ""
+    const error = validateAttachmentFiles(next)
+    setAttachmentError(error)
+    if (!error) setFiles(next)
+  }, [files])
 
   const availableModels = getModelsForProvider(selectedProvider)
   const currentModel = availableModels.find((model) => model.id === selectedModel) || availableModels[0]
   const placeholderText = isRecording ? "Listening..." : "Type a message... (Shift+Enter for new line)"
   const hasText = Boolean(value.trim())
-  const canSend = Boolean(value.trim() || uploadedImage) && !disabled
+  const canSend = Boolean(value.trim() || files.length) && !disabled && !isSending
 
   return (
     <div
       ref={layoutRef}
-      className={cn("fixed bottom-4 left-0 right-0 px-4 pointer-events-none z-10 sm:left-80", hasAnimated && "composer-intro")}
+      className={cn("fixed bottom-4 left-0 right-0 px-4 pointer-events-none z-10 lg:left-80", hasAnimated && "composer-intro")}
     >
       <div
         data-slot="chat-composer-mask"
@@ -374,7 +395,7 @@ export function Composer({
         <div
           data-slot="chat-composer"
           className={cn(
-            "flex flex-col gap-3 p-4 bg-white border-stone-200 transition-all duration-200 border-none border-0 overflow-hidden relative rounded-3xl theme-dark:bg-zinc-900",
+            "flex flex-col gap-3 p-4 bg-white border-stone-200 transition-all duration-200 border-none border-0 max-h-[55dvh] overflow-y-auto relative rounded-3xl theme-dark:bg-zinc-900",
             "focus-within:border-stone-300 focus-within:ring-2 focus-within:ring-stone-200 theme-dark:focus-within:ring-zinc-700",
           )}
           style={{
@@ -382,29 +403,18 @@ export function Composer({
               "rgba(14, 63, 126, 0.06) 0px 0px 0px 1px, rgba(42, 51, 69, 0.06) 0px 1px 1px -0.5px, rgba(42, 51, 70, 0.06) 0px 3px 3px -1.5px, rgba(42, 51, 70, 0.06) 0px 6px 6px -3px, rgba(14, 63, 126, 0.06) 0px 12px 12px -6px, rgba(14, 63, 126, 0.06) 0px 24px 24px -12px",
           }}
         >
+          {files.length > 0 && <div className="flex flex-wrap gap-2" aria-label="已选附件">
+            {files.map((file, index) => <div key={`${file.name}-${index}`} className="flex max-w-full items-center gap-2 rounded-xl bg-stone-100 px-3 py-2 text-xs theme-dark:bg-zinc-800">
+              <Paperclip className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 max-w-48 truncate" title={file.name}>{file.name}</span>
+              <span className="shrink-0 text-stone-500">{Math.max(1, Math.ceil(file.size / 1024))} KB</span>
+              <button type="button" className="shrink-0" disabled={isSending} aria-label={`移除 ${file.name}`} onClick={() => setFiles(current => current.filter((_, item) => item !== index))}><X className="h-3 w-3" /></button>
+            </div>)}
+          </div>}
+          {attachmentError && <p role="alert" className="text-xs text-red-500">{attachmentError}</p>}
+          {isSending && !isStreaming && <p role="status" className="text-xs text-stone-500">正在发送附件与消息…</p>}
           <div className="flex gap-2 items-center">
-            {uploadedImage && (
-              <div className={cn("relative shrink-0", showImageBounce && "image-bounce")}>
-                <div className="w-12 h-12 rounded-lg overflow-hidden border border-stone-200 theme-dark:border-zinc-700">
-                  <Image
-                    src={uploadedImage || "/placeholder.svg"}
-                    alt="Uploaded image"
-                    width={48}
-                    height={48}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <button
-                  onClick={removeImage}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-stone-800 hover:bg-stone-900 text-white rounded-full flex items-center justify-center transition-colors"
-                  aria-label="Remove image"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            )}
-
-            <div className="relative flex-1">
+            <div className="relative min-w-0 flex-1">
               {!value && (
                 <TextType
                   key={placeholderText}
@@ -435,12 +445,12 @@ export function Composer({
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder=""
-                disabled={isStreaming || disabled}
+                disabled={isStreaming || disabled || isSending}
                 rows={1}
                 className={cn(
                   "relative z-10 block w-full resize-none bg-transparent px-2 py-1.5 text-sm text-stone-800 theme-dark:text-zinc-100",
                   "focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-                  "max-h-[56px] overflow-y-auto",
+                  "max-h-[min(8rem,25dvh)] overflow-y-auto",
                 )}
                 aria-label={placeholderText}
               />
@@ -487,7 +497,7 @@ export function Composer({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {SHOW_VOICE_INPUT && (
               <div className="relative">
                 <Button
@@ -518,20 +528,22 @@ export function Composer({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={ATTACHMENT_ACCEPT}
+                  multiple
                   onChange={handleFileSelect}
                   className="hidden"
-                  aria-label="Upload image"
+                  aria-label="选择图片和文件"
                 />
                 <Button
                   onClick={() => {
                     playClickSound()
                     fileInputRef.current?.click()
                   }}
-                  disabled={isStreaming || disabled}
+                  disabled={isStreaming || disabled || isSending}
                   size="icon"
                   className="h-9 w-9 shrink-0 bg-zinc-100 hover:bg-zinc-200 text-stone-700 rounded-full theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700"
-                  aria-label="Attach image"
+                  aria-label="添加图片或文件"
+                  title="图片 ≤10 MB，文件 ≤50 MB，每次最多 5 个"
                 >
                   <Paperclip className="w-4 h-4" />
                 </Button>
@@ -544,13 +556,13 @@ export function Composer({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={isStreaming || disabled}
-                  className="h-9 max-w-full shrink-0 rounded-full bg-zinc-100 px-3 text-xs font-normal text-stone-600 hover:bg-zinc-200 hover:text-stone-800 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700 theme-dark:hover:text-zinc-100"
+                  disabled={isStreaming || disabled || isSending}
+                  className="h-9 min-w-0 max-w-full shrink rounded-full bg-zinc-100 px-3 text-xs font-normal text-stone-600 hover:bg-zinc-200 hover:text-stone-800 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700 theme-dark:hover:text-zinc-100"
                   aria-label="Select AI model"
                   onClick={playClickSound}
                 >
                   <span className="truncate">{currentModel.name}</span>
-                  <ChevronDown className="h-4 w-4 text-stone-400 theme-dark:text-zinc-500" aria-hidden="true" />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-stone-400 theme-dark:text-zinc-500" aria-hidden="true" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuPortal>
@@ -561,7 +573,7 @@ export function Composer({
                   className="w-max min-w-40 px-2 py-2 rounded-2xl z-[9999]"
                 >
                   {availableModels.map((model) => {
-                    const modelDisabled = "disabled" in model && model.disabled
+                    const modelDisabled = "disabled" in model && model.disabled === true
 
                     return (
                       <DropdownMenuItem
@@ -588,7 +600,8 @@ export function Composer({
                           height={20}
                           className="h-4 w-4 shrink-0 rounded-sm object-contain"
                         />
-                        <span className="whitespace-nowrap text-sm">{model.name}</span>
+                        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-sm" title={model.name}>{model.name}</span>
+                        {selectedProvider === "openrouter" && !modelDisabled && <span className="ml-auto shrink-0 text-[0.625rem] text-stone-500">{modelSupportsImages(selectedProvider, model.id) ? "图片 · 文字" : "文字"}</span>}
                       </DropdownMenuItem>
                     )
                   })}

@@ -1,0 +1,71 @@
+{
+  "checkedAt": "2026-09-29T07:08:23.735Z",
+  "source": "https://openrouter.ai/api/v1/models",
+  "models": [
+    {
+      "id": "z-ai/glm-5.3",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "moonshotai/kimi-k3",
+      "input_modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "qwen/qwen3.8-max-0902",
+      "input_modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ]
+    }
+  ],
+  "syntheticImageProbes": [
+    {
+      "model": "moonshotai/kimi-k3",
+      "status": 200,
+      "elapsedMs": 3963,
+      "answer": "Red",
+      "correct": true
+    },
+    {
+      "model": "qwen/qwen3.8-max-0902",
+      "status": 200,
+      "elapsedMs": 3979,
+      "answer": "Red",
+      "correct": true
+    }
+  ]
+}

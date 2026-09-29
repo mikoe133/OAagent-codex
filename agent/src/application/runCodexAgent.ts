@@ -160,13 +160,13 @@ export function buildRuntimeContext(
     `- 模型 provider: ${config.modelProvider}`,
     `- 模型: ${config.model}`,
     runtime.sessionId ? `- 当前 sessionId: ${runtime.sessionId}` : null,
-    `- 当前路由接口域: ${selectedCatalogs.join(", ")}`,
+    `- 当前路由接口域: ${selectedCatalogs.join(", ") || "无需外部接口"}`,
     rwkvKnowledgeGuidance,
     usesOa ? `- OA 完整接口文档: ${openapiPath}` : null,
     candidateContext,
     oaApiBudgetContext,
-    config.oaRead ? "- OA 查询遵循下方数据库模式指导；OpenAPI 候选仅用于 OA 写操作及其他接口域。" : "- 必须优先从当前路由接口域的候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,只允许在同一接口域候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
-    `- 候选索引包含主要请求字段和响应字段。候选信息不足,或受限检索发现候选外 operation 时,才读取完整 schema,并精确限定到该 operation;具体读取次数服从本 turn 的动态查询模式。不得因候选接口未命中就直接断言接口不存在。`,
+    selectedCatalogs.length === 0 ? "- 本轮无需外部接口，直接根据用户消息和服务器提供的附件内容回答。" : config.oaRead ? "- OA 查询遵循下方数据库模式指导；OpenAPI 候选仅用于 OA 写操作及其他接口域。" : "- 必须优先从当前路由接口域的候选接口索引中选择 operation。候选接口未包含语义上可满足用户意图的 operation 时,只允许在同一接口域候选以外的完整 OpenAPI 中进行一次受限检索;只按业务关键词、已知 path 片段、summary、tag 或 operationId 定位,不得遍历或转储整个文档。",
+    selectedCatalogs.length > 0 ? `- 候选索引包含主要请求字段和响应字段。候选信息不足,或受限检索发现候选外 operation 时,才读取完整 schema,并精确限定到该 operation;具体读取次数服从本 turn 的动态查询模式。不得因候选接口未命中就直接断言接口不存在。` : null,
     oaGuidance,
     knowledgeBaseGuidance,
     "- 不使用额外 Skill、MCP 或自定义 function tools",
@@ -182,6 +182,7 @@ export function buildRuntimeContext(
 }
 
 function resolveSelectedCatalogs(runtime: AgentRuntimeContext): AgentRouteCatalog[] {
+  if (runtime.selectedApiCatalogs) return [...new Set(runtime.selectedApiCatalogs)];
   const candidates = runtime.openApiCandidates ?? [];
   const catalogs = runtime.selectedApiCatalogs ??
     candidates.map((candidate) => candidate.catalog).filter(Boolean);

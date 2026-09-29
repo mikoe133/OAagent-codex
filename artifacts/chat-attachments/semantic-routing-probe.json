@@ -1,0 +1,206 @@
+{
+  "date": "2026-09-29T09:33:25.472Z",
+  "scope": "Live unified semantic router only; synthetic metadata, no attachment bytes or knowledge-base writes.",
+  "reports": [
+    {
+      "task": "这个人是谁",
+      "source": "current",
+      "mime": "text/plain",
+      "elapsedMs": 2983,
+      "decision": {
+        "intent": "analyze",
+        "requiresVision": false,
+        "visionModel": "moonshotai/kimi-k3",
+        "reason": "用户询问“这个人是谁”，并附有文本文件，需读取附件内容进行人物识别；纯文本无需视觉模型。"
+      },
+      "catalogs": [],
+      "diagnostics": {
+        "strategy": "semantic",
+        "usedFallbackModel": true,
+        "winningModel": "deepseek/deepseek-v4.1-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "switched": false
+      },
+      "passed": true
+    },
+    {
+      "task": "这张图里有什么？",
+      "source": "current",
+      "mime": "image/png",
+      "elapsedMs": 3274,
+      "decision": {
+        "intent": "analyze",
+        "requiresVision": true,
+        "visionModel": "moonshotai/kimi-k3",
+        "reason": "用户询问图片内容，需视觉模型分析当前附件；所选模型不支持图片，改用 Kimi。"
+      },
+      "catalogs": [],
+      "diagnostics": {
+        "strategy": "semantic",
+        "usedFallbackModel": true,
+        "winningModel": "deepseek/deepseek-v4.1-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "moonshotai/kimi-k3",
+        "switched": true
+      },
+      "passed": true
+    },
+    {
+      "task": "把这张图片上传到知识库页面 X",
+      "source": "current",
+      "mime": "image/png",
+      "elapsedMs": 3411,
+      "decision": {
+        "intent": "upload",
+        "requiresVision": false,
+        "visionModel": "moonshotai/kimi-k3",
+        "reason": "用户明确要求把图片上传到知识库页面，属于发布写入操作，无需识别图片内容，故不需要视觉模型。"
+      },
+      "catalogs": [
+        "knowledge_base_write"
+      ],
+      "diagnostics": {
+        "strategy": "semantic",
+        "usedFallbackModel": true,
+        "winningModel": "deepseek/deepseek-v4.1-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "switched": false
+      },
+      "passed": true
+    },
+    {
+      "task": "不要上传，只告诉我图上写了什么",
+      "source": "current",
+      "mime": "image/png",
+      "elapsedMs": 2528,
+      "decision": {
+        "intent": "analyze",
+        "requiresVision": true,
+        "visionModel": "moonshotai/kimi-k3",
+        "reason": "用户明确不上传，仅要求读取图片内容，需视觉模型分析图片文字，无需任何目录查询。"
+      },
+      "catalogs": [],
+      "diagnostics": {
+        "strategy": "semantic",
+        "winningModel": "z-ai/glm-5.3-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "moonshotai/kimi-k3",
+        "switched": true
+      },
+      "passed": true
+    },
+    {
+      "task": "你好，今天心情不错",
+      "source": "previous",
+      "mime": "image/png",
+      "elapsedMs": 2886,
+      "decision": {
+        "intent": "ignore",
+        "requiresVision": false,
+        "visionModel": "moonshotai/kimi-k3",
+        "reason": "用户仅打招呼，未提及附件或提出问题，无需调用任何目录或分析图片，附件意图视为无关忽略。"
+      },
+      "catalogs": [],
+      "diagnostics": {
+        "strategy": "semantic",
+        "winningModel": "z-ai/glm-5.3-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "switched": false
+      },
+      "passed": true
+    },
+    {
+      "task": "他有哪些经历",
+      "source": "previous",
+      "mime": "text/plain",
+      "elapsedMs": 2747,
+      "decision": {
+        "intent": "analyze",
+        "requiresVision": false,
+        "visionModel": "moonshotai/kimi-k3",
+        "reason": "用户追问上轮附件中人物的经历，需基于已提取的文本内容作答，无需图像识别。"
+      },
+      "catalogs": [],
+      "diagnostics": {
+        "strategy": "semantic",
+        "usedFallbackModel": true,
+        "winningModel": "deepseek/deepseek-v4.1-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "switched": false
+      },
+      "passed": true
+    },
+    {
+      "task": "图片可以上传到知识库吗？先不要操作",
+      "source": "current",
+      "mime": "image/png",
+      "elapsedMs": 3158,
+      "decision": {
+        "intent": "clarify",
+        "requiresVision": false,
+        "visionModel": "moonshotai/kimi-k3",
+        "reason": "用户只是询问图片能否上传到知识库，并明确表示先不要操作，属于能力咨询而非发布指令，因此不授权写入，仅需澄清。"
+      },
+      "catalogs": [],
+      "diagnostics": {
+        "strategy": "semantic",
+        "usedFallbackModel": true,
+        "winningModel": "deepseek/deepseek-v4.1-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-v4-flash",
+        "switched": false
+      },
+      "passed": true
+    },
+    {
+      "task": "请用 Qwen 看看这幅图的主要内容",
+      "source": "current",
+      "mime": "image/png",
+      "elapsedMs": 3123,
+      "decision": {
+        "intent": "analyze",
+        "requiresVision": true,
+        "visionModel": "qwen/qwen3.8-max-0902",
+        "reason": "用户明确要求用 Qwen 分析当前图片内容，需视觉模型；无 OA 或知识库查询需求。"
+      },
+      "catalogs": [],
+      "diagnostics": {
+        "strategy": "semantic",
+        "usedFallbackModel": true,
+        "winningModel": "deepseek/deepseek-v4.1-flash",
+        "racedModelCount": 2
+      },
+      "execution": {
+        "provider": "openrouter",
+        "model": "qwen/qwen3.8-max-0902",
+        "switched": true
+      },
+      "passed": true
+    }
+  ]
+}

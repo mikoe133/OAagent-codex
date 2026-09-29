@@ -22,6 +22,24 @@ html[data-font-size="extra-large"] {
   font-size: 125%;
 }
 
+/* Side-by-side menu panels cannot fit on phones at enlarged font sizes.
+   Keep nested settings in a viewport-bound panel above the parent menu. */
+@media (max-width: 639px) {
+  [data-radix-popper-content-wrapper]:has(> [data-slot="dropdown-menu-sub-content"]) {
+    top: auto !important;
+    bottom: 1rem;
+    left: 1rem !important;
+    right: 1rem;
+    transform: none !important;
+    z-index: 10000 !important;
+  }
+
+  [data-slot="dropdown-menu-sub-content"] {
+    width: 100%;
+    max-height: calc(100dvh - 2rem);
+  }
+}
+
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

@@ -3,6 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { applyAttachmentRoute } from '../src/attachments/attachmentRouting.js';
+import { attachmentTurn } from '../src/attachments/attachmentContext.js';
 import { createAgentHttpServer } from '../src/api/httpServer.js';
 import { SessionStore } from '../src/infrastructure/persistence/sessionStore.js';
 import { ChatScheduler } from '../src/chat/chatScheduler.js';
@@ -39,6 +41,25 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
   };
   const service = { async streamMessage(input: any, emit: any, signal: AbortSignal) {
     calls++;
+    const binding = attachmentTurn(input.sessionId);
+    if (binding) {
+      assert.equal(binding.intent, 'clarify', 'public API must not classify user text before semantic routing');
+      // This service stub models route outputs; real router parsing/racing is tested separately.
+      const intent = binding.mode !== 'auto' ? binding.mode : ({
+        '分析附件': 'analyze', '分析图片': 'analyze', '这个人是谁': 'analyze', '他有哪些经历': 'analyze',
+        '把附件上传到知识库页面 X': 'upload', '请问这些附件要如何处理？': 'clarify', '你好': 'ignore',
+      } as Record<string, 'analyze' | 'upload' | 'clarify' | 'ignore'>)[input.message] || 'clarify';
+      const execution = applyAttachmentRoute(input.sessionId, input.provider, input.model, {
+        intent, requiresVision: intent === 'analyze' && binding.files.some(file => file.mime.startsWith('image/')),
+        visionModel: 'moonshotai/kimi-k3', reason: '模型判断附件用途',
+      });
+      for (const event of execution.events) await emit(event);
+      input = { ...input, provider: execution.provider, model: execution.model };
+    }
+    if (input.message === '分析附件' || input.message === '他有哪些经历') {
+      assert.equal(binding?.intent, 'analyze');
+      assert.equal(binding?.files[0]?.name, 'notes.txt');
+    }
     assert.match(input.sessionId, /^oa-/);
     await emit({ type: 'progress', sessionId: input.sessionId, itemId: 'route', toolType: 'semantic_route', status: 'completed', message: '路由完成', durationMs: 12 });
     await emit({ type: 'tool.started', sessionId: input.sessionId, itemId: 'lookup', toolType: 'command_execution', name: 'node scripts/callOaApi.mjs --operationId list_reports' });
@@ -133,6 +154,63 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     assert.equal((await request('/1/messages', 'POST', { message: 'cancel' }, 'cancel')).status, 409);
     assert.equal(calls, 4);
     assert.equal((await request('/1/messages', 'POST', { message: 'x'.repeat(140000) }, 'large')).status, 413);
+    const upload = await originalFetch(`${base}/v1/sessions/1/attachments`, {
+      method: 'POST', headers: { Authorization: 'Bearer valid', 'x-file-name': 'notes.txt' }, body: 'attachment text',
+    });
+    assert.equal(upload.status, 201);
+    const attachment = await upload.json();
+    assert.equal('path' in attachment, false);
+    assert.equal((await request(`/1/attachments/${attachment.id}`, 'GET', undefined, undefined, 'other')).status, 404);
+    assert.equal(await (await request(`/1/attachments/${attachment.id}`)).text(), 'attachment text');
+    const documentAnalysis = await (await request('/1/messages', 'POST', { message: '分析附件', attachmentIds: [attachment.id] }, 'with-attachment')).json();
+    assert.equal(documentAnalysis.result.model, 'gpt-5.6-terra');
+    assert.ok(documentAnalysis.traceEvents.some((event: any) => event.toolType === 'attachment_route'));
+    assert.equal(documentAnalysis.traceEvents.some((event: any) => event.toolType === 'model_switch'), false);
+    const savedAttachment = records.get('1').record.messages.find((message: any) => message.id === 'with-attachment:user').attachments[0];
+    assert.deepEqual(savedAttachment, attachment);
+    assert.equal((await request('/1/messages', 'POST', { message: '分析附件', attachmentIds: [attachment.id] }, 'with-attachment')).status, 200);
+    assert.equal((await request('/1/messages', 'POST', { message: '分析附件', attachmentIds: [] }, 'with-attachment')).status, 409);
+    assert.equal((await request('/1/messages', 'POST', { message: '分析附件', attachmentIds: ['../../env'] }, 'invalid-attachment')).status, 400);
+    assert.equal((await request('/1/messages', 'POST', { message: '他有哪些经历' }, 'context-followup')).status, 200);
+    const imageUpload = await originalFetch(`${base}/v1/sessions/1/attachments`, {
+      method: 'POST', headers: { Authorization: 'Bearer valid', 'x-file-name': 'red.png' },
+      body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6ksAAAAASUVORK5CYII=', 'base64'),
+    });
+    const image = await imageUpload.json();
+    const analyzeImage = { message: '分析图片', attachmentIds: [image.id], provider: 'openrouter', model: 'deepseek/deepseek-v4-flash' };
+    const analysisStream = await request('/1/messages/stream', 'POST', analyzeImage, 'image-analysis');
+    assert.equal(analysisStream.status, 200);
+    const events = (await analysisStream.text()).split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
+    const switched = events.find(event => event.toolType === 'model_switch');
+    assert.equal(switched?.message, '切换为 Kimi K3 模型用作文件解析（仅本次请求）');
+    assert.equal('sessionId' in switched, false);
+    assert.equal(events.at(-1).result.model, 'moonshotai/kimi-k3');
+    const analysisReplay = await (await request('/1/messages', 'POST', analyzeImage, 'image-analysis')).json();
+    assert.equal(analysisReplay.result.model, 'moonshotai/kimi-k3');
+    assert.equal(analysisReplay.traceEvents.filter((event: any) => event.toolType === 'model_switch').length, 1);
+    const imageHistory = records.get('1').record.messages;
+    assert.equal(imageHistory.find((message: any) => message.id === 'image-analysis:user').attachmentOptions.modelOverride.model, analyzeImage.model);
+    assert.ok(imageHistory.find((message: any) => message.id === 'image-analysis:assistant').traceEvents.some((event: any) => event.toolType === 'model_switch'));
+    assert.equal((await request('/1/messages', 'POST', { ...analyzeImage, model: 'moonshotai/kimi-k3' }, 'image-analysis')).status, 409);
+    for (const model of ['moonshotai/kimi-k3', 'qwen/qwen3.8-max-0902']) {
+      const retained = await (await request('/1/messages', 'POST', { ...analyzeImage, model }, model.startsWith('qwen') ? 'keep-qwen' : 'keep-kimi')).json();
+      assert.equal(retained.result.model, model);
+      assert.equal(retained.traceEvents.some((event: any) => event.toolType === 'model_switch'), false);
+    }
+    for (const message of ['把附件上传到知识库页面 X', '请问这些附件要如何处理？']) {
+      const unchanged = await (await request('/1/messages', 'POST', { ...analyzeImage, message }, message.startsWith('把') ? 'auto-upload' : 'auto-clarify')).json();
+      assert.equal(unchanged.result.model, analyzeImage.model);
+      assert.equal(unchanged.traceEvents.some((event: any) => event.toolType === 'model_switch'), false);
+    }
+    const uploadOnly = { message: '手动上传', attachmentIds: [image.id], attachmentMode: 'upload', attachmentTarget: '研发页面', provider: 'openrouter', model: 'deepseek/deepseek-v4-flash' };
+    assert.equal((await request('/1/messages', 'POST', uploadOnly, 'manual-upload')).status, 200);
+    const manualHistory = records.get('1').record.messages.find((message: any) => message.id === 'manual-upload:user');
+    assert.equal(manualHistory.content, '手动上传');
+    assert.equal(manualHistory.attachmentOptions.mode, 'upload');
+    assert.equal(manualHistory.attachmentOptions.target, '研发页面');
+    assert.equal((await request('/1/messages', 'POST', { ...uploadOnly, attachmentTarget: '其他页面' }, 'manual-upload')).status, 409);
+    assert.equal((await request('/1/messages', 'POST', { ...uploadOnly, attachmentMode: 'analyze' }, 'manual-analyze')).status, 200);
+    assert.equal((await request('/1/messages', 'POST', { ...uploadOnly, attachmentMode: 'invalid' }, 'manual-invalid')).status, 400);
     assert.equal((await request('/1', 'DELETE')).status, 200);
     assert.equal((await request('/1/requests/first')).status, 404);
   } finally {

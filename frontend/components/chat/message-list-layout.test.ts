@@ -29,9 +29,9 @@ test("chat content keeps vertical scrolling enabled", () => {
 })
 
 test("reply scrolling reserves space above the fixed composer", () => {
-  assert.match(messageListSource, /max-w-5xl flex-col gap-7 px-4 pb-40 pt-24/)
+  assert.match(messageListSource, /max-w-5xl flex-col gap-7 px-4 pb-\[var\(--chat-composer-space,10rem\)\] pt-24/)
 })
 
 test("chat messages use a thin borderless scrollbar", () => {
-  assert.match(messageListSource, /chat-message-scrollbar absolute inset-0 border-none/)
+  assert.match(messageListSource, /chat-message-scrollbar absolute inset-0 overflow-x-hidden border-none/)
 })

@@ -54,7 +54,7 @@ const markdownComponents: Components = {
   },
   table: ({ children }) => (
     <div className="my-4 max-w-full overflow-x-auto rounded-lg border border-stone-200 theme-dark:border-zinc-700">
-      <table className="w-full border-collapse text-left text-sm">{children}</table>
+      <table className="w-full min-w-[24rem] border-collapse text-left text-sm">{children}</table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-stone-100/80 text-stone-700 theme-dark:bg-zinc-800 theme-dark:text-zinc-200">{children}</thead>,
@@ -64,7 +64,7 @@ const markdownComponents: Components = {
 
 export function MarkdownRenderer({ content, className, isStreaming = false }: MarkdownRendererProps) {
   return (
-    <div className={cn("min-w-0 max-w-full text-[0.9375rem] leading-7 text-stone-800 theme-dark:text-zinc-200", className)}>
+    <div className={cn("min-w-0 max-w-full [overflow-wrap:anywhere] text-[0.9375rem] leading-7 text-stone-800 theme-dark:text-zinc-200", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
         {content}
       </ReactMarkdown>

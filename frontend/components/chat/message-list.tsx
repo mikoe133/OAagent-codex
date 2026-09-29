@@ -162,7 +162,7 @@ export function MessageList({
       }}
       onTouchMove={() => setAutoScroll(false)}
       className={cn(
-        "chat-message-scrollbar absolute inset-0 border-none",
+        "chat-message-scrollbar absolute inset-0 overflow-x-hidden border-none",
         resolveMessageListOverflow({
           messageCount: messages.length,
           isStreaming,
@@ -173,7 +173,7 @@ export function MessageList({
       aria-label="Chat messages"
       aria-live="polite"
     >
-      <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-7 px-4 pb-40 pt-24 sm:px-8 lg:px-12">
+      <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-7 px-4 pb-[var(--chat-composer-space,10rem)] pt-24 sm:px-8 lg:px-12">
         {messages.length === 0 && !error && !isStreaming && (
           <div className="flex min-h-[calc(100dvh-16rem)] flex-col items-center justify-center text-center text-stone-400 theme-dark:text-zinc-500">
             <div className={`mb-4 ${hasAnimated ? "orb-intro" : ""}`}>
@@ -244,7 +244,7 @@ export function MessageList({
       </div>
 
       {!autoScroll && messages.length > 0 && (
-        <div className="pointer-events-none sticky bottom-36 z-20 -mt-24 flex justify-center">
+        <div className="pointer-events-none sticky bottom-[var(--chat-composer-space,10rem)] z-20 -mt-24 flex justify-center">
           <Button
             type="button"
             variant="outline"

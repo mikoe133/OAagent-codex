@@ -12,6 +12,8 @@ import {
 } from "@/lib/model-catalog"
 
 type ChatRequestBody = {
+  attachmentMode?: unknown
+  attachmentTarget?: unknown
   messages?: unknown
   recordId?: unknown
   requestId?: unknown
@@ -27,6 +29,7 @@ type ChatMessage = {
   role?: unknown
   content?: unknown
   imageData?: unknown
+  attachmentIds?: unknown
 }
 
 type AgentStreamEvent = {
@@ -64,6 +67,12 @@ async function handleChat(req: Request, diagnostics: ChatRequestDiagnostics) {
       return jsonResponse({ error: "No valid user message to process" }, 400)
     }
 
+    const attachmentIds = [...messages].reverse().find(message => message.role === "user")?.attachmentIds
+    if (attachmentIds !== undefined && (!Array.isArray(attachmentIds) || attachmentIds.length > 5 || attachmentIds.some(id => typeof id !== "string" || !/^[a-f0-9-]{36}$/.test(id)))) {
+      return jsonResponse({ error: "Invalid attachment IDs" }, 400)
+    }
+    if (body.attachmentMode !== undefined && !['auto', 'analyze', 'upload'].includes(String(body.attachmentMode))) return jsonResponse({ error: 'Invalid attachment mode' }, 400)
+    if (body.attachmentTarget !== undefined && (typeof body.attachmentTarget !== 'string' || body.attachmentTarget.length > 300)) return jsonResponse({ error: 'Invalid attachment target' }, 400)
     const sessionId = String(body.recordId ?? body.sessionId ?? "")
     if (!/^[1-9]\d*$/.test(sessionId)) return jsonResponse({ error: "OA recordId required" }, 400)
     const requestId = body.requestId
@@ -92,6 +101,9 @@ async function handleChat(req: Request, diagnostics: ChatRequestDiagnostics) {
       headers: new Headers({ ...Object.fromEntries(buildAgentHeaders(sessionToken)), "Idempotency-Key": requestId }),
       body: JSON.stringify({
         message,
+        ...(attachmentIds ? { attachmentIds } : {}),
+        ...(body.attachmentMode !== undefined ? { attachmentMode: body.attachmentMode } : {}),
+        ...(body.attachmentTarget !== undefined ? { attachmentTarget: body.attachmentTarget } : {}),
         provider,
         ...(model ? { model } : {}),
         ...(developerMode ? { developerMode: true } : {}),

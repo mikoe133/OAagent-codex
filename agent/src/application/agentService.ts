@@ -1,3 +1,5 @@
+import { applyAttachmentRoute } from '../attachments/attachmentRouting.js';
+import { prepareAttachmentInput, attachmentTurn, supportsImages } from '../attachments/attachmentContext.js';
 import type { ThreadEvent, ThreadItem, Usage } from "@openai/codex-sdk";
 import { withDatabaseReadRouting } from "../infrastructure/oa-read/routing.js";
 import { readToolToken } from "../infrastructure/oa-read/readService.js";
@@ -279,6 +281,7 @@ export class AgentService {
       resolveRequestedRouterModels(input.routerModels, input.routerModel),
       undefined,
       hasOaAdminAccess(input.sessionId, this.sessions.getOaToken(input.sessionId) ?? ""),
+      input.sessionId,
     );
     finishRouting?.();
     input.latency?.mark("routing_completed");
@@ -311,7 +314,7 @@ export class AgentService {
     input.latency?.markOnce("codex_invoked");
     const turn = await (async () => {
       try {
-        return await thread.run(prompt);
+        return await thread.run(await prepareAttachmentInput(prompt, input.sessionId, runConfig.modelProvider, runConfig.model));
       } finally {
         finishOaTurn(input.sessionId);
         finishOaChatAccessTurn(input.sessionId);
@@ -391,6 +394,7 @@ export class AgentService {
           resolveRequestedRouterModels(input.routerModels, input.routerModel),
           stageProgress,
           hasOaAdminAccess(input.sessionId, this.sessions.getOaToken(input.sessionId) ?? ""),
+          input.sessionId,
         );
         return { session, resolvedRun };
       },
@@ -398,6 +402,7 @@ export class AgentService {
     );
     finishRouting?.();
     input.latency?.mark("routing_completed");
+    for (const event of resolvedRun.attachmentEvents) await emit(event);
     const runConfig = resolvedRun.config;
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
@@ -457,7 +462,7 @@ export class AgentService {
         state.modelStartupStartedAt = performance.now();
         await stageProgress("codex_startup", "in_progress");
       }
-      const { events } = await thread.runStreamed(turnPrompt, { signal });
+      const { events } = await thread.runStreamed(await prepareAttachmentInput(turnPrompt, input.sessionId, runConfig.modelProvider, runConfig.model), { signal });
       for await (const event of events) {
         throwIfAborted(signal);
         await this.emitCodexEvent(
@@ -959,6 +964,7 @@ async function resolveRunConfig(
   routerModels: readonly RouterModelId[] = DEFAULT_ROUTER_MODELS,
   stageProgress?: LatencyStageProgress,
   allowAdmin = false,
+  sessionId?: string,
 ) {
   const modelProvider = resolveRequestedProvider(requestedProvider, config.modelProvider);
   const fallbackModel =
@@ -979,9 +985,15 @@ async function resolveRunConfig(
     knowledgeBase.read.index,
     ...(knowledgeBase.write ? [knowledgeBase.write.index] : []),
   ]);
+  const binding = sessionId ? attachmentTurn(sessionId) : undefined;
+  const attachments = binding?.files.length ? {
+    files: binding.files.map(({ id, name, mime, size }) => ({ id, name, mime, size })),
+    source: binding.source, mode: binding.mode, target: binding.target,
+    selectedModel: { provider: modelProvider, model, supportsImages: supportsImages(modelProvider, model) },
+  } : undefined;
   const routers = routerModels.map(model => ({
     model,
-    router: createOpenApiSemanticRouter(resolveRouterConfig(runConfig, model)),
+    router: createOpenApiSemanticRouter(resolveRouterConfig(runConfig, model), fetch, Boolean(attachments)),
   }));
   const route = await measureLatencyStage(
     latency,
@@ -989,14 +1001,18 @@ async function resolveRunConfig(
     () => routeOpenApiRequestRace(
       runConfig,
       routingIndex,
-      { task, conversationMemory, signal, allowAdmin },
+      { task, conversationMemory, signal, allowAdmin, attachments },
       routers,
     ),
     stageProgress,
     formatSemanticRouteTraceMessage,
   );
+  signal?.throwIfAborted();
+  const execution = sessionId && route.attachment
+    ? applyAttachmentRoute(sessionId, modelProvider, model, route.attachment, route.diagnostics.strategy === 'fallback') : undefined;
   return {
-    config: runConfig,
+    attachmentEvents: execution?.events ?? [],
+    config: execution?.switched ? { ...runConfig, modelProvider: 'openrouter' as const, model: execution.model } : runConfig,
     openApiCandidates: route.candidates,
     selectedApiCatalogs: route.catalogs,
     knowledgeBaseWriteContractAvailable: knowledgeBase.write !== null,
@@ -1081,7 +1097,7 @@ function createLatencyStageProgress(
 export function formatSemanticRouteTraceMessage(
   route: OpenApiRouteResult,
 ): string {
-  const catalogs = route.catalogs.map(formatRouteCatalog).join("、");
+  const catalogs = route.catalogs.map(formatRouteCatalog).join("、") || "无需外部接口";
   if (route.diagnostics.strategy === "fallback") {
     return `路由模型失败，已启用安全降级；原因：${route.diagnostics.failureReason}；最终接口域：${catalogs}`;
   }

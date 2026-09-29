@@ -2,6 +2,38 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { restoreStoredTrace } from './stored-trace'
 import { resolveLoadedSessionMessages } from './session-messages'
+import { mergeToolTimelineEvent } from './chat-stream'
+
+test('semantic attachment decision and failure remain readable after history restoration', () => {
+  for (const status of ['completed', 'failed']) {
+    const event = {
+      type: 'progress', itemId: 'attachment-intent-routing', toolType: 'attachment_route', status,
+      message: status === 'completed' ? '需要读取图片，使用视觉模型' : '附件语义路由暂不可用，请明确需求后重试。',
+      detail: { intent: status === 'completed' ? 'analyze' : 'clarify', requiresVision: status === 'completed' },
+    }
+    const live = mergeToolTimelineEvent([], event)
+    assert.deepEqual(restoreStoredTrace([event])!.toolSteps, live)
+    assert.equal(live[0]?.title, '附件用途判断')
+    assert.equal(live[0]?.status, status)
+    assert.equal(live[0]?.description, event.message)
+    assert.match(live[0]?.output || '', /requiresVision/)
+  }
+})
+
+test('model switch is readable in both live and restored traces', () => {
+  const event = {
+    type: 'progress', itemId: 'attachment-model-routing', toolType: 'model_switch', status: 'completed',
+    message: '切换为 Kimi K3 模型用作文件解析（仅本次请求）',
+    detail: { requested: { model: 'deepseek/deepseek-v4-flash' }, effective: { model: 'moonshotai/kimi-k3' } },
+  }
+  const live = mergeToolTimelineEvent([], event)
+  const restored = restoreStoredTrace([event])!
+  assert.deepEqual(restored.toolSteps, live)
+  assert.equal(live[0]?.title, '文件解析模型')
+  assert.equal(live[0]?.description, event.message)
+  assert.equal(live[0]?.status, 'completed')
+  assert.match(live[0]?.output || '', /deepseek-v4-flash/)
+});
 
 test('restores tool inputs, output, duration and interleaved messages from a saved journal', () => {
   const restored = restoreStoredTrace([

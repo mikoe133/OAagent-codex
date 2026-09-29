@@ -1,5 +1,6 @@
 "use client"
 
+import { MessageAttachments } from "./message-attachments"
 import * as AccordionPrimitive from "@radix-ui/react-accordion"
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
@@ -89,16 +90,21 @@ export function MessageBubble({
         isUser
           ? "ml-auto max-w-[min(88%,42rem)] flex-row-reverse user-message-enter"
           : "mr-auto w-full max-w-[52rem] animate-in items-start fade-in slide-in-from-bottom-2 duration-300",
+        isUser && !!message.attachments?.length && "w-full max-w-[min(100%,42rem)]",
       )}
       aria-label={isUser ? "Your message" : "OA Agent response"}
     >
-      <div className={cn("min-w-0", isUser ? "flex flex-col items-end" : "flex-1")}>
+      <div className={cn("min-w-0", isUser ? "flex flex-col items-end" : "flex-1", isUser && !!message.attachments?.length && "w-full")}>
+        {isUser && !!message.attachments?.length && <MessageAttachments files={message.attachments} />}
         {isUser ? (
+          (message.content || message.imageData) ? (
           <div
             data-slot="user-message-bubble"
             className="max-w-full rounded-2xl rounded-tr-md bg-[#f5f5f5] px-4 py-3 text-stone-800 theme-dark:bg-zinc-800 theme-dark:text-zinc-100"
           >
             <div className="flex flex-col gap-2">
+              {!!message.attachments?.length && message.attachmentOptions && (message.attachmentOptions.mode !== 'auto' || message.attachmentOptions.target) &&
+                <p className="text-xs text-stone-500">{message.attachmentOptions.mode === 'analyze' ? '仅解析附件' : message.attachmentOptions.mode === 'upload' ? '上传知识库' : '自动判断用途'}{message.attachmentOptions.target ? ` · 目标：${message.attachmentOptions.target}` : ''}</p>}
               {message.imageData && (
                 <div className="h-24 w-24 overflow-hidden rounded-lg border border-stone-200 bg-white theme-dark:border-zinc-700 theme-dark:bg-zinc-900">
                   <Image
@@ -110,9 +116,10 @@ export function MessageBubble({
                   />
                 </div>
               )}
-              <p className="whitespace-pre-wrap break-words text-[0.9375rem] leading-6">{message.content}</p>
+              <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[0.9375rem] leading-6">{message.content}</p>
             </div>
           </div>
+          ) : null
         ) : (
           <div className="min-w-0 max-w-full">
             {(toolSteps.length > 0 || traceMessages.length > 0) && (
@@ -173,7 +180,7 @@ function UserActions({ message }: { message: Message }) {
   const showCopy = message.content.trim().length > 0
 
   return (
-            <div className="mt-1.5 flex min-h-7 items-center justify-end gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
+            <div className="mt-1.5 flex min-h-7 flex-wrap items-center justify-end gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
       <span>{formatTime(message.createdAt)}</span>
       {showCopy && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
@@ -207,7 +214,7 @@ function AssistantActions({
   }
 
   return (
-            <div className="mt-2 flex min-h-7 items-center gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
+            <div className="mt-2 flex min-h-7 flex-wrap items-center gap-1 text-[0.6875rem] text-stone-400 theme-dark:text-zinc-500">
       {responseDuration && <span>{`已处理: ${responseDuration}`}</span>}
       {showActions && (
         <span data-slot="message-actions" className={MESSAGE_ACTION_CONTROLS_CLASS}>
@@ -446,7 +453,7 @@ function ToolTimeline({
           </AccordionPrimitive.Trigger>
         </AccordionPrimitive.Header>
         <AccordionContent
-          className="ml-3 pb-2 pl-10 pt-1"
+          className="pb-2 pl-2 pt-1 sm:ml-3 sm:pl-10"
           aria-label="Agent trace"
         >
           <div className="space-y-3">
@@ -625,7 +632,7 @@ function ToolTimelineItem({ step }: { step: ToolStep }) {
             </span>
           ) : null}
         </div>
-        <p className="mt-0.5 break-words text-xs leading-5 text-stone-500 theme-dark:text-zinc-400">{step.description}</p>
+        <p className="mt-0.5 [overflow-wrap:anywhere] text-xs leading-5 text-stone-500 theme-dark:text-zinc-400">{step.description}</p>
         {hasDetails && (
           <details className="group mt-1.5" open={step.status === "running"}>
             <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[0.6875rem] font-medium text-stone-500 transition-colors hover:text-stone-800 theme-dark:text-zinc-400 theme-dark:hover:text-zinc-200">

@@ -446,7 +446,7 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
   return (
     <main
       data-slot="automated-tasks-view"
-      className="h-full overflow-y-auto bg-stone-50 px-5 pb-12 pt-20 text-slate-950 theme-dark:bg-zinc-950 theme-dark:text-zinc-100 sm:px-9 sm:pt-7"
+      className="h-full overflow-y-auto bg-stone-50 px-5 pb-12 pt-20 text-slate-950 theme-dark:bg-zinc-950 theme-dark:text-zinc-100 sm:px-9 lg:pt-7"
     >
       {conversationTask ? (
         <AutomatedTaskConversation
@@ -463,7 +463,7 @@ export function AutomatedTasksView({ oaNavigationUrl }: { oaNavigationUrl: strin
         />
       ) : (
         <>
-          <header data-slot="automated-tasks-header" className="flex min-h-9 items-center justify-between gap-4 sm:pl-8">
+          <header data-slot="automated-tasks-header" className="flex min-h-9 items-center justify-between gap-4 lg:pl-8">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">自动任务</h1>
             </div>

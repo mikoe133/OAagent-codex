@@ -23,6 +23,7 @@ const response = await fetch(url, {
   body: JSON.stringify({
     sessionId: args.sessionId || process.env.CALL_KNOWLEDGE_BASE_API_SESSION_ID,
     operationId: args.operationId,
+    attachmentId: args.attachmentId,
     pathParams: parseJsonArg(args.pathParams, "pathParams"),
     query: parseJsonArg(args.query, "query"),
     body: parseJsonArg(args.body, "body"),

@@ -240,7 +240,7 @@ const UserInfo = ({
         align="end"
         side="top"
         sideOffset={10}
-        className="z-[9999] w-48 overflow-visible rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
+        className="z-[9999] w-48 rounded-xl border-slate-200 bg-white p-1 shadow-[0_14px_32px_rgba(15,23,42,0.14)] theme-dark:border-zinc-700 theme-dark:bg-zinc-900 theme-dark:shadow-[0_14px_32px_rgba(0,0,0,0.4)]"
       >
         <DropdownMenuSub>
           <DropdownMenuSubTrigger
@@ -260,13 +260,13 @@ const UserInfo = ({
             >
               <DropdownMenuRadioItem
                 value="disabled"
-                className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+                className="min-h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
               >
                 关闭
               </DropdownMenuRadioItem>
               <DropdownMenuRadioItem
                 value="enabled"
-                className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+                className="min-h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
               >
                 开启
               </DropdownMenuRadioItem>
@@ -297,7 +297,7 @@ const UserInfo = ({
                     disabled={providerSwitchDisabled || (isChecked && selectedRouterModels.length === 1)}
                     onSelect={(event) => event.preventDefault()}
                     onCheckedChange={() => onRouterModelsChange(toggleRouterModel(selectedRouterModels, model.id))}
-                    className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+                    className="min-h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
                   >
                     {model.name}
                   </DropdownMenuCheckboxItem>
@@ -330,7 +330,7 @@ const UserInfo = ({
                 <DropdownMenuRadioItem
                   key={provider.id}
                   value={provider.id}
-                  className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+                  className="min-h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
                 >
                   {provider.name}
                 </DropdownMenuRadioItem>
@@ -391,7 +391,7 @@ const FontSizeMenu = () => {
             <DropdownMenuRadioItem
               key={mode.value}
               value={mode.value}
-              className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+              className="min-h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
             >
               {mode.label}
             </DropdownMenuRadioItem>
@@ -421,7 +421,7 @@ const ThemeModeMenu = () => {
             <DropdownMenuRadioItem
               key={mode.value}
               value={mode.value}
-              className="h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
+              className="min-h-10 rounded-lg text-sm text-slate-700 focus:bg-slate-100 theme-dark:text-zinc-200 theme-dark:focus:bg-zinc-800"
             >
               {mode.label}
             </DropdownMenuRadioItem>
@@ -860,21 +860,21 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         aria-label="Conversations"
         aria-hidden={isCollapsed && !isMobileOpen}
         className={cn(
-          "fixed left-0 top-0 z-40 flex h-dvh w-[min(20rem,calc(100vw-3rem))] flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.12)] backdrop-blur-xl transition-[transform,visibility] duration-300 ease-out theme-dark:border-zinc-800 theme-dark:bg-zinc-950/95 theme-dark:shadow-[16px_0_60px_rgba(0,0,0,0.32)] sm:visible sm:h-full sm:w-80 sm:translate-x-0 sm:pointer-events-auto sm:transition-none",
+          "fixed left-0 top-0 z-40 flex h-dvh w-[min(20rem,calc(100vw-3rem))] flex-col overflow-hidden border-r border-slate-200 bg-white/95 shadow-[16px_0_60px_rgba(15,23,42,0.12)] backdrop-blur-xl transition-[transform,visibility] duration-300 ease-out theme-dark:border-zinc-800 theme-dark:bg-zinc-950/95 theme-dark:shadow-[16px_0_60px_rgba(0,0,0,0.32)] lg:visible lg:h-full lg:w-80 lg:translate-x-0 lg:pointer-events-auto lg:transition-none",
           isMobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none",
         )}
       >
         <button
           type="button"
           onClick={onMobileClose}
-          className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-stone-600 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700 theme-dark:focus-visible:ring-white/15 sm:hidden"
+          className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100 text-stone-600 transition-colors hover:bg-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/10 theme-dark:bg-zinc-800 theme-dark:text-zinc-300 theme-dark:hover:bg-zinc-700 theme-dark:focus-visible:ring-white/15 lg:hidden"
           aria-label="Close conversations"
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>
         <div
           data-slot="sider-actions"
-          className="flex shrink-0 flex-col gap-1 bg-white/95 px-1 pb-4 pt-14 backdrop-blur-xl theme-dark:bg-zinc-950/95 sm:pt-6 md:px-5"
+          className="flex shrink-0 flex-col gap-1 bg-white/95 px-1 pb-4 pt-14 backdrop-blur-xl theme-dark:bg-zinc-950/95 lg:pt-6 md:px-5"
         >
           <SearchBox
             value={query}

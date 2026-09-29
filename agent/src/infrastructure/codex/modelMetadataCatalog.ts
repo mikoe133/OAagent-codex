@@ -130,6 +130,7 @@ export function buildCustomModelCatalog(bundledCatalog: unknown): ModelCatalog {
         effective_context_window_percent: 95,
         supports_parallel_tool_calls: definition.supportsParallelToolCalls,
         support_verbosity: definition.supportVerbosity,
+        ...(["z-ai/glm-5.3", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash"].includes(slug) ? { input_modalities: ["text"] } : {}),
         supports_image_detail_original: false,
         supports_search_tool: false,
       } satisfies ModelInfo;

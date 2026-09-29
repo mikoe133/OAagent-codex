@@ -1,5 +1,6 @@
 "use client"
 
+import { validAttachments, validAttachmentOptions, type AttachmentSendOptions, type ChatAttachment } from "@/lib/chat-attachments"
 import { fetchChatWithDiagnostics, redirectToChatLogin, logChatDiagnostic, traceId, TRACE_HEADER } from "@/lib/chat-diagnostics"
 
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react"
@@ -60,6 +61,8 @@ export interface Message {
   model?: string
   provider?: string
   imageData?: string
+  attachments?: ChatAttachment[]
+  attachmentOptions?: AttachmentSendOptions
   toolSteps?: ToolStep[]
   traceMessages?: TraceMessage[]
   knowledgeSources?: KnowledgeSource[]
@@ -78,10 +81,7 @@ const DEVELOPER_MODE_STORAGE_KEY = "chat-developer-mode"
 const ROUTER_MODELS_STORAGE_KEY = "chat-router-models-v2"
 const AGENT_SESSION_STORAGE_KEY = "chat-agent-session-id"
 const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,120}$/
-const SIDEBAR_WIDTH = 320
-const SIDEBAR_DESKTOP_QUERY = "(min-width: 640px)"
-const COLLAPSED_CONTROL_LEFT = 16
-const EXPANDED_CONTROL_LEFT = SIDEBAR_WIDTH + COLLAPSED_CONTROL_LEFT
+const SIDEBAR_DESKTOP_QUERY = "(min-width: 1024px)"
 const TYPEWRITER_INTERVAL_MS = 18
 const SESSION_INDICATOR_VIEWED_HOLD_MS = 1500
 const SESSION_INDICATOR_FADE_MS = 500
@@ -103,6 +103,8 @@ type StoredMessage = {
   model?: unknown
   provider?: unknown
   imageData?: unknown
+  attachments?: unknown
+  attachmentOptions?: unknown
   toolSteps?: unknown
   traceMessages?: unknown
   traceEvents?: unknown
@@ -353,6 +355,8 @@ function normalizeStoredMessage(value: unknown): Message | null {
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(model ? { model } : {}),
     ...(provider ? { provider } : {}),
+    attachments: validAttachments(message.attachments),
+    attachmentOptions: validAttachmentOptions(message.attachmentOptions),
     ...(typeof message.imageData === "string" ? { imageData: message.imageData } : {}),
     ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
     ...(Array.isArray(message.traceMessages)
@@ -470,6 +474,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   const [isMobileSiderOpen, setIsMobileSiderOpen] = useState(false)
   const [activeWorkspaceView, setActiveWorkspaceView] = useState<WorkspaceView>("conversation")
   const [isLoaded, setIsLoaded] = useState(false)
+  const shellRef = useRef<HTMLDivElement | null>(null)
   const siderRef = useRef<HTMLElement | null>(null)
   const sidebarControlsRef = useRef<HTMLDivElement | null>(null)
   const messageLayoutRef = useRef<HTMLDivElement | null>(null)
@@ -592,8 +597,10 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
       const duration = animate ? 0.42 : 0
       const ease = "power3.inOut"
-      const nextLayoutLeft = isSiderCollapsed ? 0 : SIDEBAR_WIDTH
-      const nextControlLeft = isSiderCollapsed ? COLLAPSED_CONTROL_LEFT : EXPANDED_CONTROL_LEFT
+      const sidebarWidth = sider?.offsetWidth ?? 0
+      const controlInset = parseFloat(getComputedStyle(document.documentElement).fontSize)
+      const nextLayoutLeft = isSiderCollapsed ? 0 : sidebarWidth
+      const nextControlLeft = nextLayoutLeft + controlInset
 
       if (sider) {
         if (!isSiderCollapsed) {
@@ -601,7 +608,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         }
 
         gsap.to(sider, {
-          x: isSiderCollapsed ? -SIDEBAR_WIDTH : 0,
+          x: isSiderCollapsed ? -sidebarWidth : 0,
           autoAlpha: isSiderCollapsed ? 0 : 1,
           duration,
           ease,
@@ -649,9 +656,33 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
     }
 
+    const observer = new ResizeObserver(() => animateSiderLayout(false))
+    if (siderRef.current) observer.observe(siderRef.current)
     window.addEventListener("resize", handleResize)
-    return () => window.removeEventListener("resize", handleResize)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", handleResize)
+    }
   }, [animateSiderLayout])
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current
+    const composer = composerLayoutRef.current
+    if (!shell || !composer) return
+    // Reserve the actual composer height, including wrapped attachments and
+    // enlarged fonts, so the last reply and scroll control stay reachable.
+    const updateSpace = () => {
+      const inset = parseFloat(getComputedStyle(document.documentElement).fontSize)
+      const log = messageLayoutRef.current?.querySelector<HTMLElement>('[role="log"]')
+      const wasAtBottom = log && log.scrollHeight - log.clientHeight - log.scrollTop < 24
+      shell.style.setProperty("--chat-composer-space", `${composer.offsetHeight + inset * 2}px`)
+      if (wasAtBottom) log.scrollTop = log.scrollHeight
+    }
+    updateSpace()
+    const observer = new ResizeObserver(updateSpace)
+    observer.observe(composer)
+    return () => observer.disconnect()
+  }, [activeWorkspaceView])
 
   useEffect(() => {
     if (!isMobileSiderOpen) {
@@ -804,9 +835,10 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   )
 
   // Send a message to the AI
+  const uploadedFilesRef = useRef(new WeakMap<File, ChatAttachment>())
   const sendMessage = useCallback(
-    async (content: string, imageData?: string, retryRequestId?: string) => {
-      if (!content.trim() && !imageData) return false
+    async (content: string, filesOrAttachments?: File[] | ChatAttachment[], retryRequestId?: string, onAdmitted?: () => void, options?: AttachmentSendOptions) => {
+      if (!content.trim() && !filesOrAttachments?.length) return false
 
       if (preparingSessionRef.current) return false
       let currentAgentSessionId = agentSessionId || getOrCreateAgentSessionId()
@@ -814,6 +846,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       preparingSessionRef.current = true
       const preparationTraceId = traceId()
       const originalSessionId = currentAgentSessionId
+      const attachments: ChatAttachment[] = []
       try {
         currentAgentSessionId = await prepareChatSession({
           sessionId: originalSessionId,
@@ -833,9 +866,24 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         setAgentSessionId(currentAgentSessionId)
         setActiveRecordId(currentAgentSessionId)
         persistAgentSessionId(currentAgentSessionId)
+        for (const file of filesOrAttachments || []) {
+          if (file instanceof File) {
+            const cached = uploadedFilesRef.current.get(file)
+            if (cached?.recordId === currentAgentSessionId) { attachments.push(cached); continue }
+            const response = await fetch(`/api/chat/attachments?recordId=${currentAgentSessionId}`, {
+              method: "POST", credentials: "same-origin", signal: AbortSignal.timeout(120000),
+              headers: { "X-File-Name": encodeURIComponent(file.name), "Content-Type": "application/octet-stream" }, body: file,
+            })
+            if (!response.ok) throw new Error(await readResponseError(response))
+            const attachment: ChatAttachment = await response.json()
+            uploadedFilesRef.current.set(file, attachment)
+            attachments.push(attachment)
+          } else attachments.push(file)
+        }
+        if (activeSessionIdRef.current !== currentAgentSessionId) return false
       } catch (error) {
         logChatDiagnostic({ scope: "browser", route: "/api/chat/sessions", traceId: preparationTraceId, event: "prepare_failed" })
-        if (activeSessionIdRef.current === originalSessionId) {
+        if (activeSessionIdRef.current === originalSessionId || activeSessionIdRef.current === currentAgentSessionId) {
           setError(error instanceof Error ? error.message : "读取 OA 会话失败")
         }
         return false
@@ -853,9 +901,10 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       const userMessage: Message = {
         id: `${requestId}:user`,
         role: "user",
-        content: content.trim() || "Describe this image",
+        content: content.trim() || "请问这些附件要如何处理？",
         createdAt: new Date(),
-        imageData,
+        attachments,
+        attachmentOptions: options,
       }
 
       const assistantMessage: Message = {
@@ -882,6 +931,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       messagesRef.current = newMessages
       sessionMessagesRef.current.set(currentAgentSessionId, newMessages)
       setMessages(newMessages)
+      onAdmitted?.()
       // Agent persists generated messages to OA; no browser history write.
 
       let cancelPendingTypewriter = () => {}
@@ -925,10 +975,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             messages: [...conversationMessages, userMessage].map((m) => ({
               role: m.role,
               content: m.content,
-              imageData: m.imageData,
+              attachmentIds: m.attachments?.map(file => file.id),
             })),
-            provider: selectedProvider,
-            model: selectedModel,
+            provider: options?.modelOverride?.provider ?? selectedProvider,
+            model: options?.modelOverride?.model ?? selectedModel,
+            ...(options ? { attachmentMode: options.mode, attachmentTarget: options.target } : {}),
             developerMode,
             routerModels: selectedRouterModels,
           }),
@@ -1294,7 +1345,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
       setMessages(retryMessages)
       setError(null)
-      setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.imageData, originalRequestId), 100)
+      setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.attachments, originalRequestId, undefined, lastUserMessage.attachmentOptions), 100)
     }
   }, [agentSessionId, messages, sendMessage])
 
@@ -1488,6 +1539,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
   return (
     <div
+      ref={shellRef}
       data-slot="chat-shell"
       className="relative h-dvh bg-stone-50 theme-dark:bg-zinc-950"
       style={{
@@ -1495,7 +1547,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           "rgba(14, 63, 126, 0.04) 0px 0px 0px 1px, rgba(42, 51, 69, 0.04) 0px 1px 1px -0.5px, rgba(42, 51, 70, 0.04) 0px 3px 3px -1.5px, rgba(42, 51, 70, 0.04) 0px 6px 6px -3px, rgba(14, 63, 126, 0.04) 0px 12px 12px -6px, rgba(14, 63, 126, 0.04) 0px 24px 24px -12px",
       }}
     >
-      <div ref={sidebarControlsRef} className="absolute left-4 top-7 z-50 hidden flex-col gap-3 sm:flex sm:left-[21rem]">
+      <div ref={sidebarControlsRef} className="absolute left-4 top-7 z-50 hidden flex-col gap-3 lg:flex lg:left-[21rem]">
         <Button
           onClick={toggleSider}
           variant="ghost"
@@ -1512,7 +1564,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         onClick={() => setIsMobileSiderOpen(true)}
         variant="ghost"
         size="icon"
-        className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-4 z-20 sm:hidden`}
+        className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-4 z-20 lg:hidden`}
         aria-controls="chat-sider"
         aria-expanded={isMobileSiderOpen}
         aria-label="Open conversations"
@@ -1524,7 +1576,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           onClick={startNewSession}
           variant="ghost"
           size="icon"
-          className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-4 top-20 z-20 sm:hidden`}
+          className={`${FLOATING_CONTROL_BUTTON_CLASS} absolute left-16 top-4 z-20 lg:hidden`}
           aria-label="New chat"
         >
           <SquarePen className="h-5 w-5" />
@@ -1534,7 +1586,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         <button
           data-slot="mobile-sider-backdrop"
           type="button"
-          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] sm:hidden"
+          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] lg:hidden"
           onClick={closeMobileSider}
           aria-label="Dismiss conversations"
         />
@@ -1604,7 +1656,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       </div>
       */}
 
-      <div ref={messageLayoutRef} className="absolute inset-0 sm:left-80">
+      <div ref={messageLayoutRef} className="absolute inset-0 lg:left-80">
         {activeWorkspaceView === "automated-tasks" ? (
           <AutomatedTasksView oaNavigationUrl={oaNavigationUrl} />
         ) : (
@@ -1625,7 +1677,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       {activeWorkspaceView === "conversation" ? (
         <Composer
           layoutRef={composerLayoutRef}
-          onSend={sendMessage}
+          onSend={(content, files, onAdmitted) => sendMessage(content, files, undefined, onAdmitted)}
           onStop={stopStreaming}
           isStreaming={isStreaming}
           selectedProvider={selectedProvider}

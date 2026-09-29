@@ -1,0 +1,20 @@
+[
+  {
+    "model": "moonshotai/kimi-k3",
+    "elapsedMs": 24826,
+    "answer": "Red",
+    "correct": true,
+    "items": [
+      "agent_message"
+    ]
+  },
+  {
+    "model": "qwen/qwen3.8-max-0902",
+    "elapsedMs": 23188,
+    "answer": "Red",
+    "correct": true,
+    "items": [
+      "agent_message"
+    ]
+  }
+]

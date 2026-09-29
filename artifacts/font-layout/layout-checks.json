@@ -1,0 +1,112 @@
+[
+  {
+    "composerLeft": 442,
+    "composerRight": 1198,
+    "font": "large",
+    "logLeft": 360,
+    "logScrollWidth": 909,
+    "logWidth": 909,
+    "pageWidth": 1280,
+    "sideRight": 360,
+    "viewport": 1280
+  },
+  {
+    "composerLeft": 378,
+    "composerRight": 1006,
+    "font": "large",
+    "logLeft": 360,
+    "logScrollWidth": 653,
+    "logWidth": 653,
+    "pageWidth": 1024,
+    "sideRight": 360,
+    "viewport": 1024
+  },
+  {
+    "composerLeft": 18,
+    "composerRight": 750,
+    "font": "large",
+    "logLeft": 0,
+    "logScrollWidth": 757,
+    "logWidth": 757,
+    "pageWidth": 768,
+    "sideRight": 0,
+    "viewport": 768
+  },
+  {
+    "composerLeft": 18,
+    "composerRight": 372,
+    "font": "large",
+    "logLeft": 0,
+    "logScrollWidth": 379,
+    "logWidth": 379,
+    "pageWidth": 390,
+    "sideRight": 0,
+    "viewport": 390
+  },
+  {
+    "composerLeft": 18,
+    "composerRight": 302,
+    "font": "large",
+    "logLeft": 0,
+    "logScrollWidth": 309,
+    "logWidth": 309,
+    "pageWidth": 320,
+    "sideRight": 0,
+    "viewport": 320
+  },
+  {
+    "composerLeft": 20,
+    "composerRight": 300,
+    "font": "extra-large",
+    "logLeft": 0,
+    "logScrollWidth": 309,
+    "logWidth": 309,
+    "pageWidth": 320,
+    "sideRight": 0,
+    "viewport": 320
+  },
+  {
+    "composerLeft": 20,
+    "composerRight": 370,
+    "font": "extra-large",
+    "logLeft": 0,
+    "logScrollWidth": 379,
+    "logWidth": 379,
+    "pageWidth": 390,
+    "sideRight": 0,
+    "viewport": 390
+  },
+  {
+    "composerLeft": 20,
+    "composerRight": 748,
+    "font": "extra-large",
+    "logLeft": 0,
+    "logScrollWidth": 757,
+    "logWidth": 757,
+    "pageWidth": 768,
+    "sideRight": 0,
+    "viewport": 768
+  },
+  {
+    "composerLeft": 420,
+    "composerRight": 1004,
+    "font": "extra-large",
+    "logLeft": 400,
+    "logScrollWidth": 613,
+    "logWidth": 613,
+    "pageWidth": 1024,
+    "sideRight": 400,
+    "viewport": 1024
+  },
+  {
+    "composerLeft": 420,
+    "composerRight": 1260,
+    "font": "extra-large",
+    "logLeft": 400,
+    "logScrollWidth": 869,
+    "logWidth": 869,
+    "pageWidth": 1280,
+    "sideRight": 400,
+    "viewport": 1280
+  }
+]

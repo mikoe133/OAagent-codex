@@ -1,3 +1,8 @@
+import type { AttachmentMode } from '../attachments/attachmentIntent.js';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { AttachmentStore, attachmentIds, publicAttachment, type StoredAttachment } from '../attachments/attachmentStore.js';
+import { bindAttachmentTurn, finishAttachmentTurn } from '../attachments/attachmentContext.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ChatLatencyTrace } from '../infrastructure/observability/chatLatency.js';
 import type { AppConfig } from '../config/config.js';
@@ -27,11 +32,13 @@ function bounded(value: string | null, fallback: number, max: number) {
 }
 export class PublicChatApi {
   private records: RequestStore;
+  private attachments: AttachmentStore;
   private active = new Map<string, Active>();
   private admission: Promise<unknown> = Promise.resolve();
   constructor(private config: AppConfig, private service: AgentService, private sessions: SessionStore,
     readonly scheduler = new ChatScheduler()) {
     this.records = new RequestStore(sessions.requestStorePath);
+    this.attachments = new AttachmentStore(`${sessions.requestStorePath}.attachments`);
   }
   async handle(req: IncomingMessage, res: ServerResponse, url: URL, token: string, principal: Principal, latency?: ChatLatencyTrace) {
     if (url.pathname !== '/v1/sessions' && !url.pathname.startsWith('/v1/sessions/')) return false;
@@ -63,6 +70,23 @@ export class PublicChatApi {
       }
       throw new ChatError(405, 'method_not_allowed', '不支持该方法');
     }
+    const attachmentMatch = url.pathname.match(/^\/v1\/sessions\/([1-9]\d*)\/attachments(?:\/([a-f0-9-]+))?$/);
+    if (attachmentMatch) {
+      const recordId = attachmentMatch[1]!;
+      await client.get(recordId);
+      const owner = JSON.stringify([this.config.oaApiBaseUrl, this.config.oaAuthAlias, principal.principalId]);
+      if (method === 'POST' && !attachmentMatch[2]) {
+        json(res, 201, await this.attachments.receive(owner, recordId, req)); return;
+      }
+      if (method === 'GET' && attachmentMatch[2]) {
+        const file = await this.attachments.get(owner, recordId, attachmentMatch[2]);
+        res.writeHead(200, { 'content-type': file.mime, 'content-length': file.size, 'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox",
+          'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
+        await pipeline(createReadStream(file.path), res); return;
+      }
+      throw new ChatError(405, 'method_not_allowed', '不支持该方法');
+    }
     const match = url.pathname.match(/^\/v1\/sessions\/([1-9]\d*)(?:\/(messages(?:\/stream)?|requests\/([A-Za-z0-9_.:-]{1,120})(?:\/(cancel|sync))?))?$/);
     if (!match) throw new ChatError(404, 'not_found', '接口或 OA 会话编号不存在');
     const recordId = match[1]!, action = match[2], requestId = match[3], operation = match[4];
@@ -75,6 +99,7 @@ export class PublicChatApi {
         await this.exclusive(async () => {
           if (this.scheduler.busy(sessionKey)) throw new ChatError(409, 'session_busy', '请先取消或等待当前请求结束');
           await client.call('DELETE', '/copilot/record', { record_id: recordId });
+          await this.attachments.deleteSession(owner, recordId);
         });
         json(res, 200, { recordId, deleted: true }); return;
       }
@@ -133,7 +158,13 @@ export class PublicChatApi {
       if (typeof messageKey !== 'string' || !/^[A-Za-z0-9_.:-]{1,120}$/.test(messageKey) || (body.requestId !== undefined && body.requestId !== messageKey))
         throw new ChatError(400, 'invalid_request_id', '必须提供 Idempotency-Key；与 requestId 同时提供时须一致');
       const input = selection(this.config, body);
-      const digest = fingerprint({ recordId, ...input });
+      const ids = attachmentIds(body.attachmentIds);
+      if (body.attachmentMode !== undefined && !['auto', 'analyze', 'upload'].includes(body.attachmentMode)) throw new ChatError(400, 'invalid_attachment_mode', '附件用途无效');
+      if (body.attachmentTarget !== undefined && (typeof body.attachmentTarget !== 'string' || body.attachmentTarget.length > 300)) throw new ChatError(400, 'invalid_attachment_target', '目标页面须为不超过 300 字的文字');
+      const mode: AttachmentMode = body.attachmentMode ?? 'auto';
+      const target: string | undefined = body.attachmentTarget?.trim() || undefined;
+      let files: StoredAttachment[] = [];
+      const digest = fingerprint({ recordId, ...input, ...(ids.length ? { attachmentIds: ids, ...(mode !== "auto" ? { attachmentMode: mode } : {}), ...(target ? { attachmentTarget: target } : {}) } : {}) });
       const key = this.records.key(owner, recordId, messageKey);
       const streaming = action.endsWith('/stream');
       let fresh = false;
@@ -143,9 +174,10 @@ export class PublicChatApi {
           if (existing.fingerprint !== digest) throw new ChatError(409, 'idempotency_conflict', '编号已用于不同的请求参数');
           return;
         }
+        files = await Promise.all(ids.map(id => this.attachments.get(owner, recordId, id)));
         const now = new Date().toISOString();
         const value: RequestRecord = { recordId, requestId: messageKey, fingerprint: digest, message: input.message,
-          state: 'queued', createdAt: now, updatedAt: now, historySync: 'pending' };
+          ...(files.length ? { attachments: files.map(publicAttachment), attachmentOptions: { mode, target, modelOverride: { provider: String(input.provider), model: String(input.model) } } } : {}), state: 'queued', createdAt: now, updatedAt: now, historySync: 'pending' };
         await this.records.create(key, value);
         const trace = new ChatTraceRecorder(this.records, key);
         const listeners = new Set<(event: Record<string, unknown>) => void>();
@@ -164,6 +196,18 @@ export class PublicChatApi {
               if (!await this.sessions.bindOaToken(internalId, token, principal.principalId, principal.oaUserId)) throw new ChatError(403, 'forbidden', '内部会话归属不匹配');
               signal.throwIfAborted();
               const emit = (event: Record<string, unknown>) => { for (const listener of listeners) listener(event); };
+              // Prior attachments are routing candidates, not keyword-selected inputs.
+              // An unrelated message may be classified as ignore by the router.
+              if (!files.length) {
+                const previous = [...(Array.isArray(latest.record.messages) ? latest.record.messages : [])].reverse()
+                  .find((message: any) => message.role === 'user' && message.attachments?.length);
+                const candidates = attachmentIds(previous?.attachments?.map((file: any) => file.id));
+                for (const id of candidates) {
+                  try { files.push(await this.attachments.get(owner, recordId, id)); }
+                  catch (error) { if (!(error instanceof ChatError) || ![404, 410].includes(error.status)) throw error; }
+                }
+              }
+              if (files.length) bindAttachmentTurn(internalId, files, mode, target, ids.length ? 'current' : 'previous');
               await this.service.streamMessage({ ...input, sessionId: internalId, oaApiToken: token, oaUserId: principal.oaUserId, latency }, async event => {
                 if (event.type === 'run.failed') throw new Error('agent_failed');
                 await trace.record(event);
@@ -176,7 +220,7 @@ export class PublicChatApi {
                   const { sessionId: _sid, ...publicEvent } = event;
                   if (event.type !== 'thread.started') emit({ ...publicEvent, recordId, requestId: messageKey });
                 }
-              }, signal).catch(error => { throw signal.aborted ? signal.reason : error; });
+              }, signal).catch(error => { throw signal.aborted ? signal.reason : error; }).finally(() => finishAttachmentTurn(internalId));
               if (!value.result) throw new Error('agent_result_missing');
               try { await this.sync(client, key, value); } catch { /* result remains available; explicit sync retry */ }
             } catch (error) {
@@ -237,7 +281,7 @@ export class PublicChatApi {
     const latest = await client.get(value.recordId);
     const messages = Array.isArray(latest.record.messages) ? latest.record.messages : [];
     const additions = [
-      { id: `${value.requestId}:user`, requestId: value.requestId, role: 'user', content: value.message, createdAt: value.createdAt },
+      { id: `${value.requestId}:user`, requestId: value.requestId, role: 'user', content: value.message, ...(value.attachments ? { attachments: value.attachments, attachmentOptions: value.attachmentOptions } : {}), createdAt: value.createdAt },
       { id: `${value.requestId}:assistant`, requestId: value.requestId, role: 'assistant', content: value.result?.finalResponse ?? '',
         createdAt: value.updatedAt, status: value.state === 'cancelled' ? 'stopped' : value.state,
         durationMs: Math.max(0, Date.parse(value.updatedAt) - Date.parse(value.createdAt)),

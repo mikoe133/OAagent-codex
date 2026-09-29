@@ -68,7 +68,7 @@ test("the composer masks replies after they scroll beneath the input", () => {
   assert.match(composerSource, /relative z-10 max-w-2xl mx-auto pointer-events-auto/)
 })
 
-test("the current nexttoken model opens model selection while voice and upload controls stay hidden", async () => {
+test("the current nexttoken model opens model selection with attachments available and voice hidden", async () => {
   const { Composer } = await import("./composer")
   const html = renderToStaticMarkup(
     <Composer
@@ -88,8 +88,8 @@ test("the current nexttoken model opens model selection while voice and upload c
   assert.ok(modelTrigger, "expected an accessible model selector button")
   assert.match(modelTrigger[1], /GPT-5\.6 Terra/)
   assert.doesNotMatch(html, /aria-label="(?:Start|Stop) voice input"/)
-  assert.doesNotMatch(html, /aria-label="Attach image"/)
-  assert.doesNotMatch(html, /aria-label="Upload image"/)
+  assert.match(html, /aria-label="添加图片或文件"/)
+  assert.match(html, /aria-label="选择图片和文件"/)
 })
 
 test("shows the selected OpenRouter GLM model in the composer", async () => {
@@ -118,6 +118,6 @@ test("shows disabled models in gray with a hover hint", () => {
 test("keeps model names on one line in the selection dropdown", () => {
   assert.match(
     composerSource,
-    /<span className="whitespace-nowrap text-sm">\{model\.name\}<\/span>/,
+    /<span className="min-w-0 flex-1 truncate whitespace-nowrap text-sm" title=\{model\.name\}>\{model\.name\}<\/span>/,
   )
 })

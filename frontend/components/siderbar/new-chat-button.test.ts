@@ -158,7 +158,7 @@ test("keeps the automated task title clear of floating sidebar controls", () => 
 
   assert.ok(taskHeader, "expected a dedicated automated task header")
   assert.match(taskHeader, /min-h-9/)
-  assert.match(taskHeader, /sm:pl-8/)
+  assert.match(taskHeader, /lg:pl-8/)
   assert.match(
     chatShellSource,
     /activeWorkspaceView === "conversation" \? \([\s\S]*?aria-label="New chat"[\s\S]*?\) : null/,

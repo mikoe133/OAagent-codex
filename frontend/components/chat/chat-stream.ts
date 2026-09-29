@@ -321,6 +321,12 @@ function resolveToolTitle(toolType: string, name: string | null, previous: ToolS
   if (toolType === "codex_startup") {
     return "模型启动"
   }
+  if (toolType === "attachment_route") {
+    return "附件用途判断"
+  }
+  if (toolType === "model_switch") {
+    return "文件解析模型"
+  }
   if (toolType === "model_inference") {
     return "模型首字"
   }
@@ -419,7 +425,7 @@ function resolveToolOutput(
     output = mergeResult(output, result)
   }
 
-  if (event.detail !== undefined && toolType === "progress") {
+  if (event.detail !== undefined && (toolType === "progress" || toolType === "model_switch" || toolType === "attachment_route")) {
     output = formatDetailValue(event.detail)
   }
 

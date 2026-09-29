@@ -57,7 +57,6 @@ test("keeps provider model lists isolated", () => {
       "qwen/qwen3.8-max-0902",
       "deepseek/deepseek-v4-pro",
       "deepseek/deepseek-v4-flash",
-      "openai/gpt-5.6",
     ],
   )
   assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.3"), true)
@@ -71,17 +70,9 @@ test("keeps provider model lists isolated", () => {
   assert.equal(isModelForProvider("nexttoken", "z-ai/glm-5.3"), false)
 })
 
-test("marks OpenRouter GPT-5.6 as temporarily unavailable", () => {
-  const gptModel = getModelsForProvider("openrouter").find(
-    (model) => model.id === "openai/gpt-5.6",
-  )
-
-  assert.deepEqual(gptModel, {
-    id: "openai/gpt-5.6",
-    name: "GPT-5.6",
-    icon: "/images/gpt.png",
-    disabled: true,
-  })
+test("removes OpenRouter GPT-5.6 while retaining Nexttoken GPT models", () => {
+  assert.equal(isModelForProvider("openrouter", "openai/gpt-5.6"), false)
+  assert.equal(isModelForProvider("nexttoken", "gpt-5.6-terra"), true)
 })
 
 test("labels Kimi K3 in the OpenRouter model list", () => {
