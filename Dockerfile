@@ -29,7 +29,10 @@ ENV NODE_ENV=production \
     PORT=3000 \
     AGENT_SESSION_STORE=/app/.context/agent-sessions.json
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 \
+    && apt-get install -y --no-install-recommends python3 curl ca-certificates jq ripgrep wget \
+    && update-ca-certificates \
+    && curl --version && python3 --version && jq --version && rg --version && wget --version \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /app/.context /home/node/.codex \
     && chown -R node:node /app /home/node/.codex

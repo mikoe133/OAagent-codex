@@ -1,0 +1,86 @@
+[
+  {
+    "id": "rwkv-overview",
+    "title": "RWKV architecture and performance overview",
+    "url": "https://github.com/BlinkDL/RWKV-LM/blob/main/README.md",
+    "fetchUrl": "https://raw.githubusercontent.com/BlinkDL/RWKV-LM/main/README.md",
+    "format": "text",
+    "topics": [
+      "overview",
+      "architecture",
+      "comparison",
+      "performance"
+    ]
+  },
+  {
+    "id": "rwkv-v7-numpy",
+    "title": "RWKV v7 NumPy reference implementation",
+    "url": "https://github.com/BlinkDL/RWKV-LM/blob/main/RWKV-v7/rwkv_v7_numpy.py",
+    "fetchUrl": "https://raw.githubusercontent.com/BlinkDL/RWKV-LM/main/RWKV-v7/rwkv_v7_numpy.py",
+    "format": "text",
+    "topics": [
+      "RWKV v7",
+      "architecture",
+      "reference implementation"
+    ]
+  },
+  {
+    "id": "rwkv7-qwen35",
+    "title": "RWKV-7 Qwen3.5 comparison",
+    "url": "https://github.com/BlinkDL/RWKV-LM/blob/main/RWKV-v7/run_rwkv7_qwen35.py",
+    "fetchUrl": "https://raw.githubusercontent.com/BlinkDL/RWKV-LM/main/RWKV-v7/run_rwkv7_qwen35.py",
+    "format": "text",
+    "topics": [
+      "RWKV-7",
+      "Qwen3.5",
+      "inference"
+    ]
+  },
+  {
+    "id": "albatross",
+    "title": "Albatross inference engine",
+    "url": "https://github.com/BlinkDL/Albatross",
+    "fetchUrl": "https://raw.githubusercontent.com/BlinkDL/Albatross/main/README.md",
+    "format": "text",
+    "topics": [
+      "inference",
+      "performance"
+    ]
+  },
+  {
+    "id": "rwkv-v7-training",
+    "title": "RWKV v7 simplified training reference",
+    "url": "https://github.com/BlinkDL/RWKV-LM/blob/main/RWKV-v7/train_temp/rwkv7_train_simplified.py",
+    "fetchUrl": "https://raw.githubusercontent.com/BlinkDL/RWKV-LM/main/RWKV-v7/train_temp/rwkv7_train_simplified.py",
+    "format": "text",
+    "topics": [
+      "training",
+      "configuration",
+      "tutorial"
+    ]
+  },
+  {
+    "id": "dplr-mathematics",
+    "title": "DPLR mathematics",
+    "url": "https://zhiyuan1i.github.io/posts/dplr-mathematics/",
+    "fetchUrl": "https://zhiyuan1i.github.io/posts/dplr-mathematics/",
+    "format": "html",
+    "topics": [
+      "DPLR",
+      "mathematics",
+      "architecture"
+    ]
+  },
+  {
+    "id": "rwkv-mobile",
+    "title": "RWKV Mobile",
+    "url": "https://github.com/MollySophia/rwkv-mobile",
+    "fetchUrl": "https://raw.githubusercontent.com/MollySophia/rwkv-mobile/master/README.md",
+    "format": "text",
+    "topics": [
+      "mobile",
+      "deployment",
+      "inference"
+    ]
+  }
+]

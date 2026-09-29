@@ -22,7 +22,10 @@ function buildChildEnv(
   providerConfig: AppConfig["modelProviders"][AppConfig["modelProvider"]],
   toolSessionId?: string,
 ): Record<string, string> {
-  const passthroughKeys = ["PATH", "HOME", "TMPDIR", "USER", "LANG", "TERM"];
+  const passthroughKeys = [
+    "PATH", "HOME", "TMPDIR", "USER", "LANG", "TERM",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS",
+  ];
   const env: Record<string, string> = {};
   for (const key of passthroughKeys) {
     const value = process.env[key];

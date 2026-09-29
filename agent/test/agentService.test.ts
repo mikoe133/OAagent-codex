@@ -82,6 +82,7 @@ describe("model provider selection", () => {
     assert.deepEqual(MODEL_CATALOG.openrouter, [
       "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
+      "qwen/qwen3.8-max-0902",
       "deepseek/deepseek-v4-pro",
       "deepseek/deepseek-v4-flash",
       "openai/gpt-5.5",

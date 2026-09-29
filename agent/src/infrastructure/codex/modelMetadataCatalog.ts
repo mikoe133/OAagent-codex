@@ -51,6 +51,15 @@ const CUSTOM_MODEL_DEFINITIONS = {
     supportsParallelToolCalls: false,
     supportVerbosity: false,
   },
+  "qwen/qwen3.8-max-0902": {
+    baseSlug: "gpt-5.5",
+    displayName: "Qwen 3.8 Max",
+    description: "Alibaba Qwen 3.8 Max (0902) served through OpenRouter.",
+    contextWindow: 1_000_000,
+    autoCompactTokenLimit: 950_000,
+    supportsParallelToolCalls: false,
+    supportVerbosity: false,
+  },
   "qwen/qwen3.5-flash-02-23": {
     baseSlug: "gpt-5.5",
     displayName: "Qwen 3.5 Flash",

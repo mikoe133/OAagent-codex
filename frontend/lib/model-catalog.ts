@@ -40,6 +40,7 @@ export const MODELS_BY_PROVIDER = {
   openrouter: [
     { id: "z-ai/glm-5.3", name: "GLM-5.3", icon: "/images/z-ai.svg" },
     { id: "moonshotai/kimi-k3", name: "Kimi K3", icon: "/images/moonshot-ai.svg" },
+    { id: "qwen/qwen3.8-max-0902", name: "Qwen 3.8 Max", icon: "/images/qwen-color.svg" },
     {
       id: "deepseek/deepseek-v4-pro",
       name: "DeepSeek V4 Pro",

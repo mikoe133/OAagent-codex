@@ -23,6 +23,7 @@ test("loads custom Codex metadata for answer and lightweight router models", () 
     "deepseek/deepseek-v4-flash",
   );
 
+  assert.equal(resolveCodexModelCatalogPath("qwen/qwen3.8-max-0902"), glmCatalogPath);
   assert.ok(glmCatalogPath);
   assert.equal(terraCatalogPath, glmCatalogPath);
   assert.ok(terraCatalogPath);
@@ -58,9 +59,12 @@ test("loads custom Codex metadata for answer and lightweight router models", () 
     "gpt-5.6-terra",
     "moonshotai/kimi-k3",
     "qwen/qwen3.5-flash-02-23",
+    "qwen/qwen3.8-max-0902",
     "z-ai/glm-4.7-flash",
     "z-ai/glm-5.3",
   ]);
+  assert.equal(metadata["qwen/qwen3.8-max-0902"]?.context_window, 1_000_000);
+  assert.equal(metadata["qwen/qwen3.8-max-0902"]?.auto_compact_token_limit, 950_000);
   assert.equal(metadata["z-ai/glm-5.3"]?.context_window, 1_048_576);
   assert.equal(metadata["z-ai/glm-5.3"]?.auto_compact_token_limit, 996_147);
   assert.equal(metadata["z-ai/glm-5.3"]?.supports_parallel_tool_calls, false);
