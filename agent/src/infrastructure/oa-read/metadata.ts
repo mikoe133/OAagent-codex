@@ -13,7 +13,8 @@ export const semanticSchema = z.object({
     description: z.string(),
     access: z.enum(["authenticated", "self", "admin"]),
     ownerColumn: identifier.optional(),
-    columns: z.record(identifier, z.object({ description: z.string(), values: z.record(z.string()).optional() }).strict()),
+    columns: z.record(identifier, z.object({ description: z.string(), values: z.record(z.string()).optional(), filterPolicy: z.enum(['semantic', 'explicit_only']).optional() }).strict()),
+    period: z.object({ startColumn: identifier, endColumn: identifier.optional(), endInclusive: z.boolean().default(false) }).strict().optional(),
     filters: z.array(z.object({ column: identifier, value: z.union([z.string(), z.number(), z.boolean()]) }).strict()).default([]),
     references: z.array(z.object({ column: identifier, entity: identifier, targetColumn: identifier }).strict()).default([]),
   }).strict()).max(500),
@@ -91,6 +92,9 @@ export function validateReferences(schema: SchemaSnapshot, metadata: SemanticMet
     if (!table) { errors.push(`${entity.name}: 表不存在 ${entity.table}`); continue; }
     const required = new Set([...Object.keys(entity.columns), ...entity.filters.map(f => f.column), ...(entity.ownerColumn ? [entity.ownerColumn] : [])]);
     for (const column of required) if (!table.columns.some(c => c.name === column)) errors.push(`${entity.name}: 字段不存在 ${column}`);
+    for (const column of entity.period ? [entity.period.startColumn, ...(entity.period.endColumn ? [entity.period.endColumn] : [])] : []) {
+      if (!entity.columns[column] || !/^(date|datetime|timestamp)\b/i.test(table.columns.find(c => c.name === column)?.type ?? '')) errors.push(`${entity.name}.${column}: 期间字段必须是已发布的日期类型`);
+    }
     for (const ref of entity.references) {
       const target = metadata.entities.find(e => e.name === ref.entity);
       if (!entity.columns[ref.column] || !target?.columns[ref.targetColumn]) errors.push(`${entity.name}: 关联字段不存在 ${ref.column} -> ${ref.entity}.${ref.targetColumn}`);
@@ -119,7 +123,7 @@ export function materializeMetadata(schema: SchemaSnapshot, definitions: Semanti
       if (!sensitiveColumn.test(column.name) && !Object.hasOwn(columns, column.name)) {
         columns[column.name] = { description: column.comment
           ? `数据库注释：${column.comment}；未另行定义的枚举、JSON结构和业务口径不得推测。`
-          : `${column.name}；业务含义未标注，不得推测枚举或JSON结构。` };
+          : `${column.name}；业务含义未标注，不得推测枚举或JSON结构。`, ...(column.comment ? {} : { filterPolicy: 'explicit_only' as const }) };
       }
     }
     if (Object.keys(columns).length) entities.push({ ...copy, columns, access, references: [...copy.references] });

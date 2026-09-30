@@ -220,7 +220,7 @@ function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | 
     : stringValue(event.toolType) || previousRawToolType || (eventType === "progress" ? "progress" : "tool")
   const name = stringValue(event.name)
   const toolType = resolveToolStepType(rawToolType, name, previous)
-  const error = stringValue(event.error)
+  const error = stringValue(event.error) || readBusinessError(name || previous?.input, appendDelta(previous?.output || "", typeof event.outputDelta === "string" ? event.outputDelta : ""))
   const status = normalizeToolStatus(event.status, eventType, Boolean(error))
   const input = resolveToolInput(rawToolType, event, name, previous)
   const output = resolveToolOutput(rawToolType, event, error, previous)
@@ -231,7 +231,7 @@ function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | 
     type: toolType,
     status,
     title: resolveToolTitle(toolType, name, previous),
-    description: resolveToolDescription(toolType, event, name, status, previous),
+    description: resolveToolDescription(toolType, error ? { ...event, error } : event, name, status, previous),
     ...(input ? { input } : {}),
     ...(output ? { output } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
@@ -321,6 +321,10 @@ function resolveToolTitle(toolType: string, name: string | null, previous: ToolS
   if (toolType === "codex_startup") {
     return "模型启动"
   }
+  if (toolType === "answer_completion") return "回答完成确认"
+  if (toolType === "stream_drain") return "连接释放"
+  if (toolType === "persistence") return "会话保存"
+  if (toolType === "report_coverage") return "结果覆盖核对"
   if (toolType === "attachment_route") {
     return "附件用途判断"
   }
@@ -507,4 +511,15 @@ function stringValue(value: unknown): string | null {
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
+
+// Restore older journals whose shell exit code hid a controlled API failure.
+function readBusinessError(command: string | null | undefined, output: string): string | null {
+  if (!command || !/(?:callKnowledgeBaseApi|queryOaDatabase|callOaApi)\.mjs\b/.test(command)) return null
+  try {
+    const result = JSON.parse(output)
+    if (result?.ok !== false) return null
+    const message = result.error?.message ?? result.data?.error?.message
+    return typeof message === 'string' ? message.slice(0, 500) : '业务请求未成功'
+  } catch { return null }
 }

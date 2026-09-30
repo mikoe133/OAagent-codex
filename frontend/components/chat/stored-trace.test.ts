@@ -4,6 +4,17 @@ import { restoreStoredTrace } from './stored-trace'
 import { resolveLoadedSessionMessages } from './session-messages'
 import { mergeToolTimelineEvent } from './chat-stream'
 
+test('business failure is visible with zero shell exit, and subsequent retry retains its own success', () => {
+  const failed = { type: 'tool.completed', toolType: 'command_execution', itemId: 'bad-format', status: 'completed', exitCode: 0,
+    name: 'node scripts/callKnowledgeBaseApi.mjs --operationId getKnowledgeBasePage',
+    outputDelta: JSON.stringify({ ok: false, status: 400, data: { error: { message: 'format unsupported' } } }) }
+  const retry = { ...failed, itemId: 'retry', outputDelta: JSON.stringify({ ok: true, data: { content: 'page text' } }) }
+  const restored = restoreStoredTrace([failed, retry])!
+  assert.equal(restored.toolSteps[0]?.status, 'failed')
+  assert.equal(restored.toolSteps[0]?.description, 'format unsupported')
+  assert.equal(restored.toolSteps[1]?.status, 'completed')
+})
+
 test('semantic attachment decision and failure remain readable after history restoration', () => {
   for (const status of ['completed', 'failed']) {
     const event = {

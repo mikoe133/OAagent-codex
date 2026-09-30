@@ -39,6 +39,7 @@ try {
   data = text;
 }
 console.log(stringifyJsonLineSafe(data, 2));
+if (!response.ok || data?.ok === false) process.exitCode = 1;
 
 function parseArgs(values) {
   const result = {};

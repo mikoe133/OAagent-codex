@@ -1,0 +1,106 @@
+{
+  "description": "Local replay of failed request parameters against the same published metadata, with an empty fake database; not an online model or data-accuracy benchmark.",
+  "historical": {
+    "glm": {
+      "durationMs": 434542,
+      "commands": 30,
+      "failed": 14,
+      "invalidQuery": 10,
+      "metadataFailure": 3,
+      "searchNoMatch": 1
+    },
+    "deepseek": {
+      "durationMs": 443362,
+      "commands": 12,
+      "failed": 2,
+      "invalidQuery": 2
+    }
+  },
+  "acceptedWithoutChanges": 11,
+  "totalInvalidRequests": 12,
+  "results": [
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_5",
+      "accepted": true,
+      "elapsedMs": 3.079
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_7",
+      "accepted": true,
+      "elapsedMs": 1.256
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_9",
+      "accepted": true,
+      "elapsedMs": 1.696
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_15",
+      "accepted": true,
+      "elapsedMs": 2.203
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_19",
+      "accepted": true,
+      "elapsedMs": 1.379
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_21",
+      "accepted": true,
+      "elapsedMs": 1.221
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_27",
+      "accepted": true,
+      "elapsedMs": 1.835
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_29",
+      "accepted": true,
+      "elapsedMs": 1.217
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_36",
+      "accepted": true,
+      "elapsedMs": 1.09
+    },
+    {
+      "model": "z-ai/glm-5.3",
+      "item": "item_38",
+      "accepted": true,
+      "elapsedMs": 0.939
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "item": "item_1",
+      "accepted": true,
+      "elapsedMs": 1.058
+    },
+    {
+      "model": "deepseek/deepseek-v4-flash",
+      "item": "item_6",
+      "accepted": false,
+      "elapsedMs": 0.19,
+      "code": "invalid_query",
+      "issues": [
+        {
+          "path": "query.select.3.field",
+          "code": "invalid_string",
+          "message": "字段必须为 别名.字段，不能包含 SQL 函数；截取正文请在 select 项使用 textOffset 和 textLength。"
+        }
+      ]
+    }
+  ],
+  "sqlExpressionCorrectedUsingTextLength": true,
+  "databaseTransactions": 12,
+  "addedModelCalls": 0
+}

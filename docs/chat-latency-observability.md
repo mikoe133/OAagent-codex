@@ -26,11 +26,17 @@ sessionId、用户消息、prompt、token 或工具输入输出。
 - `model_ttft`: 正式模型调用开始到第一段回答文本。
 - `model_inference`: `turn.started` 到第一段回答文本。
 - `model_turn`: `turn.started` 到 `turn.completed`。
+- `answer_completion`: 最后一条完整回答消息到协议 `turn.completed`，用于区分文本生成与模型完成确认。
 - `stream_drain`: `turn.completed` 到 Codex 事件流关闭。
 - `total`: 整个请求总耗时。
 
 `tools` 按工具类型记录调用数量和累计耗时。并行工具的累计耗时可能大于
 请求墙钟时间。
+
+聊天执行在收到 `turn.completed`、已有最终回答且没有未完成工具时关闭 SDK
+迭代器，由 SDK 回收子进程，不再等待 CLI 的退出尾部。中间文本、未完成工具、
+失败和取消不会被当作成功完成。开发 Trace 分别展示回答完成确认、连接释放和
+会话保存；这不保证上游发送 `turn.completed` 前的等待也能消除。
 
 正式回答经过本地模型中继。中继按 provider 平滑请求起始时间；上游返回
 可重试的 `429` 时，所有同 provider 请求共享冷却窗口，优先遵循

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const INDEX_VERSION = 3;
+const INDEX_VERSION = 4;
 const INDEX_FILE_NAME = "openapi-index.json";
 const OPENAPI_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 const MAX_RESPONSE_FIELDS = 32;
@@ -22,6 +22,8 @@ export type OpenApiIndexParameter = {
   in: string;
   required: boolean;
   type: string | null;
+  enum?: unknown[];
+  default?: unknown;
 };
 
 export type OpenApiOperationIndexEntry = {
@@ -250,6 +252,8 @@ function extractParameters(
       in: location,
       required: parameter.required === true,
       type: inferSchemaType(schema),
+      ...(Array.isArray(schema?.enum) ? { enum: schema.enum.slice(0, 30) } : {}),
+      ...(schema && Object.hasOwn(schema, "default") ? { default: schema.default } : {}),
     });
   }
 

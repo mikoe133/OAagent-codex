@@ -1,0 +1,22 @@
+{
+  "scope": "Local replay of supplied query results; no extra database or model request. Dates not re-queried.",
+  "totals": {
+    "population": 31,
+    "withContent": 15,
+    "empty": 2,
+    "notFound": 14
+  },
+  "missingBefore": 3,
+  "appendedKnownObjects": 3,
+  "localCheckMs": 1.166,
+  "tests": {
+    "agentPassed": 576,
+    "agentSkipped": 5,
+    "frontendPassed": 238
+  },
+  "sdkFixture": {
+    "exitDelayMs": 10000,
+    "completedMs": 233,
+    "scope": "Synthetic process through real SDK; not an online latency measurement"
+  }
+}

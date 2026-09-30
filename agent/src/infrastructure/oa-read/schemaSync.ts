@@ -6,6 +6,7 @@ import type { OaReadConfig } from "../../config/oaReadConfig.js";
 import { ReadDatabase, quoteIdentifier, type ReadQuery } from "./database.js";
 import { diffSchema, hash, impactedEntities, materializeMetadata, parseMetadata, validateReferences, type PublishedMetadata, type SchemaSnapshot, type Change } from "./metadata.js";
 import { tableAccess } from "./accessPolicy.js";
+import { databaseErrorCode, isTransientDatabaseError } from './databaseErrors.js';
 
 export type SyncReport = {
   status: "published" | "unchanged" | "rejected";
@@ -16,6 +17,7 @@ export type SyncReport = {
   changes: Change[];
   impacted: string[];
   errors: string[];
+  failure?: { kind: 'validation' | 'unavailable'; stage: string; code?: string; retryable: boolean };
 };
 export type CatalogState = { active: PublishedMetadata | null; report: SyncReport };
 
@@ -47,6 +49,11 @@ async function atomicJson(file: string, data: unknown) {
   try { await rename(temp, file); } finally { await rm(temp, { force: true }); }
 }
 
+async function recordFailure(directory: string, report: SyncReport) {
+  try { await atomicJson(path.join(directory, 'last-failure.json'), report); }
+  catch { console.error('[oa-read] could not persist last failure diagnostics'); }
+}
+
 // Single writer across background polling and optional manual refreshes.
 export async function synchronizeMetadata(config: OaReadConfig, db: Pick<ReadDatabase, "read">, trigger: string): Promise<SyncReport> {
   await mkdir(config.stateDirectory, { recursive: true, mode: 0o700 });
@@ -57,12 +64,26 @@ export async function synchronizeMetadata(config: OaReadConfig, db: Pick<ReadDat
     if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new Error("metadata_sync_busy");
     throw e;
   }
+  let stage = 'definitions';
+  let retried = false;
+  // One reconnect for a known transient failure, entirely in background sync.
+  // Never reuse a snapshot that has failed validation or retry malformed SQL.
+  const read: ReadDatabase['read'] = async operation => {
+    try { return await db.read(operation); }
+    catch (error) {
+      if (retried || !isTransientDatabaseError(error)) throw error;
+      retried = true;
+      return db.read(operation);
+    }
+  };
   try {
     await writeFile(path.join(lock, "owner.json"), JSON.stringify({ host: os.hostname(), pid: process.pid }), { mode: 0o600 });
     const previous = await readCatalogState(config.stateDirectory);
     const definitions = parseMetadata(JSON.parse(await readFile(config.metadataPath, "utf8")));
     const database = new URL(config.databaseUrl).pathname.slice(1);
-    const schema = await db.read(q => inspectSchema(q, database));
+    stage = 'inspect_schema';
+    const schema = await read(q => inspectSchema(q, database));
+    stage = 'validate_definitions';
     const semantic = materializeMetadata(schema, definitions);
     const version = hash({ schema, semantic });
     const changes = diffSchema(previous?.active?.schema ?? null, schema);
@@ -88,17 +109,25 @@ export async function synchronizeMetadata(config: OaReadConfig, db: Pick<ReadDat
       }
     }
     if (!errors.length) {
-      await db.read(async query => {
+      stage = 'validate_queries';
+      await read(async query => {
         for (const entity of semantic.entities) {
           try { await query(`SELECT ${Object.keys(entity.columns).map(quoteIdentifier).join(", ")} FROM ${quoteIdentifier(entity.table)} LIMIT 0`); }
-          catch { errors.push(`${entity.name}: 业务视图/字段不可查询`); }
+          catch (error) {
+            if (isTransientDatabaseError(error)) throw error;
+            errors.push(`${entity.name}: 业务视图/字段不可查询`);
+          }
         }
         for (const view of schema.tables.filter(t => t.kind === "VIEW" && tableAccess(t.name, schema) !== "denied")) {
           try { await query(`SELECT * FROM ${quoteIdentifier(view.name)} LIMIT 0`); }
-          catch { errors.push(`${view.name}: 数据库视图不可查询`); }
+          catch (error) {
+            if (isTransientDatabaseError(error)) throw error;
+            errors.push(`${view.name}: 数据库视图不可查询`);
+          }
         }
       });
-      const after = await db.read(q => inspectSchema(q, database));
+      stage = 'recheck_schema';
+      const after = await read(q => inspectSchema(q, database));
       if (hash(after) !== hash(schema)) errors.push("同步期间结构再次变化，下一次后台检查将自动重试");
     }
     const report: SyncReport = {
@@ -106,6 +135,7 @@ export async function synchronizeMetadata(config: OaReadConfig, db: Pick<ReadDat
       checkedAt: new Date().toISOString(), trigger, candidateVersion: version,
       activeVersion: errors.length ? previous?.active?.version ?? null : version,
       changes, impacted, errors,
+      ...(errors.length ? { failure: { kind: 'validation' as const, stage, retryable: false } } : {}),
     };
     const candidate: PublishedMetadata = previous?.active?.version === version ? previous.active : { version, publishedAt: report.checkedAt, schema, semantic };
     await mkdir(path.join(config.stateDirectory, "versions"), { recursive: true, mode: 0o700 });
@@ -113,17 +143,24 @@ export async function synchronizeMetadata(config: OaReadConfig, db: Pick<ReadDat
     const artifact = path.join(config.stateDirectory, "versions", `${version}${errors.length ? ".rejected" : ""}.json`);
     try { await writeFile(artifact, JSON.stringify({ candidate, report }, null, 2) + "\n", { flag: "wx", mode: 0o600 }); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
+    stage = 'publish';
     await atomicJson(path.join(config.stateDirectory, "current.json"), { active: errors.length ? previous?.active ?? null : candidate, report } satisfies CatalogState);
+    if (errors.length) await recordFailure(config.stateDirectory, report);
     return report;
-  } catch {
+  } catch (error) {
     const previous = await readCatalogState(config.stateDirectory);
     const report: SyncReport = {
       status: "rejected", checkedAt: new Date().toISOString(), trigger,
       candidateVersion: "unavailable", activeVersion: previous?.active?.version ?? null,
       changes: [], impacted: previous?.active?.semantic.entities.map(e => e.name) ?? [],
-      errors: ["结构同步失败：连接、元数据格式或结构读取不可用；保留旧版本并暂停查询。"],
+      errors: [stage === 'definitions' || stage === 'validate_definitions'
+        ? '元数据定义无法读取或格式无效，需修复定义后重新同步。'
+        : '元数据检查未能完成，尚不能确认结构是否变化；后台将重新检查。'],
+      failure: { kind: stage === 'definitions' || stage === 'validate_definitions' ? 'validation' : 'unavailable',
+        stage, code: databaseErrorCode(error), retryable: isTransientDatabaseError(error) },
     };
     await atomicJson(path.join(config.stateDirectory, "current.json"), { active: previous?.active ?? null, report } satisfies CatalogState);
+    await recordFailure(config.stateDirectory, report);
     return report;
   } finally { await rm(lock, { recursive: true, force: true }); }
 }

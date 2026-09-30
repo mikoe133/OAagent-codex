@@ -1,8 +1,11 @@
+import { toolBusinessError } from './toolBusinessError.js';
+import { beginReportTurn, checkReportAnswer, finishReportTurn, hasReportForTurn } from '../infrastructure/oa-read/reportCoverage.js';
+import { completedTurnEvents, runCompletedTurn } from '../infrastructure/codex/completedTurn.js';
 import { applyAttachmentRoute } from '../attachments/attachmentRouting.js';
 import { prepareAttachmentInput, attachmentTurn, supportsImages } from '../attachments/attachmentContext.js';
 import type { ThreadEvent, ThreadItem, Usage } from "@openai/codex-sdk";
 import { withDatabaseReadRouting } from "../infrastructure/oa-read/routing.js";
-import { readToolToken } from "../infrastructure/oa-read/readService.js";
+import { getOaReadService, readToolToken } from "../infrastructure/oa-read/readService.js";
 import type { AppConfig } from "../config/config.js";
 import {
   getDefaultModel,
@@ -288,11 +291,13 @@ export class AgentService {
     const runConfig = resolvedRun.config;
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
+      ...await this.getReadContext(input.sessionId, resolvedRun.selectedApiCatalogs),
       openApiCandidates: resolvedRun.openApiCandidates,
       selectedApiCatalogs: resolvedRun.selectedApiCatalogs,
       knowledgeBaseWriteContractAvailable:
         resolvedRun.knowledgeBaseWriteContractAvailable,
       oaQueryPolicy: resolvedRun.oaQueryPolicy,
+      reportPeriod: resolvedRun.reportPeriod,
     };
     const codex = createCodexClient(runConfig, input.sessionId);
     const thread = startOrResumeThread(
@@ -310,12 +315,16 @@ export class AgentService {
     );
     beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
     beginKnowledgeBaseSourceTurn(input.sessionId);
+    beginReportTurn(input.sessionId, input.message, resolvedRun.reportPeriod);
     let knowledgeSources: KnowledgeBaseSource[] = [];
     input.latency?.markOnce("codex_invoked");
     const turn = await (async () => {
       try {
-        return await thread.run(await prepareAttachmentInput(prompt, input.sessionId, runConfig.modelProvider, runConfig.model));
+        const turn = await runCompletedTurn(thread, await prepareAttachmentInput(prompt, input.sessionId, runConfig.modelProvider, runConfig.model));
+        turn.finalResponse = redactSecrets(checkReportAnswer(input.sessionId, turn.finalResponse).answer, this.getSecrets(runtimeContext.sessionOaApiToken, input.sessionId));
+        return turn;
       } finally {
+        finishReportTurn(input.sessionId);
         finishOaTurn(input.sessionId);
         finishOaChatAccessTurn(input.sessionId);
         knowledgeSources = finishKnowledgeBaseSourceTurn(input.sessionId);
@@ -406,11 +415,13 @@ export class AgentService {
     const runConfig = resolvedRun.config;
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
+      ...await this.getReadContext(input.sessionId, resolvedRun.selectedApiCatalogs),
       openApiCandidates: resolvedRun.openApiCandidates,
       selectedApiCatalogs: resolvedRun.selectedApiCatalogs,
       knowledgeBaseWriteContractAvailable:
         resolvedRun.knowledgeBaseWriteContractAvailable,
       oaQueryPolicy: resolvedRun.oaQueryPolicy,
+      reportPeriod: resolvedRun.reportPeriod,
     };
     const codex = createCodexClient(runConfig, input.sessionId);
     const thread = startOrResumeThread(
@@ -455,16 +466,30 @@ export class AgentService {
 
     beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
     beginKnowledgeBaseSourceTurn(input.sessionId);
+    beginReportTurn(input.sessionId, input.message, resolvedRun.reportPeriod);
     let knowledgeSources: KnowledgeBaseSource[] = [];
+    let reportCheck: ReturnType<typeof checkReportAnswer> | undefined;
+    let lastTextAt: number | undefined;
+    let turnEndedAt: number | undefined;
     const runStreamedTurn = async (turnPrompt: string): Promise<void> => {
+      lastTextAt = undefined;
+      turnEndedAt = undefined;
       input.latency?.markOnce("codex_invoked");
       if (stageProgress && state.modelStartupStartedAt === undefined) {
         state.modelStartupStartedAt = performance.now();
         await stageProgress("codex_startup", "in_progress");
       }
       const { events } = await thread.runStreamed(await prepareAttachmentInput(turnPrompt, input.sessionId, runConfig.modelProvider, runConfig.model), { signal });
-      for await (const event of events) {
+      for await (const event of completedTurnEvents(events)) {
         throwIfAborted(signal);
+        if (event.type === 'item.completed' && event.item.type === 'agent_message') {
+          lastTextAt = performance.now();
+          input.latency?.mark('last_message');
+        }
+        if (event.type === 'turn.completed') {
+          turnEndedAt = performance.now();
+          if (lastTextAt !== undefined) await stageProgress?.('answer_completion', 'completed', Math.round(turnEndedAt - lastTextAt));
+        }
         await this.emitCodexEvent(
           input.sessionId,
           event,
@@ -476,6 +501,7 @@ export class AgentService {
         );
       }
       input.latency?.mark("codex_stream_closed");
+      if (turnEndedAt !== undefined) await stageProgress?.('stream_drain', 'completed', elapsedMilliseconds(turnEndedAt));
     };
     try {
       try {
@@ -496,6 +522,8 @@ export class AgentService {
         }
       }
     } finally {
+      if (state.finalResponse.trim()) reportCheck = checkReportAnswer(input.sessionId, state.finalResponse);
+      finishReportTurn(input.sessionId);
       finishOaTurn(input.sessionId);
       finishOaChatAccessTurn(input.sessionId);
       knowledgeSources = finishKnowledgeBaseSourceTurn(input.sessionId);
@@ -522,8 +550,15 @@ export class AgentService {
       throw new Error("agent turn 已完成,但 SDK 未返回 thread id。");
     }
 
+    if (reportCheck?.replacement || reportCheck?.appendix) {
+      const finalItem = [...state.items].reverse().find(item => item.type === 'agent_message');
+      state.finalResponse = redactSecrets(reportCheck.answer, secrets);
+      await emit({ type: 'message.delta', sessionId: input.sessionId, itemId: finalItem?.id ?? 'report-coverage-answer',
+        delta: redactSecrets(reportCheck.replacement ? reportCheck.answer : reportCheck.appendix, secrets), text: state.finalResponse });
+    }
     await measureLatencyStage(input.latency, "persistence", () =>
       this.sessions.updateThreadId(input.sessionId, thread.id!),
+      stageProgress,
     );
     const summary = buildNextSummary(
       session.summary,
@@ -532,8 +567,14 @@ export class AgentService {
     );
     await measureLatencyStage(input.latency, "persistence", () =>
       this.sessions.updateSummary(input.sessionId, summary),
+      stageProgress,
     );
 
+    if (reportCheck?.reports) {
+      await emit({ type: 'progress', sessionId: input.sessionId, itemId: 'report-coverage', toolType: 'report_coverage',
+        status: 'completed', message: reportCheck.interrupted ? '后续数据读取失败，仅保留范围说明，未补充对象正文。'
+          : `按来源核对 ${reportCheck.subjectCount} 个对象${reportCheck.missingCount ? `，${reportCheck.missingCount} 个使用已有片段补全` : ''}${reportCheck.limited ? '；存在查询范围限制' : ''}。` });
+    }
     const result: SendMessageResult = {
       sessionId: input.sessionId,
       threadId: thread.id,
@@ -671,7 +712,7 @@ export class AgentService {
           );
           state.modelInferenceStartedAt = undefined;
         }
-        await emit({
+        if (!hasReportForTurn(sessionId)) await emit({
           type: "message.delta",
           sessionId,
           itemId: item.id,
@@ -685,6 +726,7 @@ export class AgentService {
     if (item.type === "command_execution") {
       const command = redactSecrets(item.command, secrets);
       const output = redactSecrets(item.aggregated_output || "", secrets);
+      const businessError = toolBusinessError(command, output);
       const previousOutput = state.commandOutputs.get(item.id) ?? "";
       const outputDelta = output.startsWith(previousOutput)
         ? output.slice(previousOutput.length)
@@ -712,6 +754,7 @@ export class AgentService {
           name: command,
           status: item.status,
           exitCode: item.exit_code,
+          ...(businessError ? { status: "failed", error: businessError } : {}),
           outputDelta: outputDelta || undefined,
           ...(durationMs === undefined ? {} : { durationMs }),
         });
@@ -857,6 +900,15 @@ export class AgentService {
     }
     await prepareOaChatAccess(this.config, input.sessionId, this.sessions.getOaToken(input.sessionId), input.message);
     return session;
+  }
+
+  private async getReadContext(sessionId: string, catalogs: string[]) {
+    const userId = this.sessions.getOaUserId(sessionId);
+    const token = this.sessions.getOaToken(sessionId);
+    if (!this.config.oaRead || !catalogs.includes('oa') || !userId || !token) return {};
+    return { oaReadContext: await getOaReadService(this.config.oaRead).context(sessionId, {
+      userId, isAdmin: hasOaAdminAccess(sessionId, token),
+    }) };
   }
 
   private getRuntimeContext(sessionId: string): AgentRuntimeContext & {
@@ -1018,6 +1070,7 @@ async function resolveRunConfig(
     knowledgeBaseWriteContractAvailable: knowledgeBase.write !== null,
     reasoningEffort: resolveTaskReasoningEffort(task),
     oaQueryPolicy: resolveOaQueryPolicy(task),
+    reportPeriod: route.reportPeriod,
   };
 }
 
@@ -1075,6 +1128,9 @@ function createLatencyStageProgress(
     semantic_route: `使用 ${routerModels.join("、")} ${routerModels.length > 1 ? "并发路由" : "分析请求"}`,
     codex_startup: "启动正式回答模型",
     model_inference: "等待模型生成首段回复",
+    answer_completion: "模型确认回答完成",
+    stream_drain: "释放模型连接",
+    persistence: "保存会话",
   };
 
   return async (stage, status, durationMs, messageOverride) => {

@@ -15,6 +15,17 @@ import {
 } from "../src/infrastructure/oa/openApiRouter.js";
 
 describe("OpenAPI semantic router", () => {
+  it('returns the model-selected report interval in the existing routing call', async () => {
+    let calls = 0;
+    const result = await routeOpenApiRequest(createConfig(), buildOpenApiIndex(createContract()), { task: '指定期间的对象进度' }, async prompt => {
+      calls++;
+      assert.match(prompt, /reportPeriod/);
+      assert.ok((JSON.parse(prompt.match(/<router_input>\n([\s\S]*?)\n<\/router_input>/)![1]!) as any).currentDate);
+      return JSON.stringify({ catalogs: ['oa'], tags: ['projects'], operationIds: ['github_commit_summaries_projects_github_commit_summaries_get'], accessMode: 'read', searchTerms: ['project progress'], reportPeriod: { start: '2028-05-01', end: '2028-06-01' } });
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(result.reportPeriod, { start: '2028-05-01', end: '2028-06-01' });
+  });
   it("always prepends the RWKV knowledge module when the task mentions RWKV", async () => {
     const prompts: string[] = [];
     const result = await routeOpenApiRequest(

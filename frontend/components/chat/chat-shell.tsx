@@ -1661,6 +1661,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           <AutomatedTasksView oaNavigationUrl={oaNavigationUrl} />
         ) : (
           <MessageList
+            key={agentSessionId}
             messages={messages}
             isStreaming={isStreaming}
             error={error}

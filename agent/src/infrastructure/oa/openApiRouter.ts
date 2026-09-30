@@ -1,4 +1,5 @@
 import { ATTACHMENT_DECISION_SCHEMA, decodeAttachmentDecision, unavailableAttachmentDecision, type AttachmentDecision, type AttachmentRoutingInput } from '../../attachments/attachmentIntent.js';
+import { reportPeriodSchema, type ReportPeriod } from '../oa-read/reportPlan.js';
 import type { AppConfig } from "../../config/config.js";
 import { ROUTER_MODEL_CATALOG } from "../../config/modelCatalog.js";
 import { isChatOpenApiOperationAllowed } from "./openApiChatPolicy.js";
@@ -40,6 +41,7 @@ export type OpenApiSemanticRouter = (
 type SemanticRouterFetch = typeof fetch;
 
 type SemanticRoute = {
+  reportPeriod?: ReportPeriod | null;
   attachment?: AttachmentDecision;
   catalogs: OpenApiCatalog[];
   tags: string[];
@@ -57,6 +59,7 @@ type RouteInput = {
 };
 
 export type OpenApiRouteResult = {
+  reportPeriod?: ReportPeriod | null;
   attachment?: AttachmentDecision;
   catalogs: AgentRouteCatalog[];
   candidates: OpenApiOperationIndexEntry[];
@@ -76,8 +79,9 @@ export type OpenApiRouteDiagnostics =
 const SEMANTIC_ROUTE_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["catalogs", "tags", "operationIds", "accessMode", "searchTerms"],
+  required: ["catalogs", "tags", "operationIds", "accessMode", "searchTerms", "reportPeriod"],
   properties: {
+    reportPeriod: { anyOf: [{ type: 'null' }, { type: 'object', additionalProperties: false, required: ['start', 'end'], properties: { start: { type: 'string', format: 'date' }, end: { type: 'string', format: 'date' } } }] },
     catalogs: {
       type: "array",
       minItems: 1,
@@ -256,12 +260,14 @@ export async function routeOpenApiRequest(
 
   try {
     const route = await requestSemanticRoute(safeIndex, input, semanticRouter);
+    const reportPeriod = route.reportPeriod === undefined ? {} : { reportPeriod: route.reportPeriod };
     const routed = rankRoutedCandidates(safeIndex, input.task, route);
     if (route.attachment && route.catalogs.length === 0) {
       return { attachment: route.attachment, catalogs: [], candidates: [], diagnostics: { strategy: 'semantic' } };
     }
     if (routed.length > 0) {
       return {
+        ...reportPeriod,
         ...(route.attachment ? { attachment: route.attachment } : {}),
         catalogs: prioritizeRwkvKnowledgeCatalog(input.task, route.catalogs),
         candidates: routed,
@@ -270,6 +276,7 @@ export async function routeOpenApiRequest(
     }
     if (route.catalogs.includes("knowledge_base_write")) {
       return {
+        ...reportPeriod,
         ...(route.attachment ? { attachment: route.attachment } : {}),
         catalogs: prioritizeRwkvKnowledgeCatalog(input.task, route.catalogs),
         candidates: [],
@@ -277,6 +284,7 @@ export async function routeOpenApiRequest(
       };
     }
     return {
+      ...reportPeriod,
       ...(route.attachment ? { attachment: route.attachment } : {}),
       catalogs: prioritizeRwkvKnowledgeCatalog(input.task, route.catalogs),
       candidates: selectFallbackCandidates(safeIndex, input.task, route.catalogs),
@@ -524,6 +532,7 @@ function buildRoutePrompt(
     "Prefer operations that return activity, history, changes, or summaries when the user asks what has happened recently; prefer metadata or list operations only when they are needed to identify the entity.",
     "Choose read for lookup, search, status, history, summaries, or reports. Choose write only for an explicit mutation request; otherwise choose mixed.",
     "A noun such as commit, submission, report, or summary does not by itself imply a write operation.",
+    'For an OA read with a requested reporting period, return reportPeriod:{start:"YYYY-MM-DD",end:"YYYY-MM-DD"} as the intended half-open date range. Infer relative dates semantically using currentDate and Asia/Shanghai. Preserve the user period through retries; do not replace it with week start dates. Return null when no reporting period is requested or when the request is unrelated to OA reads. Do not guess an ambiguous period.',
     repairAttempt
       ? "This is a repair attempt. Return every required field, including accessMode, with no markdown or explanation."
       : null,
@@ -540,6 +549,7 @@ function buildRoutePrompt(
     "<router_input>",
     JSON.stringify({
       task: input.task,
+      currentDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()),
       ...(input.attachments ? { attachments: input.attachments } : {}),
       conversationMemory: (input.conversationMemory ?? "").slice(
         -MAX_MEMORY_LENGTH,
@@ -668,7 +678,8 @@ function decodeSemanticRoute(text: string, index: OpenApiOperationIndex, attachm
   ) {
     throw new Error("semantic router returned an unusable route");
   }
-  return { catalogs, tags, operationIds, accessMode, searchTerms, ...(attachment ? { attachment } : {}) };
+  const reportPeriod = parsed.reportPeriod === undefined ? undefined : parsed.reportPeriod === null ? null : reportPeriodSchema.parse(parsed.reportPeriod);
+  return { catalogs, tags, operationIds, accessMode, searchTerms, ...(attachment ? { attachment } : {}), ...(reportPeriod === undefined ? {} : { reportPeriod }) };
 }
 
 function normalizeSemanticRoutePayload(value: unknown): unknown {

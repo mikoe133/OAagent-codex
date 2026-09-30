@@ -13,6 +13,7 @@ export type ChatLatencyStage =
   | "model_ttft"
   | "model_inference"
   | "model_turn"
+  | "answer_completion"
   | "stream_drain"
   | "total";
 
@@ -22,6 +23,7 @@ export type ChatLatencyMilestone =
   | "routing_completed"
   | "codex_invoked"
   | "turn_started"
+  | "last_message"
   | "first_message"
   | "turn_completed"
   | "codex_stream_closed";
@@ -215,6 +217,7 @@ export class ChatLatencyTrace {
     this.deriveDuration("model_ttft", "codex_invoked", "first_message");
     this.deriveDuration("model_inference", "turn_started", "first_message");
     this.deriveDuration("model_turn", "turn_started", "turn_completed");
+    this.deriveDuration("answer_completion", "last_message", "turn_completed");
     this.deriveDuration("stream_drain", "turn_completed", "codex_stream_closed");
   }
 

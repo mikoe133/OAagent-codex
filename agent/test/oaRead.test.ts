@@ -342,3 +342,92 @@ test("background checks retry initial failures and recover after a removed field
   assert.equal((await tick()).report.status, "unchanged");
   assert.equal((await service.call({ action: "catalog" }, principal)).ok, true);
 });
+
+test('a single transient inspection failure reconnects before publishing a false metadata rejection', async t => {
+  const { dir, config } = await fixture(); t.after(() => rm(dir, { recursive: true, force: true }));
+  await synchronizeMetadata(config, fakeDatabase(() => schema), 'startup');
+  let failures = 0;
+  const db = fakeDatabase(() => {
+    if (failures++ === 0) throw Object.assign(new Error('private connection detail'), { code: 'ECONNRESET' });
+    return schema;
+  });
+  const report = await synchronizeMetadata(config, db, 'scheduled');
+  assert.equal(report.status, 'unchanged');
+  assert.equal(report.failure, undefined);
+  const service = new OaReadService(config, db); t.after(() => service.close());
+  assert.equal((await service.call({ action: 'catalog' }, principal)).ok, true);
+});
+
+test('a lost connection during validation is retried as a transaction, not marked as invalid fields', async t => {
+  const { dir, config } = await fixture(); t.after(() => rm(dir, { recursive: true, force: true }));
+  const db = fakeDatabase(() => schema);
+  const read = db.read.bind(db);
+  let disconnected = false;
+  db.read = operation => read(query => operation((async (sql: string) => {
+    if (sql.endsWith('LIMIT 0') && !disconnected) {
+      disconnected = true;
+      throw Object.assign(new Error('temporary'), { code: 'PROTOCOL_CONNECTION_LOST' });
+    }
+    return query(sql);
+  }) as ReadQuery));
+  const report = await synchronizeMetadata(config, db, 'startup');
+  assert.equal(disconnected, true);
+  assert.equal(report.status, 'published');
+  assert.deepEqual(report.errors, []);
+});
+
+test('persistent transient failure stays closed with accurate diagnostics and recovers on a short background retry', async t => {
+  const { dir, config } = await fixture(); t.after(() => rm(dir, { recursive: true, force: true }));
+  await synchronizeMetadata(config, fakeDatabase(() => schema), 'startup');
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let available = false;
+  let attempts = 0;
+  const service = new OaReadService(config, fakeDatabase(() => {
+    attempts++;
+    if (!available) throw Object.assign(new Error('private connection detail'), { code: 'ETIMEDOUT' });
+    return schema;
+  }));
+  t.after(() => service.close());
+  await service.start();
+  assert.equal(attempts, 2); // one initial attempt plus one immediate reconnect
+  const failed = (await readCatalogState(dir))!.report;
+  assert.equal(failed.status, 'rejected');
+  assert.deepEqual(failed.failure, { kind: 'unavailable', stage: 'inspect_schema', code: 'ETIMEDOUT', retryable: true });
+  const response: any = await service.call({ action: 'query', version: failed.activeVersion, query: basic }, principal);
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'metadata_sync_unavailable');
+  assert.equal(response.error.recovery.action, 'stop_for_turn');
+  assert.equal(attempts, 2); // chat calls do not perform schema checks or read stale data
+  const diagnostic = await readFile(path.join(dir, 'last-failure.json'), 'utf8');
+  assert.doesNotMatch(diagnostic, /private connection detail/);
+  available = true;
+  t.mock.timers.tick(29999);
+  assert.equal(attempts, 2);
+  t.mock.timers.tick(1);
+  await service.sync('test_join');
+  assert.equal((await readCatalogState(dir))!.report.trigger, 'retry');
+  assert.equal((await service.call({ action: 'catalog' }, principal)).ok, true);
+  assert.equal(await readFile(path.join(dir, 'last-failure.json'), 'utf8'), diagnostic);
+  await service.close();
+  const count = attempts;
+  t.mock.timers.tick(600000);
+  assert.equal(attempts, count);
+});
+
+test('real metadata definition failures retain a validation error and do not schedule transient retries', async t => {
+  const { dir, config } = await fixture(); t.after(() => rm(dir, { recursive: true, force: true }));
+  await synchronizeMetadata(config, fakeDatabase(() => schema), 'startup');
+  await writeFile(config.metadataPath, '{bad-json');
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let reads = 0;
+  const service = new OaReadService(config, fakeDatabase(() => { reads++; return schema; }));
+  t.after(() => service.close());
+  await service.start();
+  const failed = (await readCatalogState(dir))!.report;
+  assert.equal(failed.failure?.kind, 'validation');
+  assert.equal(failed.failure?.retryable, false);
+  const response: any = await service.call({ action: 'catalog' }, principal);
+  assert.equal(response.error.code, 'metadata_validation_failed');
+  t.mock.timers.tick(30000);
+  assert.equal(reads, 0);
+});

@@ -18,7 +18,9 @@ try {
     body: JSON.stringify({ ...input, sessionId }), signal: AbortSignal.timeout(45000),
   });
   if (!response.ok) throw new Error(`只读工具请求失败 (${response.status})`);
-  console.log(stringifyJsonLineSafe(await response.json(), 2));
+  const result = await response.json();
+  console.log(stringifyJsonLineSafe(result, 2));
+  if (result?.ok === false) process.exitCode = 1;
 } catch (e) {
   console.error(e instanceof SyntaxError ? "--input 必须是合法 JSON" : e.message);
   process.exitCode = 1;
