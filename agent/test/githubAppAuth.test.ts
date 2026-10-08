@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { describe, it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { GitHubAppAuth } from "../src/infrastructure/github/githubAppAuth.js";
 import { GitHubRestProjectReader } from "../src/infrastructure/github/githubClient.js";
 import { GitHubRequestExecutor } from "../src/infrastructure/github/githubRequestExecutor.js";
@@ -9,6 +10,165 @@ import { OperationMetricsRecorder } from "../src/infrastructure/observability/op
 import { normalizeGitHubRepositoryUrl } from "../src/infrastructure/github/githubUrl.js";
 
 describe("GitHubAppAuth", () => {
+  it("checks installations concurrently with a limit of three and preserves the full inventory", async () => {
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    let active = 0;
+    let peak = 0;
+    let calls = 0;
+    const auth = new GitHubAppAuth({
+      appId: "12345",
+      privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      requestExecutor: new GitHubRequestExecutor({ sleep: async () => undefined }),
+      fetchImpl: async (input, init) => {
+        calls += 1;
+        const path = new URL(String(input)).pathname;
+        if (path === "/app/installations") return Response.json([1, 2, 3, 4, 5, 6].map(id => ({ id })));
+        active += 1;
+        peak = Math.max(peak, active);
+        try {
+          await delay(5);
+          if (path.endsWith("/access_tokens")) {
+            const id = path.split("/")[3]!;
+            return Response.json({ token: `token-${id}`, expires_at: "2099-01-01T00:00:00Z", permissions: { contents: "read" } }, { status: 201 });
+          }
+          const id = new Headers(init?.headers).get("authorization")!.split("-")[1]!;
+          return Response.json({ total_count: 1, repositories: [{ full_name: `acme/repo-${id}`, owner: { login: "acme" }, name: `repo-${id}` }] });
+        } finally {
+          active -= 1;
+        }
+      },
+    });
+
+    const access = await auth.describeAccess();
+
+    assert.equal(peak, 3);
+    assert.equal(active, 0);
+    assert.equal(calls, 13);
+    assert.deepEqual(access.map(item => item.repositories[0]!.fullName), [1, 2, 3, 4, 5, 6].map(id => `acme/repo-${id}`));
+    assert.equal(await auth.getAuthorizationHeader("acme/repo-6"), "Bearer token-6");
+    assert.equal(calls, 13, "the complete inventory should be cached");
+  });
+
+  it("cancels other installation checks after rejection and never caches a partial inventory", async (context) => {
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    context.mock.method(console, "error", () => undefined);
+    let rejectAccess = true;
+    let active = 0;
+    const auth = new GitHubAppAuth({
+      appId: "12345",
+      privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      requestExecutor: new GitHubRequestExecutor({ sleep: async () => assert.fail("permission failures must not retry") }),
+      fetchImpl: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/app/installations") return Response.json([1, 2, 3, 4].map(id => ({ id })));
+        if (path.endsWith("/access_tokens")) {
+          const id = path.split("/")[3]!;
+          if (rejectAccess) {
+            active += 1;
+            try {
+              const signal = init!.signal!;
+              await delay(id === "1" ? 5 : 500, undefined, { signal }).catch(() => { throw signal.reason; });
+              return Response.json({ message: "Bad credentials" }, { status: 401 });
+            } finally {
+              active -= 1;
+            }
+          }
+          return Response.json({ token: `token-${id}`, expires_at: "2099-01-01T00:00:00Z", permissions: { contents: "read" } }, { status: 201 });
+        }
+        const id = new Headers(init?.headers).get("authorization")!.split("-")[1]!;
+        return Response.json({ total_count: 1, repositories: [{ full_name: `acme/repo-${id}`, owner: { login: "acme" }, name: `repo-${id}` }] });
+      },
+    });
+
+    await assert.rejects(auth.describeAccess(), /HTTP 401/);
+    assert.equal(active, 0, "failed discovery must stop all in-flight requests");
+    rejectAccess = false;
+    const access = await auth.describeAccess();
+    assert.equal(access.length, 4);
+    assert.equal(await auth.getAuthorizationHeader("acme/repo-4"), "Bearer token-4");
+  });
+
+  for (const phase of ["connection", "body"] as const) {
+    it(`retries a ${phase} timeout with a fresh request deadline`, async () => {
+      const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const executor = new GitHubRequestExecutor({ sleep: async () => undefined });
+      const installationSignals: AbortSignal[] = [];
+      const auth = new GitHubAppAuth({
+        appId: "12345",
+        privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+        requestTimeoutMs: 20,
+        requestExecutor: executor,
+        fetchImpl: async (input, init) => {
+          const path = new URL(String(input)).pathname;
+          if (path === "/app/installations") {
+            const signal = init!.signal!;
+            installationSignals.push(signal);
+            if (installationSignals.length === 1) {
+              if (phase === "connection") {
+                await delay(200, undefined, { signal }).catch(() => { throw signal.reason; });
+                assert.fail("first request should time out");
+              }
+              return new Response(new ReadableStream({
+                start(controller) {
+                  void delay(200, undefined, { signal }).then(
+                    () => controller.close(),
+                    () => controller.error(signal.reason),
+                  );
+                },
+              }));
+            }
+            signal.throwIfAborted();
+            return Response.json([{ id: 11 }]);
+          }
+          if (path === "/app/installations/11/access_tokens") {
+            return Response.json({ token: "test-token", expires_at: "2099-01-01T00:00:00Z", permissions: { contents: "read" } }, { status: 201 });
+          }
+          return Response.json({ total_count: 1, repositories: [{ full_name: "acme/api", owner: { login: "acme" }, name: "api" }] });
+        },
+      });
+
+      const access = await auth.describeAccess();
+
+      assert.equal(access[0]?.repositories[0]?.fullName, "acme/api");
+      assert.equal(installationSignals.length, 2);
+      assert.notEqual(installationSignals[0], installationSignals[1]);
+      assert.equal(installationSignals[0]!.aborted, true);
+      assert.equal(installationSignals[1]!.aborted, false);
+      assert.equal(executor.metrics.retries, 1);
+    });
+  }
+
+  it("stops at the caller deadline without retrying and logs the failed endpoint safely", async (context) => {
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const errors: string[] = [];
+    context.mock.method(console, "error", (message: string) => errors.push(message));
+    const executor = new GitHubRequestExecutor({ sleep: async () => assert.fail("cancelled calls must not retry") });
+    const auth = new GitHubAppAuth({
+      appId: "12345",
+      privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      apiBaseUrl: "https://hidden-user:hidden-password@api.github.test",
+      signal: AbortSignal.timeout(20),
+      requestTimeoutMs: 200,
+      requestExecutor: executor,
+      fetchImpl: async (_input, init) => {
+        const signal = init!.signal!;
+        await delay(500, undefined, { signal }).catch(() => { throw signal.reason; });
+        assert.fail("caller deadline should abort the request");
+      },
+    });
+
+    await assert.rejects(auth.describeAccess(), (error: unknown) => error instanceof DOMException && error.name === "TimeoutError");
+
+    assert.equal(executor.metrics.attempts, 1);
+    assert.equal(executor.metrics.retries, 0);
+    const event = JSON.parse(errors[0]!);
+    assert.equal(event.event, "github_app_request_failed");
+    assert.equal(event.url, "https://api.github.test/app/installations");
+    assert.equal(event.callerAborted, true);
+    assert.equal(event.attempts, 1);
+    assert.doesNotMatch(errors.join(""), /hidden-user|hidden-password|Bearer/);
+  });
+
   it("maps repositories to installation tokens and reports accessible repositories", async () => {
     const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();

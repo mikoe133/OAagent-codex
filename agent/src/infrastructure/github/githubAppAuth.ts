@@ -1,5 +1,5 @@
 import { createPrivateKey, createSign, type KeyObject } from "node:crypto";
-import type { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
+import { AsyncSemaphore } from "../concurrency/asyncSemaphore.js";
 import { GitHubRequestExecutor } from "./githubRequestExecutor.js";
 import type { GitHubRepositoryIdentity } from "./githubUrl.js";
 import type { OperationMetricsRecorder } from "../observability/operationMetrics.js";
@@ -9,6 +9,7 @@ const GITHUB_API_VERSION = "2022-11-28";
 const RESPONSE_LIMIT_BYTES = 10 * 1024 * 1024;
 const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1_000;
 const GITHUB_APP_REQUEST_TIMEOUT_MS = 20_000;
+const GITHUB_APP_DISCOVERY_CONCURRENCY = 3;
 
 type GitHubFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -41,6 +42,7 @@ export type GitHubAppAuthConfig = {
   operationMetrics?: OperationMetricsRecorder;
   fetchImpl?: GitHubFetch;
   signal?: AbortSignal;
+  requestTimeoutMs?: number;
 };
 
 export type GitHubStaticAuthConfig = {
@@ -118,6 +120,7 @@ export class GitHubAppAuth implements GitHubRequestAuth {
   private readonly requestExecutor: GitHubRequestExecutor;
   private readonly operationMetrics?: OperationMetricsRecorder;
   private readonly signal?: AbortSignal;
+  private readonly requestTimeoutMs: number;
   private readonly tokenCache = new Map<number, InstallationToken>();
   private readonly tokenPromises = new Map<number, Promise<InstallationToken>>();
   private accessSummaries: GitHubAppAccessSummary[] | null = null;
@@ -144,6 +147,10 @@ export class GitHubAppAuth implements GitHubRequestAuth {
     });
     this.operationMetrics = config.operationMetrics;
     this.signal = config.signal;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? GITHUB_APP_REQUEST_TIMEOUT_MS;
+    if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs < 1) {
+      throw new Error("GitHub App requestTimeoutMs 必须是正整数。");
+    }
   }
 
   async getAuthorizationHeader(repository: string, signal?: AbortSignal): Promise<string> {
@@ -225,18 +232,18 @@ export class GitHubAppAuth implements GitHubRequestAuth {
   ): Promise<GitHubAppAccessSummary[]> {
     const installations = await this.listInstallations(signal);
     const repositoryIndex = new Map<string, number>();
-    const summaries: GitHubAppAccessSummary[] = [];
-    for (const installation of installations) {
-      const token = await this.getInstallationToken(installation.id, signal);
+    const limiter = new AsyncSemaphore(GITHUB_APP_DISCOVERY_CONCURRENCY);
+    const cancellation = new AbortController();
+    const discoverySignal = signal ? AbortSignal.any([signal, cancellation.signal]) : cancellation.signal;
+    let summaries: GitHubAppAccessSummary[];
+    const pending = installations.map(installation => limiter.run(async () => {
+      const token = await this.getInstallationToken(installation.id, discoverySignal);
       const repositories = await this.listInstallationRepositories(
         installation.id,
         token.token,
-        signal,
+        discoverySignal,
       );
-      for (const repository of repositories) {
-        repositoryIndex.set(repository.fullName.toLowerCase(), installation.id);
-      }
-      summaries.push({
+      return {
         installationId: installation.id,
         accountLogin: installation.accountLogin,
         accountType: installation.accountType,
@@ -249,7 +256,21 @@ export class GitHubAppAuth implements GitHubRequestAuth {
           repository: repository.repository,
           permissions: repository.permissions,
         })),
-      });
+      };
+    }, discoverySignal));
+    try {
+      summaries = await Promise.all(pending);
+    } catch (error) {
+      cancellation.abort(error);
+      await Promise.allSettled(pending);
+      throw error;
+    }
+    // Publish only after every installation has been verified. Partial access
+    // inventories must never be cached following a failed discovery.
+    for (const summary of summaries) {
+      for (const repository of summary.repositories) {
+        repositoryIndex.set(repository.fullName.toLowerCase(), summary.installationId);
+      }
     }
     this.repositoryIndex = repositoryIndex;
     this.accessSummaries = summaries;
@@ -397,31 +418,53 @@ export class GitHubAppAuth implements GitHubRequestAuth {
     for (const [key, value] of Object.entries(input.query ?? {})) {
       url.searchParams.set(key, String(value));
     }
-    const requestSignal = input.signal
-      ? AbortSignal.any([
-          input.signal,
-          AbortSignal.timeout(GITHUB_APP_REQUEST_TIMEOUT_MS),
-        ])
-      : AbortSignal.timeout(GITHUB_APP_REQUEST_TIMEOUT_MS);
+    const callerSignals = [this.signal, input.signal].filter((signal): signal is AbortSignal => !!signal);
+    const callerSignal = callerSignals.length ? AbortSignal.any(callerSignals) : undefined;
     const request = async () => {
-      const response = await this.requestExecutor.execute(
-        () => this.fetchImpl(url, {
-          method: input.method ?? "GET",
-          headers: {
-            accept: "application/vnd.github+json",
-            authorization: input.authHeader,
-            "x-github-api-version": GITHUB_API_VERSION,
-            "user-agent": "oa-project-progress-worker",
-          },
-          signal: requestSignal,
-        }),
-        {
+      const started = performance.now();
+      let attempts = 0;
+      let payload: unknown;
+      try {
+        await this.requestExecutor.execute(async () => {
+          attempts += 1;
+          // Each attempt gets a fresh deadline. The executor only receives the
+          // caller's deadline so a request timeout can be retried within it.
+          const timeout = AbortSignal.timeout(this.requestTimeoutMs);
+          const requestSignal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
+          const response = await this.fetchImpl(url, {
+            method: input.method ?? "GET",
+            headers: {
+              accept: "application/vnd.github+json",
+              authorization: input.authHeader,
+              "x-github-api-version": GITHUB_API_VERSION,
+              "user-agent": "oa-project-progress-worker",
+            },
+            signal: requestSignal,
+          });
+          if (response.ok || input.acceptedStatuses?.includes(response.status)) {
+            // Body timeouts are transport failures too; keep them inside the
+            // executor so they receive the same bounded retry policy.
+            payload = await readLimitedJson(response, RESPONSE_LIMIT_BYTES);
+          }
+          return response;
+        }, {
           repository: input.repositoryKey,
-          signal: requestSignal,
+          signal: callerSignal,
           ...(input.acceptedStatuses ? { acceptedStatuses: input.acceptedStatuses } : {}),
         },
-      );
-      return readLimitedJson(response, RESPONSE_LIMIT_BYTES) as Promise<T>;
+        );
+        return payload as T;
+      } catch (error) {
+        const cause = error instanceof Error ? error.cause : undefined;
+        const transportCode = cause && typeof cause === "object" && "code" in cause ? String(cause.code) : undefined;
+        console.error(JSON.stringify({
+          event: "github_app_request_failed", method: input.method ?? "GET",
+          url: `${url.origin}${url.pathname}${url.search}`, attempts, durationMs: Math.round(performance.now() - started),
+          requestTimeoutMs: this.requestTimeoutMs, callerAborted: !!callerSignal?.aborted,
+          errorType: error instanceof Error ? error.name : "unknown", transportCode,
+        }));
+        throw error;
+      }
     };
     return this.operationMetrics
       ? this.operationMetrics.measure(input.endpoint, request)

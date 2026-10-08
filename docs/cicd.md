@@ -108,6 +108,10 @@ Workflow 使用 `${{ github.token }}` 将镜像推送到 GHCR 作为版本备份
 
 `PROJECT_PROGRESS_GITHUB_APP_PRIVATE_KEY` 不写入 `.env`。Workflow 会通过 SSH 将它原子写到服务器部署目录下的 `.secrets/project-progress-github-app-private-key.pem`；部署脚本使用目标 Agent 镜像将文件设置为运行时 `node` 用户所有和 `0400`，再由 Compose 只读挂载给 `project-progress-worker`。Worker 环境变量只包含 `PROJECT_PROGRESS_GITHUB_APP_ID` 和容器内私钥路径。发布完成前，健康检查会验证私钥可读，部署脚本还会实际获取 installation token、枚举授权仓库并确认 `Contents: Read` 权限；鉴权失败会自动回滚。
 
+GitHub App 访问检查共用 60 秒总预算，包含请求、限流等待、重试及仓库分页。安装之间最多并行检查 3 个，单个安装的仓库分页仍按顺序读取，全部检查成功后才发布访问目录缓存。每次 HTTP 尝试（含响应正文读取）有独立的 20 秒时限，瞬态失败最多尝试 3 次；总预算耗尽立即停止。失败时 `github_app_request_failed` 日志会记录接口 URL、实际发起的尝试次数、耗时、错误类型、底层网络错误码以及 `callerAborted`，不记录 JWT、installation token 或私钥。`callerAborted:true` 表示上层时限耗尽或关联检查失败导致取消；部署脚本会另行明确标注 60 秒总时限耗尽。超时不能直接判定为 App ID 或私钥错误。401 或非限流 403 仍会立即失败并回滚。
+
+容器健康但该检查超时时，可在服务器执行 `docker exec oa-agent-prod-project-progress-worker-1 curl -I --connect-timeout 5 --max-time 10 https://api.github.com`，检查容器到 GitHub 的 DNS、HTTPS 连接及证书；测试环境替换为对应容器名。该命令不携带鉴权凭据，只用于检查公网连通性。若旧版日志只有通用超时，需部署包含诊断修复的新提交；重跑旧 run 仍然使用旧脚本。
+
 当前单 `agent` 实例使用进程内手动触发限流，不读取 `REDIS_URL`。在代码接入共享 Redis 前不要新增一个看似生效但实际未使用的 Redis Secret。
 
 Workflow 会额外校验 `DATABASE_URL` 的库名：`test` 只能连接 `oagent_test`，`production` 只能连接 `oagent`。库名填反时部署会在上传服务器配置前失败。
