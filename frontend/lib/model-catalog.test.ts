@@ -19,7 +19,7 @@ import {
 
 test("defaults to OpenRouter while exposing both provider choices", () => {
   assert.equal(DEFAULT_MODEL_PROVIDER, "openrouter")
-  assert.equal(getDefaultModel(DEFAULT_MODEL_PROVIDER), "deepseek/deepseek-v4-flash")
+  assert.equal(getDefaultModel(DEFAULT_MODEL_PROVIDER), "deepseek/deepseek-v4.1-flash")
   assert.deepEqual(
     MODEL_PROVIDERS.map((provider) => provider.id),
     ["nexttoken", "openrouter"],
@@ -48,21 +48,22 @@ test("exposes the dedicated lightweight router model choices", () => {
 
 test("keeps provider model lists isolated", () => {
   assert.equal(getDefaultModel("nexttoken"), "gpt-5.6-terra")
-  assert.equal(getDefaultModel("openrouter"), "deepseek/deepseek-v4-flash")
+  assert.equal(getDefaultModel("openrouter"), "deepseek/deepseek-v4.1-flash")
   assert.deepEqual(
     getModelsForProvider("openrouter").map((model) => model.id),
     [
       "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
       "qwen/qwen3.8-max-0902",
-      "deepseek/deepseek-v4-pro",
-      "deepseek/deepseek-v4-flash",
+      "deepseek/deepseek-v4.1-flash",
     ],
   )
   assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.3"), true)
   assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.2"), false)
   assert.equal(isModelForProvider("openrouter", "moonshotai/kimi-k3"), true)
-  assert.equal(isModelForProvider("openrouter", "deepseek/deepseek-v4-pro"), true)
+  assert.equal(isModelForProvider("openrouter", "deepseek/deepseek-v4-pro"), false)
+  assert.equal(isModelForProvider("openrouter", "deepseek/deepseek-v4.1-flash"), true)
+  assert.equal(isModelForProvider("openrouter", "deepseek/deepseek-v4-flash"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.5"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4"), false)
   assert.equal(isModelForProvider("openrouter", "openai/gpt-5.4-mini"), false)
@@ -83,14 +84,14 @@ test("labels Kimi K3 in the OpenRouter model list", () => {
   assert.equal(kimiModel?.name, "Kimi K3")
 })
 
-test("labels DeepSeek V4 Pro in the OpenRouter model list", () => {
+test("labels DeepSeek V4.1 Flash in the OpenRouter model list", () => {
   const deepSeekModel = getModelsForProvider("openrouter").find(
-    (model) => model.id === "deepseek/deepseek-v4-pro",
+    (model) => model.id === "deepseek/deepseek-v4.1-flash",
   )
 
   assert.deepEqual(deepSeekModel, {
-    id: "deepseek/deepseek-v4-pro",
-    name: "DeepSeek V4 Pro",
+    id: "deepseek/deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash",
     icon: "/images/deepseek-color.png",
   })
   assert.equal(existsSync(new URL("../public/images/deepseek-color.png", import.meta.url)), true)

@@ -78,10 +78,10 @@ const CUSTOM_MODEL_DEFINITIONS = {
     supportsParallelToolCalls: false,
     supportVerbosity: false,
   },
-  "deepseek/deepseek-v4-pro": {
+  "deepseek/deepseek-v4.1-flash": {
     baseSlug: "gpt-5.5",
-    displayName: "DeepSeek V4 Pro",
-    description: "DeepSeek V4 Pro served through OpenRouter.",
+    displayName: "DeepSeek V4.1 Flash",
+    description: "DeepSeek V4.1 Flash served through OpenRouter.",
     contextWindow: 1_048_576,
     autoCompactTokenLimit: 996_147,
     supportsParallelToolCalls: false,
@@ -130,7 +130,7 @@ export function buildCustomModelCatalog(bundledCatalog: unknown): ModelCatalog {
         effective_context_window_percent: 95,
         supports_parallel_tool_calls: definition.supportsParallelToolCalls,
         support_verbosity: definition.supportVerbosity,
-        ...(["z-ai/glm-5.3", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash"].includes(slug) ? { input_modalities: ["text"] } : {}),
+        ...(["z-ai/glm-5.3", "deepseek/deepseek-v4-flash"].includes(slug) ? { input_modalities: ["text"] } : {}),
         supports_image_detail_original: false,
         supports_search_tool: false,
       } satisfies ModelInfo;

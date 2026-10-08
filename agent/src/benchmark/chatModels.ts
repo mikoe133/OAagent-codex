@@ -28,7 +28,7 @@ if (!Number.isInteger(rounds) || rounds < 1 || rounds > 5) throw new Error("roun
 const output = path.join(root, "artifacts/chat-model-benchmark", new Date().toISOString().replace(/[:.]/g, "-"));
 await mkdir(output, { recursive: true });
 const base = loadConfig();
-const models = ["z-ai/glm-5.3", "deepseek/deepseek-v4-flash"];
+const models = ["z-ai/glm-5.3", "deepseek/deepseek-v4.1-flash"];
 const cases = [
   { id: "rwkv", task: "rwkv 相比于传统 transformer 的优势。请用中文简洁回答，区分 prefill 与 KV cache 解码复杂度，给出适用场景和限制。", catalogs: ["rwkv_knowledge"] as const },
   { id: "project", task: "查询 Atlas 项目的当前状态、负责人姓名和最后更新时间，只回答查询结果。", catalogs: ["oa"] as const },

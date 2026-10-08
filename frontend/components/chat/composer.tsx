@@ -19,12 +19,16 @@ import { AudioWaveform } from "./audio-waveform"
 import { shouldSubmitComposerOnKeyDown } from "./composer-keyboard"
 import TextType from "@/components/text/TextType"
 import { getModelsForProvider, type AIModel, type ModelProvider } from "@/lib/model-catalog"
+import { ConfirmationCard } from './confirmation-card'
+import type { ChatConfirmation, ConfirmationResponse } from '@/lib/chat-confirmation'
 
 // Voice input remains disabled; attachments use the authenticated upload API.
 const SHOW_VOICE_INPUT = false
 const SHOW_FILE_UPLOAD = true
 
 interface ComposerProps {
+  confirmation?: ChatConfirmation
+  onConfirmationRespond?: (response: ConfirmationResponse) => Promise<void | boolean>
   onSend: (content: string, files?: File[], onAdmitted?: () => void) => void | boolean | Promise<void | boolean>
   onStop: () => void
   isStreaming: boolean
@@ -95,6 +99,8 @@ function getSpeechErrorMessage(error?: string): string {
 }
 
 export function Composer({
+  confirmation,
+  onConfirmationRespond,
   onSend,
   onStop,
   isStreaming,
@@ -392,10 +398,12 @@ export function Composer({
         className="absolute -bottom-4 left-0 right-4 top-0 bg-stone-50 theme-dark:bg-zinc-950"
       />
       <div className="relative z-10 max-w-2xl mx-auto pointer-events-auto">
+        {confirmation && onConfirmationRespond && <ConfirmationCard key={confirmation.id} confirmation={confirmation} onRespond={onConfirmationRespond} disabled={isStreaming || disabled || isSending} />}
         <div
           data-slot="chat-composer"
           className={cn(
-            "flex flex-col gap-3 p-4 bg-white border-stone-200 transition-all duration-200 border-none border-0 max-h-[55dvh] overflow-y-auto relative rounded-3xl theme-dark:bg-zinc-900",
+            "flex flex-col gap-3 p-4 bg-white border-stone-200 transition-all duration-200 border-none border-0 overflow-y-auto relative rounded-3xl theme-dark:bg-zinc-900",
+            confirmation ? "max-h-[30dvh]" : "max-h-[55dvh]",
             "focus-within:border-stone-300 focus-within:ring-2 focus-within:ring-stone-200 theme-dark:focus-within:ring-zinc-700",
           )}
           style={{

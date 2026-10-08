@@ -28,8 +28,8 @@ import { parseCodexSandboxMode } from "../src/config/config.js";
 import { createThreadOptions } from "../src/infrastructure/codex/codexClient.js";
 
 describe("model provider selection", () => {
-  it("uses DeepSeek V4 Flash as the default OpenRouter answer model", () => {
-    assert.equal(getDefaultModel("openrouter"), "deepseek/deepseek-v4-flash");
+  it("uses DeepSeek V4.1 Flash as the default OpenRouter answer model", () => {
+    assert.equal(getDefaultModel("openrouter"), "deepseek/deepseek-v4.1-flash");
     assert.equal(getDefaultModel("nexttoken"), "gpt-5.6-terra");
   });
   it("isolates lightweight router models from answer models", () => {
@@ -88,8 +88,7 @@ describe("model provider selection", () => {
       "z-ai/glm-5.3",
       "moonshotai/kimi-k3",
       "qwen/qwen3.8-max-0902",
-      "deepseek/deepseek-v4-pro",
-      "deepseek/deepseek-v4-flash",
+      "deepseek/deepseek-v4.1-flash",
       "openai/gpt-5.5",
       "openai/gpt-5.4",
     ]);
@@ -108,10 +107,10 @@ describe("model provider selection", () => {
     assert.equal(
       resolveRequestedModel(
         "openrouter",
-        "deepseek/deepseek-v4-pro",
+        "deepseek/deepseek-v4.1-flash",
         "z-ai/glm-5.3",
       ),
-      "deepseek/deepseek-v4-pro",
+      "deepseek/deepseek-v4.1-flash",
     );
     assert.throws(
       () => resolveRequestedModel("openrouter", "z-ai/glm-5.2", "z-ai/glm-5.3"),
@@ -122,8 +121,8 @@ describe("model provider selection", () => {
   it("formats model brand names in model catalogs", () => {
     assert.equal(getModelDisplayName("z-ai/glm-5.3"), "GLM 5.3");
     assert.equal(
-      getModelDisplayName("deepseek/deepseek-v4-pro"),
-      "DeepSeek V4 Pro",
+      getModelDisplayName("deepseek/deepseek-v4.1-flash"),
+      "DeepSeek V4.1 Flash",
     );
   });
 
@@ -178,9 +177,9 @@ describe("model provider selection", () => {
     );
   });
 
-  it("allows DeepSeek V4 Pro for automation tasks", () => {
-    assert.deepEqual(
-      resolveAutomationModelSelection(
+  it("rejects the retired DeepSeek V4 Pro for automation tasks", () => {
+    assert.throws(
+      () => resolveAutomationModelSelection(
         {
           modelProvider: "openrouter",
           modelId: "deepseek/deepseek-v4-pro",
@@ -191,14 +190,7 @@ describe("model provider selection", () => {
         },
         { modelProvider: "nexttoken", modelId: "gpt-5.6-terra" },
       ),
-      {
-        modelProvider: "openrouter",
-        modelId: "deepseek/deepseek-v4-pro",
-        modelParameters: {
-          reasoning_effort: "high",
-          max_output_tokens: 2_048,
-        },
-      },
+      /不支持模型/,
     );
   });
 

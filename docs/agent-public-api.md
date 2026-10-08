@@ -143,6 +143,7 @@ Idempotency-Key: req-001
 | developerMode | 否 | boolean，默认 false，通常无需设置 |
 | routerModels | 否 | 1–6 个路由模型 ID 的数组；默认 GLM 5.3 Flash 与 DeepSeek V4.1 Flash 并发竞速 |
 | routerModel | 否 | 兼容旧请求的单模型字符串；仅调用该模型，不能与 routerModels 同时提供 |
+| confirmationResponse | 否 | 点击确认卡片时传入 `{ "id": "卡片UUID", "decision": "approve" }` 或 `decline`；message 仍必填 |
 
 路由模型白名单为 `z-ai/glm-4.7-flash`、`qwen/qwen3.5-flash-02-23`、`deepseek/deepseek-v4-flash`、`z-ai/glm-5.3-flash`、`deepseek/deepseek-v4.1-flash`、`qwen/qwen3.8-flash`，与正式回答模型的 `/models` 白名单不是同一用途。`routerModels` 去重后并发执行，先返回有效路由的胜出并取消其余请求，全部失败才安全降级。省略路由配置时无论是否开启开发模式，均使用默认双模型。普通接入可省略这些高级参数。
 
@@ -171,6 +172,10 @@ Idempotency-Key: req-001
 ```
 
 普通消息接口会等待任务结束，不是立即返回的异步提交接口。读取回答用 `result.finalResponse`。knowledgeSources 是本轮知识库来源列表，无引用时为空数组。
+
+需要用户确认操作时，模型通过结构化工具生成 `result.confirmation`：`id`、`title`、`description`、`actions`、`expiresAt`，以及可选的内部管理员 `confirmationReply`。Web 在输入框上方展示计划和“确认执行 / 取消”按钮；调用方只需将卡片 ID 和决策放入下一条消息的 `confirmationResponse`，不应自行生成卡片 ID 或确认口令。卡片有效期 30 分钟，服务端验证登录身份、会话和有效期后一次性消费；过期或已使用的卡片返回 `confirmation_expired`。确认响应属于幂等参数，重试须保留同一个 requestId 和相同决策。其他新消息会使旧卡片失效。
+
+等待确认的结果仍是本轮对话的 `completed`，表示计划已准备好，业务写入尚未执行。点击批准后的新请求才继续执行原计划。卡片和点击记录都保存到会话历史，刷新可恢复待确认卡片。
 
 响应头：
 
@@ -207,6 +212,7 @@ data: {"type":"run.completed","recordId":"457","requestId":"req-002","historySyn
 | progress | 路由/准备等进度信息 |
 | message.delta | 增量文本；delta 为增量，text 为对应 item 当前文本 |
 | tool.started、tool.updated、tool.completed | 工具执行过程 |
+| confirmation.required | 本轮准备好的结构化操作确认卡片；最终结果也包含 confirmation |
 | run.completed | 成功终态，以 result.finalResponse 为完整最终回答 |
 | run.failed | 失败终态，包含 error，通常还有 state |
 

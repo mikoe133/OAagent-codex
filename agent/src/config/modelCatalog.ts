@@ -32,8 +32,7 @@ export const MODEL_CATALOG = {
     "z-ai/glm-5.3",
     "moonshotai/kimi-k3",
     "qwen/qwen3.8-max-0902",
-    "deepseek/deepseek-v4-pro",
-    "deepseek/deepseek-v4-flash",
+    "deepseek/deepseek-v4.1-flash",
     "openai/gpt-5.5",
     "openai/gpt-5.4",
   ],
@@ -62,7 +61,7 @@ export const MODEL_CATALOG_VERSION = `sha256:${createHash("sha256")
 
 const DEFAULT_MODELS = {
   nexttoken: "gpt-5.6-terra",
-  openrouter: "deepseek/deepseek-v4-flash",
+  openrouter: "deepseek/deepseek-v4.1-flash",
 } as const satisfies Record<ModelProviderId, string>;
 
 export function isModelProviderId(value: unknown): value is ModelProviderId {
@@ -196,9 +195,6 @@ export function normalizeModelReasoningEffort<
   model: string,
   effort: ReasoningEffort,
 ): ReasoningEffort | "low" | "high" {
-  if (model === "deepseek/deepseek-v4-pro") {
-    return effort === "xhigh" ? effort : "high";
-  }
   if (model !== "z-ai/glm-5.3") {
     return effort;
   }

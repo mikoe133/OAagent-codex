@@ -2,7 +2,7 @@ export const CHAT_DIAGNOSTICS_KEY = 'oa-chat-diagnostics'
 export const TRACE_HEADER = 'x-oa-trace-id'
 export const SOURCE_HEADER = 'x-oa-error-source'
 export type DiagnosticRoute = '/api/chat' | '/api/chat/sessions' | '/api/chat/requests' | '/api/auth/me'
-export type DiagnosticEvent = 'request_started' | 'response_received' | 'upstream_response' | 'network_failed' | 'aborted' |
+export type DiagnosticEvent = 'request_started' | 'response_received' | 'upstream_response' | 'network_failed' | 'aborted' | 'request_recovered' |
   'login_redirect' | 'prepare_failed' | 'stream_completed' | 'stream_failed' | 'stream_incomplete' | 'handler_failed'
 export type DiagnosticPhase = 'local' | 'agent' | 'oa_auth'
 type Diagnostic = {

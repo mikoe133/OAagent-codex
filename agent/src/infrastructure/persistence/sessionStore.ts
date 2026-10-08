@@ -1,5 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pendingConfirmationSchema, type ChatConfirmation, type ConfirmationDecision, type ConfirmationResponse } from '../../chat/confirmation.js';
+import { ChatError } from '../../chat/chatScheduler.js';
 
 export type AgentSession = {
   sessionId: string;
@@ -7,6 +9,8 @@ export type AgentSession = {
   summary: string | null;
   createdAt: string;
   updatedAt: string;
+  pendingConfirmation?: ChatConfirmation;
+  confirmationDecision?: ConfirmationDecision;
 };
 
 type SessionStoreFile = {
@@ -15,6 +19,7 @@ type SessionStoreFile = {
 
 type StoredAgentSession = AgentSession & {
   ownerId: string | null;
+  confirmationUserId?: string;
 };
 
 export class SessionStore {
@@ -70,6 +75,36 @@ export class SessionStore {
     session.summary = summary;
     session.updatedAt = new Date().toISOString();
     await this.persist();
+  }
+
+  async setConfirmation(sessionId: string, confirmation?: ChatConfirmation): Promise<void> {
+    await this.getOrCreate(sessionId);
+    const session = this.sessions.get(sessionId)!;
+    if (confirmation) {
+      const userId = this.getOaUserId(sessionId);
+      if (!userId) throw new ChatError(401, 'confirmation_identity_missing', '当前登录身份不可用');
+      session.pendingConfirmation = confirmation;
+      session.confirmationUserId = userId;
+    } else {
+      delete session.pendingConfirmation;
+      delete session.confirmationUserId;
+    }
+    await this.persist();
+  }
+
+  async respondToConfirmation(sessionId: string, response: ConfirmationResponse): Promise<ConfirmationDecision> {
+    await this.load();
+    const session = this.sessions.get(sessionId);
+    const pending = session?.pendingConfirmation;
+    if (!session || !pending || pending.id !== response.id || session.confirmationUserId !== this.getOaUserId(sessionId) || Date.parse(pending.expiresAt) <= Date.now()) {
+      throw new ChatError(409, 'confirmation_expired', '这项确认已失效，请重新提出操作请求');
+    }
+    // Consume synchronously before persisting, so simultaneous clicks cannot
+    // both approve the same plan.
+    delete session.pendingConfirmation;
+    delete session.confirmationUserId;
+    await this.persist();
+    return { confirmation: pending, decision: response.decision };
   }
 
   async bindOaToken(
@@ -197,6 +232,7 @@ function normalizeStoredSession(value: unknown): StoredAgentSession | null {
   )) {
     return null;
   }
+  const pending = pendingConfirmationSchema.safeParse({ userId: session.confirmationUserId, confirmation: session.pendingConfirmation });
   return {
     sessionId: session.sessionId,
     threadId: session.threadId,
@@ -204,6 +240,7 @@ function normalizeStoredSession(value: unknown): StoredAgentSession | null {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     ownerId: typeof session.ownerId === "string" ? session.ownerId : null,
+    ...(pending.success ? { pendingConfirmation: pending.data.confirmation, confirmationUserId: pending.data.userId } : {}),
   };
 }
 
@@ -214,6 +251,7 @@ function publicSession(session: StoredAgentSession): AgentSession {
     summary: session.summary,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+    ...(session.pendingConfirmation ? { pendingConfirmation: session.pendingConfirmation } : {}),
   };
 }
 

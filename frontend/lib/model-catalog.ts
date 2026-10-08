@@ -42,13 +42,8 @@ export const MODELS_BY_PROVIDER = {
     { id: "moonshotai/kimi-k3", name: "Kimi K3", icon: "/images/moonshot-ai.svg" },
     { id: "qwen/qwen3.8-max-0902", name: "Qwen 3.8 Max", icon: "/images/qwen-color.svg" },
     {
-      id: "deepseek/deepseek-v4-pro",
-      name: "DeepSeek V4 Pro",
-      icon: "/images/deepseek-color.png",
-    },
-    {
-      id: "deepseek/deepseek-v4-flash",
-      name: "DeepSeek V4 Flash",
+      id: "deepseek/deepseek-v4.1-flash",
+      name: "DeepSeek V4.1 Flash",
       icon: "/images/deepseek-color.png",
     },
   ],
@@ -62,7 +57,7 @@ export const DEFAULT_MODEL_PROVIDER: ModelProvider = "openrouter"
 
 const DEFAULT_MODELS = {
   nexttoken: "gpt-5.6-terra",
-  openrouter: "deepseek/deepseek-v4-flash",
+  openrouter: "deepseek/deepseek-v4.1-flash",
 } as const satisfies Record<ModelProvider, AIModel>
 
 export function isModelProvider(value: unknown): value is ModelProvider {

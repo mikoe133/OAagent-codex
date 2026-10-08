@@ -57,9 +57,9 @@ describe("task reasoning policy", () => {
     );
   });
 
-  it("maps unsupported DeepSeek V4 Pro reasoning efforts to high", () => {
+  it("preserves DeepSeek V4.1 Flash reasoning efforts", () => {
     const config = {
-      model: "deepseek/deepseek-v4-pro",
+      model: "deepseek/deepseek-v4.1-flash",
       oaApiBaseUrl: null,
       projectRoot: "/tmp/agent",
     } as AppConfig;
@@ -67,23 +67,23 @@ describe("task reasoning policy", () => {
     assert.equal(
       createThreadOptions(
         config,
-        "deepseek/deepseek-v4-pro",
+        "deepseek/deepseek-v4.1-flash",
         "medium",
       ).modelReasoningEffort,
-      "high",
+      "medium",
     );
     assert.equal(
       createThreadOptions(
         config,
-        "deepseek/deepseek-v4-pro",
+        "deepseek/deepseek-v4.1-flash",
         "low",
       ).modelReasoningEffort,
-      "high",
+      "low",
     );
     assert.equal(
       createThreadOptions(
         config,
-        "deepseek/deepseek-v4-pro",
+        "deepseek/deepseek-v4.1-flash",
         "xhigh",
       ).modelReasoningEffort,
       "xhigh",

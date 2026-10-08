@@ -2,6 +2,7 @@ import { observeChatRoute, type ChatRequestDiagnostics } from "@/lib/server/chat
 import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
+import { validConfirmationResponse } from '@/lib/chat-confirmation'
 import {
   DEFAULT_MODEL_PROVIDER,
   isModelForProvider,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/model-catalog"
 
 type ChatRequestBody = {
+  confirmationResponse?: unknown
   attachmentMode?: unknown
   attachmentTarget?: unknown
   messages?: unknown
@@ -89,6 +91,8 @@ async function handleChat(req: Request, diagnostics: ChatRequestDiagnostics) {
       return jsonResponse({ error: "Invalid developer mode" }, 400)
     }
     const developerMode = body.developerMode === true
+    const confirmationResponse = validConfirmationResponse(body.confirmationResponse)
+    if (body.confirmationResponse !== undefined && !confirmationResponse) return jsonResponse({ error: 'Invalid confirmation response' }, 400)
     const routerModel = body.routerModel
     const routerModels = body.routerModels
     if ((routerModel !== undefined && !isRouterModel(routerModel)) ||
@@ -101,6 +105,7 @@ async function handleChat(req: Request, diagnostics: ChatRequestDiagnostics) {
       headers: new Headers({ ...Object.fromEntries(buildAgentHeaders(sessionToken)), "Idempotency-Key": requestId }),
       body: JSON.stringify({
         message,
+        ...(confirmationResponse ? { confirmationResponse } : {}),
         ...(attachmentIds ? { attachmentIds } : {}),
         ...(body.attachmentMode !== undefined ? { attachmentMode: body.attachmentMode } : {}),
         ...(body.attachmentTarget !== undefined ? { attachmentTarget: body.attachmentTarget } : {}),

@@ -70,7 +70,7 @@ test("renders a private runtime env for one isolated Compose environment", async
   const content = await readFile(outputPath, "utf8")
   assert.match(content, /^COMPOSE_PROJECT_NAME=oa-agent-test$/m)
   assert.match(content, /^CODEX_MODEL_PROVIDER=openrouter$/m)
-  assert.match(content, /^CODEX_MODEL=deepseek\/deepseek-v4-flash$/m)
+  assert.match(content, /^CODEX_MODEL=deepseek\/deepseek-v4\.1-flash$/m)
   assert.match(content, /^NEXTTOKEN_API_KEY=test-nexttoken-secret$/m)
   assert.match(content, /^NEXTTOKEN_API_BASE_URL=https:\/\/next-token\.cc$/m)
   assert.match(content, /^OPENROUTER_API_KEY=test-openrouter-secret$/m)

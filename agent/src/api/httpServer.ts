@@ -31,6 +31,7 @@ import { PublicChatApi } from "../chat/publicChatApi.js";
 import { getOaReadService, readToolToken } from "../infrastructure/oa-read/readService.js";
 import { readOaAdminPermission } from "../infrastructure/oa/oaChatAccess.js";
 import { getActiveOaQueryPolicy } from "../infrastructure/oa/oaQueryPolicy.js";
+import { confirmationToolToken, createChatConfirmation, confirmationRequestSchema } from '../chat/confirmation.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -129,6 +130,23 @@ async function routeRequest(
 
   if (method === "GET" && url.pathname === "/health") {
     writeJson(response, 200, { status: "ok" });
+    return;
+  }
+
+  if (method === 'POST' && url.pathname === '/__internal/request-chat-confirmation') {
+    if (!isLoopbackRequest(request)) { writeJson(response, 403, { error: 'forbidden' }); return; }
+    const body = await readJsonBody(request);
+    const sessionId = stringField(body, 'sessionId');
+    if (!sessionId || !isValidSessionId(sessionId) || request.headers.authorization !== `Bearer ${confirmationToolToken(config.oaApiToolToken, sessionId)}` ||
+        !getActiveOaQueryPolicy(sessionId) || !sessionStore.getOaToken(sessionId) || !sessionStore.getOaUserId(sessionId)) {
+      writeJson(response, 401, { error: 'inactive_session' }); return;
+    }
+    const parsed = confirmationRequestSchema.safeParse(body.confirmation);
+    if (!parsed.success) { writeJson(response, 400, { ok: false, error: '确认请求格式无效' }); return; }
+    const confirmation = createChatConfirmation(parsed.data);
+    try { await sessionStore.setConfirmation(sessionId, confirmation); }
+    catch { writeJson(response, 500, { ok: false, error: '确认卡片保存失败，请重试' }); return; }
+    writeJson(response, 200, { ok: true, confirmation, instruction: '确认卡片已准备好。结束本轮并等待用户点击确认；本轮不要执行写入。' });
     return;
   }
 

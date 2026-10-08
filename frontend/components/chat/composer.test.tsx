@@ -121,3 +121,27 @@ test("keeps model names on one line in the selection dropdown", () => {
     /<span className="min-w-0 flex-1 truncate whitespace-nowrap text-sm" title=\{model\.name\}>\{model\.name\}<\/span>/,
   )
 })
+
+test('renders the operation plan and both confirmation buttons above the input', async () => {
+  const { Composer } = await import('./composer')
+  const html = renderToStaticMarkup(<Composer
+    onSend={() => undefined} onStop={() => undefined} isStreaming={false}
+    selectedProvider="openrouter" selectedModel="deepseek/deepseek-v4.1-flash" onModelChange={() => undefined}
+    confirmation={{ id: '983c3194-2fab-45a9-a643-ea1a99a2440f', title: '创建测试目录', description: '在指定知识库创建目录并上传附件', actions: ['创建目录', '上传附件'], expiresAt: '2099-01-01T00:00:00.000Z' }}
+    onConfirmationRespond={async () => true}
+  />)
+  assert.match(html, /等待你的确认/)
+  assert.match(html, /创建测试目录/)
+  assert.match(html, /确认执行/)
+  assert.match(html, />取消<\/button>/)
+  assert.ok(html.indexOf('data-slot="chat-confirmation"') < html.indexOf('<textarea'))
+})
+
+test('expired or streaming confirmations cannot be clicked', async () => {
+  const { ConfirmationCard } = await import('./confirmation-card')
+  const confirmation = { id: '983c3194-2fab-45a9-a643-ea1a99a2440f', title: '创建目录', description: '说明', actions: ['创建目录'], expiresAt: '2099-01-01T00:00:00.000Z' }
+  for (const props of [{ confirmation, disabled: true }, { confirmation: { ...confirmation, expiresAt: '2000-01-01T00:00:00.000Z' } }]) {
+    const html = renderToStaticMarkup(<ConfirmationCard {...props} onRespond={async () => true} />)
+    assert.equal((html.match(/<button[^>]*disabled=""/g) ?? []).length, 2)
+  }
+})

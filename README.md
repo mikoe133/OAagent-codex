@@ -10,7 +10,9 @@ agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`
 
 ### 默认对话模型与实测
 
-默认对话使用 OpenRouter 的 `deepseek/deepseek-v4-flash`,前端、后端和部署环境默认值保持一致。显式环境配置和浏览器已保存的手动选择仍优先;切换提供商但未指定模型时,使用该提供商自身的默认模型。轻量语义路由的双模型竞速不变。
+默认对话使用 OpenRouter 的 `deepseek/deepseek-v4.1-flash`,前端、后端和部署环境默认值保持一致。显式环境配置和浏览器已保存的有效手动选择仍优先;浏览器保存的旧 V4 Flash 对话选择会回退到 V4.1 Flash。切换提供商但未指定模型时,使用该提供商自身的默认模型。轻量语义路由的双模型竞速不变。
+
+当前各厂商的型号定位与接入验证见 [2026-10-08 对话模型核对](docs/chat-model-audit-2026-10-08.md)。
 
 2026-09-29 使用现有系统提示词、Codex SDK、中继与数据库查询服务进行了两轮三场景实测。DeepSeek 的完整回答中位耗时 51.5 秒,GLM 5.3 为 64.0 秒;OA 查询/统计答案分别为 4/4、3/4 正确。GLM 首段可见文本更快,技术问答引用与简洁性更好;DeepSeek 的 RWKV 回答仍出现错误推断和缺失链接,不是全面优胜。选择依据、逐项结果与限制见 [测试报告](artifacts/chat-model-benchmark/2026-09-29T06-31-47-427Z/report.md)。
 
@@ -18,7 +20,9 @@ agent 优先从 `OA_OPENAPI_URL`(默认 `https://api-oa.rwkvos.com/openapi_json`
 
 ### RWKV 固定资料读取与运行依赖
 
-`agent-runtime` 镜像必装 `curl`、`ca-certificates`、`python3`、`jq`、`ripgrep` 和 `wget`,构建时检查命令与系统 CA 文件。工具在切换到 `USER node` 前安装,不依赖宿主机工具,也不需要模型在对话中临时安装。
+`agent-runtime` 镜像必装 `curl`、`ca-certificates`、`python3`、`jq`、`ripgrep` 和 `wget`，同时安装 Debian `python3-yaml`（PyYAML）和 Node 生产依赖 `js-yaml`，兼容旧会话中的 YAML 读取命令。工具在切换到 `USER node` 前安装；切换后运行 `agent/scripts/checkRuntimeTools.mjs` 检查命令、系统 CA 和三种 YAML 解析方式，任一失败即终止镜像构建。检查不放在每轮对话或健康检查中，不增加正常回复等待时间。
+
+Agent 读取选定接口定义统一用 `node scripts/readOpenApiOperation.mjs --file <当前契约路径> --operationId <接口ID>`：使用现有 `yaml`，一次返回该接口及展开的引用、继承的必填参数，不再先试 Python、再试另一种 Node 库、再拆开读取定义。模型仍自主选择接口和业务步骤。
 
 `agent/metadata/rwkv-knowledge-sources.json` 是提示词和读取脚本共用的来源配置。包含引用 URL、实际下载 URL、格式和主题;GitHub 文件直接获取 raw 内容,HTML 文章优先提取 article/main 正文并移除导航、脚本及页脚。来源配置变更需重新构建镜像。
 
@@ -43,7 +47,7 @@ python3 agent/scripts/readRwkvKnowledge.py rwkv-overview --refresh
 ```bash
 docker compose build agent
 docker compose up -d --no-deps agent
-docker compose exec agent sh -ec 'curl --version; python3 --version; jq --version; rg --version; wget --version; test -s /etc/ssl/certs/ca-certificates.crt'
+docker compose exec agent node agent/scripts/checkRuntimeTools.mjs
 docker compose exec agent python3 agent/scripts/readRwkvKnowledge.py rwkv-overview --refresh --max-chars 200
 ```
 

@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { restoreStoredTrace } from '../../../components/chat/stored-trace'
+import { completedRequestEvent } from '../../../components/chat/chat-run-recovery'
+import { createChatConfirmation } from '../../../../agent/src/chat/confirmation'
 import { createAgentHttpServer } from '../../../../agent/src/api/httpServer'
 import { SessionStore } from '../../../../agent/src/infrastructure/persistence/sessionStore'
 import { ChatLatencyMetricsRecorder } from '../../../../agent/src/infrastructure/observability/chatLatency'
@@ -28,6 +30,8 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
   const saved = new Map(names.map(name => [name, process.env[name]]))
   const records = new Map<string, any>()
   let count = 0, modelCalls = 0
+  let clicked: unknown
+  const confirmation = createChatConfirmation({ title: '创建目录并上传文件', description: '在指定知识库创建测试目录并上传附件', actions: ['创建目录', '上传文件'] })
   const oa = createServer(async (req, res) => {
     const url = new URL(req.url!, 'http://oa')
     res.setHeader('Content-Type', 'application/json')
@@ -47,10 +51,13 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
   const config = { sessionStorePath: storePath, oaApiBaseUrl: oaBase, oaAuthAlias: 'default', oaUserTokenHeader: 'Authorization', oaUserTokenPrefix: 'Bearer', modelProvider: 'nexttoken', model: 'gpt-5.6-terra' } as AppConfig
   const service = { async streamMessage(input: any, emit: any) {
     modelCalls++
+    clicked = input.confirmationResponse
     await emit({ type: 'tool.started', sessionId: input.sessionId, itemId: 'lookup', toolType: 'mcp_tool_call', name: 'oa.lookup', input: { query: 'reports' } })
     await emit({ type: 'tool.completed', sessionId: input.sessionId, itemId: 'lookup', toolType: 'mcp_tool_call', name: 'oa.lookup', result: { count: 1 }, durationMs: 15 })
     await emit({ type: 'message.delta', sessionId: input.sessionId, itemId: 'answer', delta: 'AI_OK', text: 'AI_OK' })
-    await emit({ type: 'run.completed', sessionId: input.sessionId, result: { sessionId: input.sessionId, threadId: 'internal', provider: input.provider, model: input.model, finalResponse: 'AI_OK', knowledgeSources: [] } })
+    const card = input.message === '准备确认' ? confirmation : undefined
+    if (card) await emit({ type: 'confirmation.required', sessionId: input.sessionId, confirmation: card })
+    await emit({ type: 'run.completed', sessionId: input.sessionId, result: { sessionId: input.sessionId, threadId: 'internal', provider: input.provider, model: input.model, finalResponse: 'AI_OK', knowledgeSources: [], ...(card ? { confirmation: card } : {}) } })
   } } as AgentService
   const agent = createAgentHttpServer(config, service, new SessionStore(storePath), undefined, new ChatLatencyMetricsRecorder({ logger: () => {} }))
   const agentBase = await listen(agent)
@@ -102,6 +109,28 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
     assert.equal((await ordinary.json()).result.finalResponse, 'AI_OK')
     assert.equal(modelCalls, 3)
     assert.equal(records.get(recordId).record.messages.length, 6)
+
+    const proposal = await chat(request('/api/chat', 'POST', { recordId, requestId: 'proposal', messages: [{ role: 'user', content: '准备确认' }] }))
+    const proposalStream = await proposal.text()
+    assert.match(proposalStream, /confirmation.required/)
+    const state = await (await requests.GET(request(`/api/chat/requests?recordId=${recordId}&requestId=proposal`))).json()
+    assert.deepEqual(state.result.confirmation, confirmation)
+    const recovered = completedRequestEvent(state, recordId, 'proposal')?.result as Record<string, unknown> | undefined
+    assert.deepEqual(recovered?.confirmation, confirmation)
+    const proposedHistory = await (await sessions.GET(request(`/api/chat/sessions?recordId=${recordId}`))).json()
+    assert.deepEqual(proposedHistory.session.messages.at(-1).confirmation, confirmation)
+    const confirmationResponse = { id: confirmation.id, decision: 'approve' }
+    const clickPayload = { recordId, requestId: 'approved', messages: [{ role: 'user', content: '确认执行以上操作' }], confirmationResponse }
+    const approval = await chat(request('/api/chat', 'POST', clickPayload))
+    await approval.text()
+    assert.deepEqual(clicked, confirmationResponse)
+    assert.deepEqual(records.get(recordId).record.messages.at(-2).confirmationResponse, confirmationResponse)
+    const approvalReplay = await chat(request('/api/chat', 'POST', clickPayload))
+    await approvalReplay.text()
+    assert.equal(modelCalls, 5, 'replaying a click must not call the model again')
+    const conflictingClick = await chat(request('/api/chat', 'POST', { ...clickPayload, confirmationResponse: { ...confirmationResponse, decision: 'decline' } }))
+    assert.equal(conflictingClick.status, 409)
+    assert.equal(modelCalls, 5)
 
   } finally {
     process.chdir(oldCwd)

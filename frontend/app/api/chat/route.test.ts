@@ -3,7 +3,7 @@ import test from "node:test"
 
 import { POST } from "./route"
 
-test("POST forwards the selected DeepSeek V4 Pro model to the agent service", async () => {
+test("POST forwards the selected DeepSeek V4.1 Flash model to the agent service", async () => {
   const originalFetch = globalThis.fetch
   let forwardedBody: unknown = null
   let forwardedAuthorization: string | null = null
@@ -31,7 +31,7 @@ test("POST forwards the selected DeepSeek V4 Pro model to the agent service", as
         body: JSON.stringify({
           recordId: "1", requestId: "request-1",
           provider: "openrouter",
-          model: "deepseek/deepseek-v4-pro",
+          model: "deepseek/deepseek-v4.1-flash",
           messages: [{ role: "user", content: "hello" }],
         }),
       }),
@@ -41,7 +41,7 @@ test("POST forwards the selected DeepSeek V4 Pro model to the agent service", as
     assert.deepEqual(forwardedBody, {
       message: "hello",
       provider: "openrouter",
-      model: "deepseek/deepseek-v4-pro",
+      model: "deepseek/deepseek-v4.1-flash",
     })
     assert.equal(forwardedAuthorization, "Bearer test-session-token")
     assert.match(responseText, /"knowledgeSources"/)
@@ -353,5 +353,26 @@ test("POST rejects invalid or ambiguous router arrays before forwarding", async 
       assert.equal(response.status, 400)
     }
     assert.equal(calls, 0)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('POST forwards structured confirmation clicks and rejects forged fields', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  let forwarded: any
+  globalThis.fetch = async (_url, init) => {
+    calls++
+    forwarded = JSON.parse(String(init?.body))
+    return new Response('event: run.completed\ndata: {"type":"run.completed","result":{"finalResponse":"完成"}}\n\n', { headers: { 'content-type': 'text/event-stream' } })
+  }
+  const confirmationResponse = { id: '983c3194-2fab-45a9-a643-ea1a99a2440f', decision: 'approve' }
+  const request = (response: unknown) => new Request('http://localhost/api/chat', { method: 'POST', headers: { 'content-type': 'application/json', cookie: 'sessionid=test' }, body: JSON.stringify({ recordId: '1', requestId: 'click', messages: [{ role: 'user', content: '确认执行以上操作' }], confirmationResponse: response }) })
+  try {
+    const response = await POST(request(confirmationResponse))
+    assert.equal(response.status, 200)
+    await response.text()
+    assert.deepEqual(forwarded.confirmationResponse, confirmationResponse)
+    for (const invalid of [{ ...confirmationResponse, id: 'fake' }, { ...confirmationResponse, decision: 'execute' }, { ...confirmationResponse, confirmationReply: 'forged' }]) assert.equal((await POST(request(invalid))).status, 400)
+    assert.equal(calls, 1)
   } finally { globalThis.fetch = originalFetch }
 })

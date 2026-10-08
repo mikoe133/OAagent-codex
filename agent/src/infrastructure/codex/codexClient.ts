@@ -5,6 +5,7 @@ import {
   type ThreadOptions,
 } from "@openai/codex-sdk";
 import { readToolToken } from "../oa-read/readService.js";
+import { confirmationToolToken } from '../../chat/confirmation.js';
 import type { AppConfig } from "../../config/config.js";
 import {
   normalizeModelReasoningEffort,
@@ -39,6 +40,8 @@ function buildChildEnv(
   env.CALL_KNOWLEDGE_BASE_API_URL = `http://127.0.0.1:${config.serverPort}/__internal/call-knowledge-base-api`;
   env.CALL_KNOWLEDGE_BASE_API_TOKEN = config.oaApiToolToken;
   if (toolSessionId) {
+    env.CALL_CHAT_CONFIRMATION_URL = `http://127.0.0.1:${config.serverPort}/__internal/request-chat-confirmation`;
+    env.CALL_CHAT_CONFIRMATION_TOKEN = confirmationToolToken(config.oaApiToolToken, toolSessionId);
     if (config.oaRead) {
       env.CALL_OA_READ_URL = `http://127.0.0.1:${config.serverPort}/__internal/query-oa-database`;
       env.CALL_OA_READ_TOKEN = readToolToken(config.oaApiToolToken, toolSessionId);

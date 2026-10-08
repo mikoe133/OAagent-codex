@@ -14,7 +14,7 @@ import { buildRuntimeContext } from '../src/application/runCodexAgent.js';
 import { formatSemanticRouteTraceMessage } from '../src/application/agentService.js';
 
 const config = {
-  projectRoot: process.cwd(), openapiPath: '/test/openapi.json', modelProvider: 'openrouter', model: 'deepseek/deepseek-v4-flash',
+  projectRoot: process.cwd(), openapiPath: '/test/openapi.json', modelProvider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash',
   modelProviders: { openrouter: { name: 'OpenRouter', apiKey: 'test', baseUrl: 'https://router.test/v1', envKey: 'OPENROUTER_API_KEY' } },
 } as AppConfig;
 const index = mergeOpenApiIndexes([

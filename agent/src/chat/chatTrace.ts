@@ -10,7 +10,7 @@ export type ChatTraceEvent = Record<string, unknown> & {
 // Only persist the public, already-redacted event payload. Never persist internal
 // session/thread identifiers or the complete run result (which contains both).
 const fields = ['itemId', 'toolType', 'name', 'input', 'status', 'outputDelta',
-  'result', 'error', 'durationMs', 'message', 'detail', 'delta', 'text', 'exitCode'] as const;
+  'result', 'error', 'durationMs', 'message', 'detail', 'delta', 'text', 'exitCode', 'confirmation'] as const;
 
 export class ChatTraceRecorder {
   private sequence = 0;

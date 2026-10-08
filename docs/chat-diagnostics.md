@@ -39,6 +39,7 @@ docker compose -p oa-agent-prod logs --since 30m web | rg '这里替换为 trace
 | `login_redirect` | 浏览器收到 401 后执行登录页跳转 |
 | `prepare_failed` | 消息发送前的会话准备失败，可用同一编号查看创建/读取请求 |
 | `stream_failed` / `stream_incomplete` | 消息请求已开始，但流返回失败或未收到结束事件 |
+| `request_recovered` | 浏览器从原请求已持久化的 completed 结果恢复回答、trace 和确认卡片 |
 | `aborted` | 请求取消，与网络故障区分 |
 
-`response_received` 表示收到 HTTP 响应，`stream_completed` 才表示消息流报告完成。日志本身不改变请求、错误提示或跳转逻辑。
+`response_received` 表示收到 HTTP 响应，`stream_completed` 才表示消息流报告完成。浏览器流异常且未主动取消时，会回查原 requestId 一次（最多等待 8 秒）；只有同一请求的 completed 结果可以恢复成功状态，查询不会重新执行业务操作。仍在执行、失败或无法查询时保留原错误。日志本身不改变请求、错误提示或跳转逻辑。

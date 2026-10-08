@@ -1,6 +1,8 @@
 "use client"
 
 import { validAttachments, validAttachmentOptions, type AttachmentSendOptions, type ChatAttachment } from "@/lib/chat-attachments"
+import { pendingChatConfirmation, validConfirmation, validConfirmationResponse, type ChatConfirmation, type ConfirmationResponse } from '@/lib/chat-confirmation'
+import { completedRequestEvent } from './chat-run-recovery'
 import { fetchChatWithDiagnostics, redirectToChatLogin, logChatDiagnostic, traceId, TRACE_HEADER } from "@/lib/chat-diagnostics"
 
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react"
@@ -53,6 +55,8 @@ export type MessageStatus = "streaming" | "completed" | "stopped" | "failed"
 export type MessageFeedback = "like" | "dislike" | null
 
 export interface Message {
+  confirmation?: ChatConfirmation
+  confirmationResponse?: ConfirmationResponse
   id: string
   role: "user" | "assistant"
   content: string
@@ -95,6 +99,8 @@ type ChatSessionRecord = {
 }
 
 type StoredMessage = {
+  confirmation?: unknown
+  confirmationResponse?: unknown
   id?: unknown
   role?: unknown
   content?: unknown
@@ -357,6 +363,8 @@ function normalizeStoredMessage(value: unknown): Message | null {
     ...(provider ? { provider } : {}),
     attachments: validAttachments(message.attachments),
     attachmentOptions: validAttachmentOptions(message.attachmentOptions),
+    confirmation: validConfirmation(message.confirmation),
+    confirmationResponse: validConfirmationResponse(message.confirmationResponse),
     ...(typeof message.imageData === "string" ? { imageData: message.imageData } : {}),
     ...(Array.isArray(message.toolSteps) ? { toolSteps: normalizeStoredToolSteps(message.toolSteps) } : {}),
     ...(Array.isArray(message.traceMessages)
@@ -837,7 +845,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
   // Send a message to the AI
   const uploadedFilesRef = useRef(new WeakMap<File, ChatAttachment>())
   const sendMessage = useCallback(
-    async (content: string, filesOrAttachments?: File[] | ChatAttachment[], retryRequestId?: string, onAdmitted?: () => void, options?: AttachmentSendOptions) => {
+    async (content: string, filesOrAttachments?: File[] | ChatAttachment[], retryRequestId?: string, onAdmitted?: () => void, options?: AttachmentSendOptions, confirmationResponse?: ConfirmationResponse) => {
       if (!content.trim() && !filesOrAttachments?.length) return false
 
       if (preparingSessionRef.current) return false
@@ -905,6 +913,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         createdAt: new Date(),
         attachments,
         attachmentOptions: options,
+        ...(confirmationResponse ? { confirmationResponse } : {}),
       }
 
       const assistantMessage: Message = {
@@ -943,6 +952,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       let currentKnowledgeSources: KnowledgeSource[] = []
       let responseModel: string | undefined
       let responseProvider: string | undefined
+      let currentConfirmation: ChatConfirmation | undefined
+      let completedResult: Record<string, unknown> | null = null
 
       const isCurrentSessionRun = () =>
         activeSessionRunsRef.current.get(currentAgentSessionId)?.requestId === requestId
@@ -972,6 +983,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           body: JSON.stringify({
             recordId: currentAgentSessionId,
             requestId,
+            ...(confirmationResponse ? { confirmationResponse } : {}),
             messages: [...conversationMessages, userMessage].map((m) => ({
               role: m.role,
               content: m.content,
@@ -1154,6 +1166,11 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         let completedRunReceived = false
 
         const handleChatStreamEvent = (event: ChatStreamEvent) => {
+          if (event.type === 'confirmation.required') {
+            currentConfirmation = validConfirmation(event.confirmation)
+            publishSessionMessages(currentMessages.map(message => message.id === assistantMessage.id ? { ...message, confirmation: currentConfirmation } : message))
+            return
+          }
           if (!developerMode && routingTraceGate.push(event)) {
             return
           }
@@ -1178,6 +1195,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             routingTraceGate.dismiss()
             completedRunReceived = true
             const result = toRecord(event.result)
+            completedResult = result
+            currentConfirmation = validConfirmation(result?.confirmation)
             responseModel = stringValue(result?.model) || undefined
             responseProvider = stringValue(result?.provider) || undefined
             const storedTrace = restoreStoredTrace(result?.traceEvents)
@@ -1258,6 +1277,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
               model: responseModel,
               provider: responseProvider,
               durationMs,
+              ...(currentConfirmation ? { confirmation: currentConfirmation } : {}),
               ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
               ...(currentKnowledgeSources.length > 0 ? { knowledgeSources: currentKnowledgeSources } : {}),
             },
@@ -1272,6 +1292,33 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       } catch (e) {
         logChatDiagnostic({ scope: "browser", route: "/api/chat", traceId: messageTraceId, event: controller.signal.aborted ? "aborted" : "stream_failed", durationMs: performance.now() - responseStartedAt })
         cancelPendingTypewriter()
+
+        // A connection may break after the server has committed its answer.
+        // Query this original request once; never repeat its business operation.
+        if (!controller.signal.aborted) {
+          let recovered: Record<string, unknown> | null = completedResult
+          if (!recovered) {
+            try {
+              const status = await fetchChatWithDiagnostics(`/api/chat/requests?recordId=${encodeURIComponent(currentAgentSessionId)}&requestId=${encodeURIComponent(requestId)}`, {
+                credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+              })
+              if (status.ok) recovered = toRecord(completedRequestEvent(await status.json(), currentAgentSessionId, requestId)?.result)
+            } catch { /* Preserve the original error if status is unavailable. */ }
+          }
+          if (recovered && !controller.signal.aborted) {
+            const trace = restoreStoredTrace(recovered.traceEvents)
+            publishSessionMessages([...conversationMessages, userMessage, {
+              ...assistantMessage, content: typeof recovered.finalResponse === 'string' ? recovered.finalResponse : accumulatedContent,
+              status: 'completed', durationMs: calculateResponseDurationMs(responseStartedAt, performance.now()),
+              model: stringValue(recovered.model) ?? undefined, provider: stringValue(recovered.provider) ?? undefined,
+              confirmation: validConfirmation(recovered.confirmation), knowledgeSources: normalizeKnowledgeSources(recovered.knowledgeSources),
+              ...(trace ?? { toolSteps: finalizeToolSteps(currentToolSteps, 'completed'), traceMessages: currentTraceMessages }),
+            }])
+            logChatDiagnostic({ scope: 'browser', route: '/api/chat', traceId: messageTraceId, event: 'request_recovered' })
+            setSessionListRefreshKey(value => value + 1)
+            return
+          }
+        }
 
         const wasStopped = e instanceof Error && e.name === "AbortError"
         const errorMessage = e instanceof Error ? e.message : "An error occurred"
@@ -1345,7 +1392,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       }
       setMessages(retryMessages)
       setError(null)
-      setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.attachments, originalRequestId, undefined, lastUserMessage.attachmentOptions), 100)
+      setTimeout(() => sendMessage(lastUserMessage.content, lastUserMessage.attachments, originalRequestId, undefined, lastUserMessage.attachmentOptions, lastUserMessage.confirmationResponse), 100)
     }
   }, [agentSessionId, messages, sendMessage])
 
@@ -1677,6 +1724,8 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
       {activeWorkspaceView === "conversation" ? (
         <Composer
+          confirmation={pendingChatConfirmation(messages)}
+          onConfirmationRespond={response => sendMessage(response.decision === 'approve' ? '确认执行以上操作' : '取消以上操作', undefined, undefined, undefined, undefined, response)}
           layoutRef={composerLayoutRef}
           onSend={(content, files, onAdmitted) => sendMessage(content, files, undefined, onAdmitted)}
           onStop={stopStreaming}

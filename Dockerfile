@@ -29,10 +29,8 @@ ENV NODE_ENV=production \
     PORT=3000 \
     AGENT_SESSION_STORE=/app/.context/agent-sessions.json
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 curl ca-certificates jq ripgrep wget \
+    && apt-get install -y --no-install-recommends python3 python3-yaml curl ca-certificates jq ripgrep wget \
     && update-ca-certificates \
-    && curl --version && python3 --version && jq --version && rg --version && wget --version \
-    && test -s /etc/ssl/certs/ca-certificates.crt \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /app/.context /home/node/.codex \
     && chown -R node:node /app /home/node/.codex
@@ -46,6 +44,7 @@ COPY --chown=node:node agent/metadata ./agent/metadata
 COPY --chown=node:node agent/scripts ./agent/scripts
 COPY --chown=node:node scripts/sql ./scripts/sql
 USER node
+RUN node agent/scripts/checkRuntimeTools.mjs
 EXPOSE 3000
 CMD ["node", "agent/dist/runtime/server.js"]
 

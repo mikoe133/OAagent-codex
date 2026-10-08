@@ -251,12 +251,18 @@ test("uses Docker as the Codex command isolation boundary", async () => {
   assert.match(compose, /^    cap_drop:\n      - ALL$/m)
 })
 
-test("provides Python for Codex commands in the agent runtime image", async () => {
+test("installs the required command and YAML tools and gates the final nonroot image on smoke checks", async () => {
   const dockerfile = await readFile(path.join(repoRoot, "Dockerfile"), "utf8")
   const agentRuntime = dockerfile.slice(
     dockerfile.indexOf("FROM ${NODE_IMAGE} AS agent-runtime"),
     dockerfile.indexOf("FROM manifests AS web-build"),
   )
 
-  assert.match(agentRuntime, /apt-get install[\s\S]*\bpython3\b/)
+  for (const name of ['python3', 'python3-yaml', 'curl', 'ca-certificates', 'jq', 'ripgrep', 'wget']) {
+    assert.ok(agentRuntime.match(/apt-get install[^\n]+/)?.[0].split(/\s+/).includes(name), `${name} must be installed in the runtime`)
+  }
+  assert.match(agentRuntime, /USER node\nRUN node agent\/scripts\/checkRuntimeTools\.mjs/)
+  const manifest = JSON.parse(await readFile(path.join(repoRoot, 'agent/package.json'), 'utf8'))
+  assert.ok(manifest.dependencies['yaml'])
+  assert.ok(manifest.dependencies['js-yaml'], 'compatibility parser must be a production dependency')
 })

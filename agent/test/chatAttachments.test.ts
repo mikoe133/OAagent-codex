@@ -16,8 +16,8 @@ import { attachmentExecutionModel } from '../src/attachments/attachmentModel.js'
 
 test('attachment analysis routes to Kimi or retains Kimi/Qwen, without changing upload or ordinary chat', () => {
   const selections = [
-    ['openrouter', 'z-ai/glm-5.3'], ['openrouter', 'deepseek/deepseek-v4-pro'],
-    ['openrouter', 'deepseek/deepseek-v4-flash'], ['nexttoken', 'gpt-5.6-terra'],
+    ['openrouter', 'z-ai/glm-5.3'],
+    ['openrouter', 'deepseek/deepseek-v4.1-flash'], ['nexttoken', 'gpt-5.6-terra'],
     ['openrouter', 'moonshotai/kimi-k3'], ['openrouter', 'qwen/qwen3.8-max-0902'],
   ] as const;
   for (const [provider, model] of selections) {
@@ -37,7 +37,7 @@ test('attachment analysis routes to Kimi or retains Kimi/Qwen, without changing 
 const decision = (intent: AttachmentDecision['intent'], requiresVision = false): AttachmentDecision => ({ intent, requiresVision, visionModel: 'moonshotai/kimi-k3', reason: '路由模型判断' });
 
 test('attachment route validates structured model output and rejects impossible vision decisions', () => {
-  const input = { files: [{ id: '1', name: 'a.txt', mime: 'text/plain', size: 3 }], source: 'current' as const, mode: 'auto' as const, selectedModel: { provider: 'openrouter', model: 'deepseek/deepseek-v4-flash', supportsImages: false } };
+  const input = { files: [{ id: '1', name: 'a.txt', mime: 'text/plain', size: 3 }], source: 'current' as const, mode: 'auto' as const, selectedModel: { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash', supportsImages: false } };
   assert.deepEqual(decodeAttachmentDecision(decision('analyze'), input), decision('analyze'));
   for (const value of [null, {}, { ...decision('analyze'), visionModel: 'untrusted/model' }, decision('analyze', true), decision('upload', true)]) {
     assert.throws(() => decodeAttachmentDecision(value, input), /invalid attachment/);
@@ -74,7 +74,7 @@ test('vision inputs only reach verified models; raw uploads skip parsing and cla
       const input = await prepareAttachmentInput('task', 'vision', 'openrouter', model);
       assert.ok(Array.isArray(input)); assert.deepEqual(input[1], { type: 'local_image', path: file.path });
     }
-    for (const model of ['z-ai/glm-5.3', 'deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-flash']) {
+    for (const model of ['z-ai/glm-5.3', 'deepseek/deepseek-v4.1-flash']) {
       const input = await prepareAttachmentInput('task', 'vision', 'openrouter', model);
       assert.equal(typeof input, 'string'); assert.match(String(input), /当前模型不支持图片输入/); assert.doesNotMatch(String(input), /private\/image/);
     }

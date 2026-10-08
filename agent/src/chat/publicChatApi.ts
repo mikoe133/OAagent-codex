@@ -13,6 +13,7 @@ import { ChatError, ChatScheduler } from './chatScheduler.js';
 import { CopilotClient, type CopilotRecord } from './copilotClient.js';
 import { RequestStore, fingerprint, type RequestRecord } from './requestStore.js';
 import { ChatTraceRecorder } from './chatTrace.js';
+import { confirmationResponseSchema } from './confirmation.js';
 
 type Principal = { principalId: string; oaUserId: string | null };
 type Active = { cancel: () => void; done: Promise<void>; listeners: Set<(event: Record<string, unknown>) => void> };
@@ -177,6 +178,7 @@ export class PublicChatApi {
         files = await Promise.all(ids.map(id => this.attachments.get(owner, recordId, id)));
         const now = new Date().toISOString();
         const value: RequestRecord = { recordId, requestId: messageKey, fingerprint: digest, message: input.message,
+          ...(input.confirmationResponse ? { confirmationResponse: input.confirmationResponse } : {}),
           ...(files.length ? { attachments: files.map(publicAttachment), attachmentOptions: { mode, target, modelOverride: { provider: String(input.provider), model: String(input.model) } } } : {}), state: 'queued', createdAt: now, updatedAt: now, historySync: 'pending' };
         await this.records.create(key, value);
         const trace = new ChatTraceRecorder(this.records, key);
@@ -213,7 +215,8 @@ export class PublicChatApi {
                 await trace.record(event);
                 if (event.type === 'run.completed') {
                   value.result = { recordId, requestId: messageKey, finalResponse: event.result.finalResponse,
-                    provider: event.result.provider, model: event.result.model, knowledgeSources: event.result.knowledgeSources };
+                    provider: event.result.provider, model: event.result.model, knowledgeSources: event.result.knowledgeSources,
+                    ...(event.result.confirmation ? { confirmation: event.result.confirmation } : {}) };
                   value.state = 'completed'; value.updatedAt = new Date().toISOString();
                   await this.records.save(key, value); // Commit before attempting OA history sync.
                 } else {
@@ -281,12 +284,13 @@ export class PublicChatApi {
     const latest = await client.get(value.recordId);
     const messages = Array.isArray(latest.record.messages) ? latest.record.messages : [];
     const additions = [
-      { id: `${value.requestId}:user`, requestId: value.requestId, role: 'user', content: value.message, ...(value.attachments ? { attachments: value.attachments, attachmentOptions: value.attachmentOptions } : {}), createdAt: value.createdAt },
+      { id: `${value.requestId}:user`, requestId: value.requestId, role: 'user', content: value.message, ...(value.confirmationResponse ? { confirmationResponse: value.confirmationResponse } : {}), ...(value.attachments ? { attachments: value.attachments, attachmentOptions: value.attachmentOptions } : {}), createdAt: value.createdAt },
       { id: `${value.requestId}:assistant`, requestId: value.requestId, role: 'assistant', content: value.result?.finalResponse ?? '',
         createdAt: value.updatedAt, status: value.state === 'cancelled' ? 'stopped' : value.state,
         durationMs: Math.max(0, Date.parse(value.updatedAt) - Date.parse(value.createdAt)),
         ...(value.errorCode ? { error: value.errorCode } : {}),
         ...(value.result ? { model: value.result.model, provider: value.result.provider } : {}),
+        ...(value.result?.confirmation ? { confirmation: value.result.confirmation } : {}),
         knowledgeSources: value.result?.knowledgeSources ?? [], traceEvents },
     ];
     const combined = [...messages];
@@ -350,10 +354,13 @@ function selection(config: AppConfig, body: Record<string, any>): Omit<SendMessa
   if (typeof body.message !== 'string' || !body.message.trim()) throw new ChatError(400, 'invalid_message', 'message 必须是非空字符串');
   for (const key of ['provider','model','routerModel']) if (body[key] !== undefined && typeof body[key] !== 'string') throw new ChatError(400, 'invalid_model', '模型参数必须是字符串');
   if (body.developerMode !== undefined && typeof body.developerMode !== 'boolean') throw new ChatError(400, 'invalid_developer_mode', 'developerMode 必须为布尔值');
+  const confirmationResponse = body.confirmationResponse === undefined ? undefined : confirmationResponseSchema.safeParse(body.confirmationResponse);
+  if (confirmationResponse && !confirmationResponse.success) throw new ChatError(400, 'invalid_confirmation_response', '确认结果格式无效');
   try {
     const provider = resolveRequestedProvider(body.provider, config.modelProvider);
     const routerModels = resolveRequestedRouterModels(body.routerModels, body.routerModel);
     return { message: body.message.trim(), provider, model: resolveRequestedModel(provider, body.model, provider === config.modelProvider ? config.model : getDefaultModel(provider)),
+      ...(confirmationResponse?.success ? { confirmationResponse: confirmationResponse.data } : {}),
       developerMode: body.developerMode === true,
       routerModel: body.routerModel !== undefined ? resolveRequestedRouterModel(body.routerModel) : null,
       ...(body.routerModel === undefined ? { routerModels } : {}) };

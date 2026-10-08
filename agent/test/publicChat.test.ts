@@ -177,7 +177,7 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
       body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6ksAAAAASUVORK5CYII=', 'base64'),
     });
     const image = await imageUpload.json();
-    const analyzeImage = { message: '分析图片', attachmentIds: [image.id], provider: 'openrouter', model: 'deepseek/deepseek-v4-flash' };
+    const analyzeImage = { message: '分析图片', attachmentIds: [image.id], provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' };
     const analysisStream = await request('/1/messages/stream', 'POST', analyzeImage, 'image-analysis');
     assert.equal(analysisStream.status, 200);
     const events = (await analysisStream.text()).split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
@@ -202,7 +202,7 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
       assert.equal(unchanged.result.model, analyzeImage.model);
       assert.equal(unchanged.traceEvents.some((event: any) => event.toolType === 'model_switch'), false);
     }
-    const uploadOnly = { message: '手动上传', attachmentIds: [image.id], attachmentMode: 'upload', attachmentTarget: '研发页面', provider: 'openrouter', model: 'deepseek/deepseek-v4-flash' };
+    const uploadOnly = { message: '手动上传', attachmentIds: [image.id], attachmentMode: 'upload', attachmentTarget: '研发页面', provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' };
     assert.equal((await request('/1/messages', 'POST', uploadOnly, 'manual-upload')).status, 200);
     const manualHistory = records.get('1').record.messages.find((message: any) => message.id === 'manual-upload:user');
     assert.equal(manualHistory.content, '手动上传');

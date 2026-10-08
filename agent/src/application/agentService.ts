@@ -1,4 +1,5 @@
 import { toolBusinessError } from './toolBusinessError.js';
+import { confirmationToolToken, type ChatConfirmation, type ConfirmationResponse } from '../chat/confirmation.js';
 import { beginReportTurn, checkReportAnswer, finishReportTurn, hasReportForTurn } from '../infrastructure/oa-read/reportCoverage.js';
 import { completedTurnEvents, runCompletedTurn } from '../infrastructure/codex/completedTurn.js';
 import { applyAttachmentRoute } from '../attachments/attachmentRouting.js';
@@ -67,6 +68,7 @@ export type SendMessageInput = {
   oaApiToken?: string | null;
   oaUserId?: string | null;
   latency?: ChatLatencyTrace;
+  confirmationResponse?: ConfirmationResponse;
 };
 
 export type SendMessageResult = {
@@ -78,6 +80,7 @@ export type SendMessageResult = {
   executedCommands: string[];
   knowledgeSources: KnowledgeBaseSource[];
   summary: string | null;
+  confirmation?: ChatConfirmation;
 };
 
 export type AgentProgressEvent = {
@@ -108,6 +111,7 @@ type LatencyStageProgress = (
 ) => Promise<void>;
 
 export type AgentStreamEvent =
+  | { type: 'confirmation.required'; sessionId: string; confirmation: ChatConfirmation }
   | {
       type: "run.queued";
       sessionId: string;
@@ -277,7 +281,7 @@ export class AgentService {
       this.config,
       input.provider,
       input.model,
-      input.message,
+      routingTask(input, session),
       session.summary,
       undefined,
       input.latency,
@@ -291,6 +295,7 @@ export class AgentService {
     const runConfig = resolvedRun.config;
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
+      confirmationDecision: session.confirmationDecision,
       ...await this.getReadContext(input.sessionId, resolvedRun.selectedApiCatalogs),
       openApiCandidates: resolvedRun.openApiCandidates,
       selectedApiCatalogs: resolvedRun.selectedApiCatalogs,
@@ -365,6 +370,7 @@ export class AgentService {
       ),
       knowledgeSources,
       summary,
+      confirmation: (await this.sessions.getOrCreate(input.sessionId)).pendingConfirmation,
     };
   }
 
@@ -396,7 +402,7 @@ export class AgentService {
           this.config,
           input.provider,
           input.model,
-          input.message,
+          routingTask(input, session),
           session.summary,
           signal,
           input.latency,
@@ -415,6 +421,7 @@ export class AgentService {
     const runConfig = resolvedRun.config;
     const runtimeContext = {
       ...this.getRuntimeContext(input.sessionId),
+      confirmationDecision: session.confirmationDecision,
       ...await this.getReadContext(input.sessionId, resolvedRun.selectedApiCatalogs),
       openApiCandidates: resolvedRun.openApiCandidates,
       selectedApiCatalogs: resolvedRun.selectedApiCatalogs,
@@ -440,6 +447,18 @@ export class AgentService {
     const state = createStreamState(input.developerMode === true);
     const secrets = this.getSecrets(runtimeContext.sessionOaApiToken, input.sessionId);
     const recoverStream = async (): Promise<boolean> => {
+      if (signal?.aborted) return false;
+      const pending = (await this.sessions.getOrCreate(input.sessionId)).pendingConfirmation;
+      if (pending) {
+        const text = `请确认以下操作：${pending.description}`;
+        const itemId = 'confirmation-ready';
+        state.turnFailure = null;
+        state.activeToolIds.clear();
+        state.finalResponse = text;
+        state.items.push({ id: itemId, type: 'agent_message', text });
+        await emit({ type: 'message.delta', sessionId: input.sessionId, itemId, delta: text, text });
+        return true;
+      }
       const recovery = resolveStreamRecovery(
         state.finalResponse,
         state.items,
@@ -510,11 +529,15 @@ export class AgentService {
           !state.turnFailure &&
           !hasTerminalAgentResponse(state.items, state.activeToolIds)
         ) {
-          state.finalResponse = "";
-          state.activeToolIds.clear();
-          await runStreamedTurn(
-            buildIncompleteTurnContinuationPrompt(input.message),
-          );
+          // A prepared card is already a complete outcome. Avoid an extra
+          // model turn just to restate its plan.
+          if ((await this.sessions.getOrCreate(input.sessionId)).pendingConfirmation) {
+            await recoverStream();
+          } else {
+            state.finalResponse = "";
+            state.activeToolIds.clear();
+            await runStreamedTurn(buildIncompleteTurnContinuationPrompt(input.message));
+          }
         }
       } catch (error) {
         if (!(await recoverStream())) {
@@ -575,6 +598,8 @@ export class AgentService {
         status: 'completed', message: reportCheck.interrupted ? '后续数据读取失败，仅保留范围说明，未补充对象正文。'
           : `按来源核对 ${reportCheck.subjectCount} 个对象${reportCheck.missingCount ? `，${reportCheck.missingCount} 个使用已有片段补全` : ''}${reportCheck.limited ? '；存在查询范围限制' : ''}。` });
     }
+    const confirmation = (await this.sessions.getOrCreate(input.sessionId)).pendingConfirmation;
+    if (confirmation) await emit({ type: 'confirmation.required', sessionId: input.sessionId, confirmation });
     const result: SendMessageResult = {
       sessionId: input.sessionId,
       threadId: thread.id,
@@ -586,6 +611,7 @@ export class AgentService {
       ),
       knowledgeSources,
       summary,
+      ...(confirmation ? { confirmation } : {}),
     };
 
     await emit({
@@ -898,7 +924,16 @@ export class AgentService {
         input.oaUserId,
       );
     }
-    await prepareOaChatAccess(this.config, input.sessionId, this.sessions.getOaToken(input.sessionId), input.message);
+    if (input.confirmationResponse) {
+      session.confirmationDecision = await this.sessions.respondToConfirmation(input.sessionId, input.confirmationResponse);
+      delete session.pendingConfirmation;
+    } else if (session.pendingConfirmation) {
+      await this.sessions.setConfirmation(input.sessionId);
+      delete session.pendingConfirmation;
+    }
+    const reply = session.confirmationDecision?.decision === 'approve'
+      ? session.confirmationDecision.confirmation.confirmationReply ?? input.message : input.message;
+    await prepareOaChatAccess(this.config, input.sessionId, this.sessions.getOaToken(input.sessionId), reply);
     return session;
   }
 
@@ -933,8 +968,15 @@ export class AgentService {
       this.config.oaRead?.databaseUrl ?? "",
       ...(this.config.oaRead ? [new URL(this.config.oaRead.databaseUrl).password, decodeURIComponent(new URL(this.config.oaRead.databaseUrl).password)] : []),
       ...(sessionId ? [readToolToken(this.config.oaApiToolToken, sessionId)] : []),
+      ...(sessionId ? [confirmationToolToken(this.config.oaApiToolToken, sessionId)] : []),
     ];
   }
+}
+
+function routingTask(input: SendMessageInput, session: AgentSession) {
+  const decision = session.confirmationDecision;
+  return decision?.decision === 'approve'
+    ? `${input.message}\n已确认的原任务：${decision.confirmation.description}\n${decision.confirmation.actions.join('\n')}` : input.message;
 }
 
 type AgentStreamState = {

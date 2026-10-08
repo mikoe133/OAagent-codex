@@ -3,10 +3,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatTraceEvent } from './chatTrace.js';
-export type PublicResult = { recordId: string; requestId: string; finalResponse: string; provider: string; model: string; knowledgeSources: unknown[] };
+import type { ChatConfirmation, ConfirmationResponse } from './confirmation.js';
+export type PublicResult = { recordId: string; requestId: string; finalResponse: string; provider: string; model: string; knowledgeSources: unknown[]; confirmation?: ChatConfirmation };
 export type RequestRecord = {
   recordId: string; requestId: string; fingerprint: string; message: string; attachments?: Attachment[];
   attachmentOptions?: { mode: 'auto' | 'analyze' | 'upload'; target?: string; modelOverride?: { provider: string; model: string } };
+  confirmationResponse?: ConfirmationResponse;
   state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
   createdAt: string; updatedAt: string; errorCode?: string;
   historySync: 'pending' | 'synced'; result?: PublicResult;
