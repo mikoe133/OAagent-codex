@@ -385,12 +385,40 @@ function ToolTimeline({
         : "idle"
   const wasTraceActiveRef = useRef(isTraceActive)
   const [isOpen, setIsOpen] = useState(isTraceActive)
+  const traceViewportRef = useRef<HTMLDivElement>(null)
+  const traceContentRef = useRef<HTMLDivElement>(null)
+  const [scrollEdges, setScrollEdges] = useState({ top: false, bottom: false })
 
   useEffect(() => {
     const wasActive = wasTraceActiveRef.current
     wasTraceActiveRef.current = isTraceActive
     setIsOpen((currentOpen) => resolveTraceOpenState(currentOpen, { wasActive, isActive: isTraceActive }))
   }, [isTraceActive])
+
+  useEffect(() => {
+    const viewport = traceViewportRef.current
+    const content = traceContentRef.current
+    if (!isOpen || !viewport || !content) return
+
+    const updateEdges = () => {
+      const top = viewport.scrollTop > 1
+      const bottom = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop > 1
+      setScrollEdges((previous) =>
+        previous.top === top && previous.bottom === bottom ? previous : { top, bottom },
+      )
+    }
+
+    updateEdges()
+    viewport.addEventListener("scroll", updateEdges, { passive: true })
+    const observer = new ResizeObserver(updateEdges)
+    observer.observe(viewport)
+    observer.observe(content)
+
+    return () => {
+      viewport.removeEventListener("scroll", updateEdges)
+      observer.disconnect()
+    }
+  }, [isOpen])
 
   const summaryText = isTraceActive
     ? resolveTraceSummaryText(traceMessages, fallbackText, steps)
@@ -409,7 +437,7 @@ function ToolTimeline({
       value={isOpen ? "agent-trace" : ""}
       onValueChange={(value) => setIsOpen(value === "agent-trace")}
       data-slot="agent-trace"
-      className="w-full max-w-2xl"
+      className="w-full"
     >
       <AccordionItem value="agent-trace" data-slot="agent-trace-item" className="border-0 py-2">
         <AccordionPrimitive.Header className="flex">
@@ -453,24 +481,35 @@ function ToolTimeline({
           </AccordionPrimitive.Trigger>
         </AccordionPrimitive.Header>
         <AccordionContent
-          className="pb-2 pl-2 pt-1 sm:ml-3 sm:pl-10"
+          className="pb-2 pt-1"
           aria-label="Agent trace"
         >
-          <div className="space-y-3">
-            {timelineItems.map((item) =>
-              item.kind === "tool" ? (
-                <ToolTimelineItem
-                  key={`tool-${item.step.id}`}
-                  step={item.step}
-                />
-              ) : (
-                <StreamingMessageTrace
-                  key={`message-${item.message.id}`}
-                  message={item.message}
-                  isActive={isStreaming && item.message.id === activeMessageId}
-                />
-              ),
-            )}
+          <div
+            ref={traceViewportRef}
+            data-slot="agent-trace-scroll"
+            data-fade-top={scrollEdges.top}
+            data-fade-bottom={scrollEdges.bottom}
+            role="region"
+            aria-label="Agent execution details"
+            tabIndex={0}
+            className="chat-message-scrollbar agent-trace-scroll max-h-[min(32rem,65dvh)] w-full overflow-x-hidden overflow-y-auto overscroll-y-contain rounded-sm py-2 pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+          >
+            <div ref={traceContentRef} className="space-y-3">
+              {timelineItems.map((item) =>
+                item.kind === "tool" ? (
+                  <ToolTimelineItem
+                    key={`tool-${item.step.id}`}
+                    step={item.step}
+                  />
+                ) : (
+                  <StreamingMessageTrace
+                    key={`message-${item.message.id}`}
+                    message={item.message}
+                    isActive={isStreaming && item.message.id === activeMessageId}
+                  />
+                ),
+              )}
+            </div>
           </div>
         </AccordionContent>
       </AccordionItem>

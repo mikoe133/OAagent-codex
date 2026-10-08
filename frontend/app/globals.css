@@ -124,6 +124,21 @@ html[data-font-size="extra-large"] {
     rgba(0, 0, 0, 0.4) 0 18px 42px -18px !important;
 }
 
+.agent-trace-scroll {
+  --trace-fade-top: #000;
+  --trace-fade-bottom: #000;
+  -webkit-mask-image: linear-gradient(to bottom, var(--trace-fade-top), #000 3rem, #000 calc(100% - 3rem), var(--trace-fade-bottom));
+  mask-image: linear-gradient(to bottom, var(--trace-fade-top), #000 3rem, #000 calc(100% - 3rem), var(--trace-fade-bottom));
+}
+
+.agent-trace-scroll[data-fade-top="true"] {
+  --trace-fade-top: transparent;
+}
+
+.agent-trace-scroll[data-fade-bottom="true"] {
+  --trace-fade-bottom: transparent;
+}
+
 .chat-message-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
