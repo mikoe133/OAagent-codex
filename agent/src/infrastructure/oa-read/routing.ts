@@ -4,9 +4,9 @@ import { isOaReadOperation } from "../oa/oaApiTool.js";
 export function withDatabaseReadRouting(index: OpenApiOperationIndex): OpenApiOperationIndex {
   const database: OpenApiOperationIndexEntry = {
     catalog: "oa", operationId: "oa_database_read", method: "GET", path: "/oa-database/read",
-    summary: "OA 只读数据库：查询、搜索、统计、汇总、关联分析员工/实习成员/部门/项目进展/周报/月报/任务/议题/公告/资产/考勤/状态/资料；使用语义元数据，不是 HTTP API",
-    tags: ["oa", "database", "user", "projects", "weekly", "report", "查询", "统计"],
-    permissionLevel: "user", parameters: [], requestBodyFields: [], mainResponseFields: ["version", "rows", "hasMore"],
+    summary: "OA 只读数据库：本人资料使用当前已验证登录身份安全查询；也可查询、搜索、统计员工/部门/项目进展/周报/月报/任务/议题/公告/资产/考勤等；使用语义元数据，不是 HTTP API",
+    tags: ["oa", "database", "user", "self", "本人资料", "projects", "weekly", "report", "查询", "统计"],
+    permissionLevel: "user", parameters: [], requestBodyFields: [], mainResponseFields: ["version", "profile", "rows", "hasMore"],
   };
   return { ...index, operations: [...index.operations.filter(op => op.catalog !== "oa" || !isOaReadOperation(op.method, op.operationId, op.path, op.summary)), database] };
 }
@@ -20,6 +20,7 @@ export function databaseReadGuidance(sessionArg: string): string {
     "- 命令：node scripts/queryOaDatabase.mjs --input '<JSON>'。session 由工具环境自动绑定。",
     '- 目录参数：{"action":"catalog"}；可加 search（空格分隔关键词，未命中可查看不带 search 的目录）。',
     '- 实体定义：{"action":"describe","entities":["members","projects","project_participants","project_github_commit_summaries"]}。以实际 catalog 为准。',
+    '- 查询当前登录者本人资料：{"action":"self","version":"当前元数据版本"}。服务端从本轮已验证登录身份取得用户 ID，并固定匹配 members 主键，再关联可用的部门及个人档案字段；调用时不要提供 userId、姓名或登录凭据。该动作只返回本人资料，不替代其他人员查询。',
     '- 查询参数：{"action":"query","version":"describe 返回的 version","query":{"from":{"entity":"projects","as":"p"},"select":[{"field":"p.id","as":"id"},{"field":"p.project_name","as":"name"}],"where":[{"field":"p.project_name","op":"contains","value":"关键词"}],"orderBy":[{"field":"p.id","direction":"asc"}],"limit":100}}',
     '- 独立查询用一次 batch：{"action":"batch","version":"当前版本","queries":[查询计划1,查询计划2]}，最多5条；query 可带可选 id，结果按顺序返回并回显 id。id 只作对应标识，不是 SQL 字段。服务端在同一只读事务内执行，避免多次模型往返。依赖前次结果的查询分开调用。',
     '- 全部对象的概览/清单优先用 report：{"action":"report","version":"当前版本","report":{"id":"overview","population":{"query":对象清单查询,"key":"对象标识输出别名","label":"名称输出别名"},"evidence":[{"query":证据查询,"key":"对象标识输出别名","content":"正文输出别名","source":"来源说明"}]}}。对象、字段和用户期间由模型选择；population.query/evidence[].query 必须是完整查询对象，key/label/content 必须引用 select.as。服务端在同一事务内将证据限制到对象清单；无需先单独查询清单。',

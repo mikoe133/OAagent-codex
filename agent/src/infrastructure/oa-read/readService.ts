@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import type { OaReadConfig } from "../../config/oaReadConfig.js";
 import { ReadDatabase } from "./database.js";
-import { accessible, type Principal } from "./metadata.js";
+import { accessible, type Principal, type PublishedMetadata } from "./metadata.js";
 import { reportSchema, buildCoverageReport, rememberReport, markReportReadFailure, reportTurnContext, cachedReportRows, cacheReportRows, reportForModel } from "./reportCoverage.js";
 import { canonicalReadInput, prepareReportPlan } from './reportPlan.js';
 import { compileQuery, querySchema } from "./queryCompiler.js";
@@ -16,6 +16,7 @@ const inputSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("batch"), sessionId: z.string().optional(), version: z.string(), queries: z.array(querySchema).min(1).max(5) }).strict(),
   z.object({ action: z.literal("report"), sessionId: z.string().optional(), version: z.string(), report: reportSchema }).strict(),
   z.object({ action: z.literal("query"), sessionId: z.string().optional(), version: z.string(), query: querySchema }).strict(),
+  z.object({ action: z.literal("self"), sessionId: z.string().optional(), version: z.string() }).strict(),
 ]);
 // The legacy OA tool token is given to the model process. It must NOT be the
 // signing key for capabilities that authorize access to other sessions.
@@ -152,6 +153,10 @@ export class OaReadService {
         return result;
       }
       if (input.version !== active.version) return failure("metadata_version_changed", "元数据已更新，请重新 describe 后生成查询。");
+      if (input.action === "self") {
+        const result = await this.readCurrentUser(active, principal, started);
+        return result;
+      }
       const turnContext = reportTurnContext(input.sessionId);
       if (input.action === 'report') input = { ...input, report: prepareReportPlan(input.report, active, turnContext?.period) };
       if (input.action === 'batch' || input.action === 'report') {
@@ -234,6 +239,71 @@ export class OaReadService {
       }
       return failure("query_rejected", e instanceof Error ? e.message : "查询被拒绝");
     }
+  }
+
+  private async readCurrentUser(active: PublishedMetadata, principal: Principal, started: number) {
+    if (!/^[1-9]\d*$/.test(principal.userId)) {
+      return failure("self_identity_unmappable", "当前 OA 用户 ID 不是成员表支持的数字 ID，未查询其他成员；请检查 OA 用户 ID 与成员主键的映射。");
+    }
+
+    const findEntity = (name: string) => active.semantic.entities.find(entity => entity.name === name);
+    const member = findEntity("members");
+    if (!member || !Object.hasOwn(member.columns, "id")) {
+      return failure("self_profile_unavailable", "已发布的 OA 只读目录缺少本人资料所需的成员主键。");
+    }
+    const memberTable = active.schema.tables.find(table => table.name === member.table);
+    const memberIdType = memberTable?.columns.find(column => column.name === "id")?.type;
+    if (!memberIdType || !/^(?:tinyint|smallint|mediumint|int|integer|bigint)\b/i.test(memberIdType)) {
+      return failure("self_profile_unavailable", "成员主键不是已验证支持的数字 ID，未执行本人资料查询。");
+    }
+
+    const select: Array<{ field: string; as: string }> = [];
+    const addFields = (entity: NonNullable<ReturnType<typeof findEntity>>, alias: string, fields: Array<[string, string]>) => {
+      for (const [column, output] of fields) {
+        if (Object.hasOwn(entity.columns, column)) select.push({ field: `${alias}.${column}`, as: output });
+      }
+    };
+    addFields(member, "m", [
+      ["id", "id"], ["full_name", "full_name"], ["username", "username"],
+      ["email", "email"], ["employee_title", "employee_title"],
+      ["employee_type", "employee_type"], ["start_date", "start_date"],
+    ]);
+
+    const joins: Array<{ entity: string; as: string; type: "left"; on: { left: string; right: string } }> = [];
+    const department = findEntity("department");
+    if (department && Object.hasOwn(department.columns, "name") &&
+        member.references.some(reference => reference.column === "department_id" && reference.entity === department.name && reference.targetColumn === "id")) {
+      joins.push({ entity: department.name, as: "d", type: "left", on: { left: "m.department_id", right: "d.id" } });
+      select.push({ field: "d.name", as: "department" });
+    }
+
+    const profile = findEntity("user_profile");
+    if (profile && profile.references.some(reference => reference.column === "user_id" && reference.entity === member.name && reference.targetColumn === "id")) {
+      joins.push({ entity: profile.name, as: "up", type: "left", on: { left: "m.id", right: "up.user_id" } });
+      addFields(profile, "up", [
+        ["title", "profile_title"], ["position", "position"], ["school", "school"],
+        ["tech_stack", "tech_stack"], ["intro", "intro"], ["github_id", "github_id"],
+      ]);
+    }
+
+    const compiled = compileQuery({
+      from: { entity: member.name, as: "m" },
+      joins,
+      select,
+      where: [{ field: "m.id", op: "eq", value: principal.userId }],
+      limit: 2,
+    }, active, principal, this.config.maxRows, this.config.queryTimeoutMs);
+    const rows = await this.db.read(query => query(compiled.sql, compiled.bindings));
+    if (!rows.length) return failure("self_profile_not_found", "已验证当前登录身份，但成员目录中没有匹配的成员记录。");
+    if (rows.length > 1) return failure("self_profile_ambiguous", "成员主键匹配到多条本人资料记录，为避免返回错误资料，查询已停止。");
+
+    return {
+      ok: true as const,
+      version: active.version,
+      durationMs: Math.round(performance.now() - started),
+      identitySource: "verified_current_session",
+      profile: rows[0],
+    };
   }
 }
 
