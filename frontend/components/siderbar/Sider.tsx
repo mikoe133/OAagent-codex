@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { AUTH_TOKEN_STORAGE_KEY, AUTH_USER_STORAGE_KEY, type AuthUser } from "@/lib/auth"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ShiningText } from "@/components/ui/shining-text"
+import { AsciiBrailleLoader } from "@/components/ui/ascii-braille-loader"
 import { matchesSessionIdentity, resolveStableSessionOrder, sortSessionItemsByPinnedOrder } from "./session-list-order"
 import {
   DropdownMenu,
@@ -634,6 +635,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
     ref,
   ) => {
     const [sections, setSections] = useState<Section[]>(defaultSections)
+    const [isLoadingSessions, setIsLoadingSessions] = useState(true)
     const [activeHref, setActiveHref] = useState(defaultItem.href)
     const [query, setQuery] = useState("")
     const [user, setUser] = useState<SiderUser>(() => buildFallbackUser())
@@ -776,6 +778,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       const abortController = new AbortController()
 
       async function loadSessions() {
+        setIsLoadingSessions(true)
         try {
           const response = await fetchChatWithDiagnostics("/api/chat/sessions", {
             method: "GET",
@@ -789,6 +792,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
           }
 
           const payload = (await response.json()) as SessionsResponse
+          if (abortController.signal.aborted) return
           const nextItems = resolveSessionItems(payload.sessions, deletedSessionIdsRef.current)
 
           setSections(buildConversationSections(nextItems))
@@ -797,6 +801,8 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
             return
           }
           console.error("Failed to load chat sessions:", error)
+        } finally {
+          if (!abortController.signal.aborted) setIsLoadingSessions(false)
         }
       }
 
@@ -853,6 +859,8 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
       })
     }, [activeRecordId, activeSessionId, filteredSections, focusSessionKey, query])
 
+    const hasSessionItems = sections.some((section) => section.items.some((item) => item.sessionId))
+
     return (
       <nav
         ref={ref}
@@ -907,9 +915,19 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div
             ref={sessionListRef}
+            aria-busy={isLoadingSessions}
             className="min-h-0 h-full space-y-7 overflow-y-auto pb-20 pt-4 scroll-pb-20 scroll-pt-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            {filteredSections.length > 0 ? (
+            {isLoadingSessions && (
+              <div
+                data-slot="session-list-loading"
+                className="flex items-center justify-center gap-2.5 px-6 py-6 text-stone-500 theme-dark:text-zinc-400"
+              >
+                <AsciiBrailleLoader label="正在加载会话" />
+                <span aria-hidden="true" className="text-xs leading-5">正在加载会话</span>
+              </div>
+            )}
+            {(!isLoadingSessions || hasSessionItems) && (filteredSections.length > 0 ? (
               filteredSections.map((section) => (
                 <div key={section.title}>
                   <SectionsList
@@ -928,7 +946,7 @@ const Sider = forwardRef<HTMLElement, SiderProps>(
               <p className="px-8 text-sm text-slate-400 theme-dark:text-zinc-500">
                 {query.trim() ? `没有匹配“${query.trim()}”的会话` : "暂无会话"}
               </p>
-            )}
+            ))}
           </div>
           <div
             className="pointer-events-none absolute inset-x-0 top-0 h-4 bg-white/95 backdrop-blur-[2px] theme-dark:bg-zinc-950/95"
