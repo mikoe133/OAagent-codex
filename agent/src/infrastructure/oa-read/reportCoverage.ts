@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { queryId, querySchema } from './queryCompiler.js';
 import { reportPeriodSchema, type ReportPeriod } from './reportPlan.js';
+import type { TextCoverage } from './queryResult.js';
 
 const alias = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, '必须引用 select.as 的输出别名，不是 别名.字段；标识仅含字母、数字、下划线').max(64);
 export const reportSchema = z.object({
@@ -11,7 +12,7 @@ export const reportSchema = z.object({
   evidence: z.array(z.object({ query: querySchema, key: alias, content: alias, source: z.string().min(1).max(80) }).strict()).min(1).max(4),
 }).strict();
 export type ReportPlan = z.infer<typeof reportSchema>;
-export type QueryResult = { rows: Record<string, unknown>[]; hasMore: boolean; coverage: string; returned: number; nextOffset?: number | null };
+export type QueryResult = { rows: Record<string, unknown>[]; hasMore: boolean; coverage: string; returned: number; nextOffset?: number | null; textCoverage?: TextCoverage };
 export type EvidenceFragment = { id: string; text: string; source: string };
 type Subject = { key: string; label: string; status: 'content' | 'empty' | 'not_found'; records: { source: string; content: string; fields: Record<string, unknown> }[]; fragments: EvidenceFragment[] };
 export type CoverageReport = {
@@ -74,7 +75,8 @@ export function buildCoverageReport(plan: ReportPlan, results: QueryResult[], sc
     if (key !== null && subjects.has(key) && row[evidence.content] != null && String(row[evidence.content]).trim()) contentCounts.set(key, (contentCounts.get(key) ?? 0) + 1);
   }
   const bytesPerSubject = Math.floor(96 * 1024 / Math.max(1, contentCounts.size));
-  let excerptsOnly = false;
+  let excerptsOnly = results.some(result => result.textCoverage?.excerptsOnly);
+  if (excerptsOnly) warnings.push('部分返回文本字段为片段，不能声称已读取全文。');
   for (const [i, evidence] of plan.evidence.entries()) {
     for (const row of results[i + 1]!.rows) {
       const key = scalarKey(row[evidence.key]);
@@ -88,7 +90,10 @@ export function buildCoverageReport(plan: ReportPlan, results: QueryResult[], sc
       subject.status = 'content';
       const fields = Object.fromEntries(Object.entries(row).filter(([key]) => key !== evidence.content));
       const selection = evidence.query.select.find(s => s.as === evidence.content);
-      if (content.length >= (selection?.textLength ?? 6000) || (selection?.textOffset ?? 0) > 0) { excerptsOnly = true; warnings.push('证据可能达到文本截断上限或仅包含正文片段，不能声称已读取全文。'); }
+      const textField = results[i + 1]!.textCoverage?.fields.find(field => field.field === evidence.content);
+      const clipped = textField ? textField.truncated || textField.textOffset > 0
+        : Array.from(content).length >= (selection?.textLength ?? 6000) || (selection?.textOffset ?? 0) > 0;
+      if (clipped) { excerptsOnly = true; warnings.push('证据可能达到文本截断上限或仅包含正文片段，不能声称已读取全文。'); }
       const budget = Math.max(64, Math.floor(bytesPerSubject / contentCounts.get(subject.key)!) - Buffer.byteLength(JSON.stringify(fields)));
       const retained = boundText(content, budget);
       if (retained.length < content.length) { excerptsOnly = true; warnings.push('正文已按对象均衡截取，保留片段而非全文。'); }

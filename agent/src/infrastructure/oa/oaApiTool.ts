@@ -1,4 +1,6 @@
 import type { AppConfig } from "../../config/config.js";
+import { fetchWithReadRetry } from '../tools/readRetry.js';
+import { httpToolFailure, runControlledTool, type ToolError } from '../tools/toolRecovery.js';
 import { normalizeJsonLineSeparators } from "../codex/jsonLineSafety.js";
 import { authorizeAdminWrite, hasOaAdminAccess, readOaAdminPermission } from "./oaChatAccess.js";
 import { isChatOpenApiOperationAllowed } from "./openApiChatPolicy.js";
@@ -53,11 +55,8 @@ export type OaApiToolResult = {
   identityMatch?: OaIdentityMatch;
   warnings?: string[];
   data?: unknown;
-  error?: {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
+  execution?: { attempts: number; recovered: boolean };
+  error?: ToolError;
 };
 
 type OpenApiOperation = {
@@ -83,13 +82,22 @@ export async function callOaApiTool(
   input: OaApiToolInput,
   sessionOaApiToken: string | null = null,
 ): Promise<OaApiToolResult> {
+  return runControlledTool('oa_api', input.sessionId, input, () => executeOaApiTool(config, input, sessionOaApiToken));
+}
+
+async function executeOaApiTool(
+  config: AppConfig,
+  input: OaApiToolInput,
+  sessionOaApiToken: string | null,
+): Promise<OaApiToolResult> {
   const sessionId = stringField(input.sessionId);
-  if (!config.oaApiBaseUrl || !sessionOaApiToken) {
+  if (!config.oaApiBaseUrl) {
     return toolError(
       "oa_not_configured",
-      "缺少 OA_API_BASE_URL 或 OA 登录态,无法调用 OA 后端。",
+      "缺少 OA_API_BASE_URL，无法调用 OA 后端。",
     );
   }
+  if (!sessionOaApiToken) return toolError('session_required', '当前 session 缺少已验证的 OA 登录态，请重新登录。');
 
   const responseId = stringField(input.responseId);
   if (responseId) {
@@ -212,6 +220,17 @@ async function executeOaRequest(
     body,
     oaApiToken: sessionOaApiToken,
   });
+  if (!response.ok) {
+    const result: OaApiToolResult = {
+      ok: false, status: response.status, operationId: operation.operationId,
+      method: operation.method.toUpperCase(), path: operation.pathTemplate,
+      data: limitToolOutput(response.data).value,
+      error: response.error,
+      ...(response.attempts > 1 ? { execution: { attempts: response.attempts, recovered: false } } : {}),
+    };
+    recordOaApiCallResult(sessionId, result);
+    return result;
+  }
   const exactPersonName = getActiveOaQueryPolicy(sessionId)?.exactPersonName;
   const focusedResult = exactPersonName
     ? focusExactPersonResult(response.data, exactPersonName)
@@ -245,6 +264,7 @@ async function executeOaRequest(
       ...(focusedResult ? { identityMatch: focusedResult.identityMatch } : {}),
       ...(queryWarnings.length > 0 ? { warnings: queryWarnings } : {}),
       data: inspectOaResponse(focusedData),
+      ...(response.attempts > 1 ? { execution: { attempts: response.attempts, recovered: true } } : {}),
     };
     recordOaApiCallResult(sessionId, result);
     return result;
@@ -268,6 +288,7 @@ async function executeOaRequest(
     ...(focusedResult ? { identityMatch: focusedResult.identityMatch } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
     data: limitedData.value,
+    ...(response.attempts > 1 ? { execution: { attempts: response.attempts, recovered: true } } : {}),
   };
   recordOaApiCallResult(sessionId, result);
   return result;
@@ -552,7 +573,7 @@ async function requestOa(
     body: unknown;
     oaApiToken: string;
   },
-): Promise<{ ok: boolean; status: number; data: unknown }> {
+): Promise<{ ok: boolean; status: number; data: unknown; attempts: number; error?: ToolError }> {
   const url = new URL(request.path, ensureTrailingSlash(config.oaApiBaseUrl!));
   for (const [key, value] of Object.entries(request.query)) {
     if (value !== null && value !== undefined) {
@@ -572,16 +593,17 @@ async function requestOa(
     body = JSON.stringify(request.body);
   }
 
-  const response = await fetch(url, {
+  const { response, text, attempts } = await fetchWithReadRetry(fetch, url, {
     method: request.method,
     headers,
     body,
-  });
-  const text = await response.text();
+  }, ['GET', 'HEAD'].includes(request.method), 30_000);
 
   return {
     ok: response.ok,
     status: response.status,
+    attempts,
+    ...(response.ok ? {} : { error: httpToolFailure(response).error }),
     data: redactValue(parseResponseBody(text), [
       request.oaApiToken,
       config.oaApiToolToken,

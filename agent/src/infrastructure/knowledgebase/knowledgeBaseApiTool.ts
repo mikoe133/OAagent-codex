@@ -4,6 +4,8 @@ import type { AppConfig } from "../../config/config.js";
 import { normalizeJsonLineSeparators } from "../codex/jsonLineSafety.js";
 import type { OpenApiCatalog } from "../oa/openApiIndex.js";
 import { resolveKnowledgeBaseContracts } from "./knowledgeBaseContract.js";
+import { fetchWithReadRetry } from '../tools/readRetry.js';
+import { httpToolFailure, runControlledTool, toolRequestFailure, type ToolError } from '../tools/toolRecovery.js';
 
 export type KnowledgeBaseApiToolInput = {
   sessionId?: unknown;
@@ -23,11 +25,9 @@ export type KnowledgeBaseApiToolResult = {
   method?: string;
   path?: string;
   data?: unknown;
-  error?: {
-    code: string;
-    message: string;
-    details?: unknown;
-  };
+  warnings?: string[];
+  execution?: { attempts: number; recovered: boolean };
+  error?: ToolError;
 };
 
 type KnowledgeBaseOperation = {
@@ -101,6 +101,16 @@ export async function callKnowledgeBaseApiTool(
   input: KnowledgeBaseApiToolInput,
   oaUserId: string | null,
   fetchImpl: KnowledgeBaseFetch = fetch,
+): Promise<KnowledgeBaseApiToolResult> {
+  return runControlledTool('knowledge_base_api', input.sessionId, input, () =>
+    executeKnowledgeBaseApiTool(config, input, oaUserId, fetchImpl));
+}
+
+async function executeKnowledgeBaseApiTool(
+  config: AppConfig,
+  input: KnowledgeBaseApiToolInput,
+  oaUserId: string | null,
+  fetchImpl: KnowledgeBaseFetch,
 ): Promise<KnowledgeBaseApiToolResult> {
   if (!config.knowledgeBaseApiToken || !config.knowledgeBaseApiBaseUrl) {
     return toolError(
@@ -198,7 +208,7 @@ export async function callKnowledgeBaseApiTool(
     const requestBody = operation.operationId === 'uploadKnowledgeBaseAttachment'
       ? await attachmentUploadForm(String(input.sessionId ?? ''), input.attachmentId)
       : input.body;
-    const { response, payload } = await requestKnowledgeBase(
+    const { response, payload, attempts } = await requestKnowledgeBase(
       config,
       operation,
       renderedPath,
@@ -221,13 +231,11 @@ export async function callKnowledgeBaseApiTool(
       method: operation.method.toUpperCase(),
       path: operation.pathTemplate,
       data: limitResponse(redactedPayload),
+      ...(response.ok ? {} : { error: httpToolFailure(response).error }),
+      ...(attempts > 1 ? { execution: { attempts, recovered: response.ok } } : {}),
     };
   } catch (error) {
-    return toolError(
-      "knowledge_base_request_failed",
-      "知识库请求失败。",
-      error instanceof Error ? error.message : String(error),
-    );
+    return toolRequestFailure(error);
   }
 }
 
@@ -274,7 +282,7 @@ async function executeKnowledgeBaseSearch(
   const results = await Promise.all(
     searchQueries.map(async (searchQuery) => {
       try {
-        const { response, payload } = await requestKnowledgeBase(
+        const { response, payload, attempts } = await requestKnowledgeBase(
           config,
           operation,
           renderedPath,
@@ -288,6 +296,7 @@ async function executeKnowledgeBaseSearch(
           response,
           payload: redactValue(payload, config.knowledgeBaseApiToken!),
           error: null,
+          attempts,
         };
       } catch (error) {
         return {
@@ -295,6 +304,7 @@ async function executeKnowledgeBaseSearch(
           response: null,
           payload: null,
           error,
+          attempts: 1,
         };
       }
     }),
@@ -302,7 +312,7 @@ async function executeKnowledgeBaseSearch(
 
   const attempts: Array<{ status: number; payload: unknown; query: string }> = [];
   let firstHttpFailure:
-    | { status: number; payload: unknown }
+    | { status: number; payload: unknown; error: ToolError }
     | null = null;
   let firstError: unknown = null;
   for (const result of results) {
@@ -317,6 +327,7 @@ async function executeKnowledgeBaseSearch(
       firstHttpFailure ??= {
         status: result.response.status,
         payload: result.payload,
+        error: httpToolFailure(result.response).error,
       };
       continue;
     }
@@ -328,6 +339,8 @@ async function executeKnowledgeBaseSearch(
   }
 
   const firstAttempt = attempts[0];
+  const requestAttempts = Math.max(...results.map(result => result.attempts));
+  const partial = results.some(result => result.error || !result.response?.ok);
   if (!firstAttempt) {
     if (firstHttpFailure) {
       return {
@@ -338,6 +351,8 @@ async function executeKnowledgeBaseSearch(
         method: operation.method.toUpperCase(),
         path: operation.pathTemplate,
         data: limitResponse(firstHttpFailure.payload),
+        error: firstHttpFailure.error,
+        ...(requestAttempts > 1 ? { execution: { attempts: requestAttempts, recovered: false } } : {}),
       };
     }
     if (firstError !== null) {
@@ -360,6 +375,8 @@ async function executeKnowledgeBaseSearch(
     method: operation.method.toUpperCase(),
     path: operation.pathTemplate,
     data: limitResponse(mergedPayload),
+    ...(partial ? { warnings: ['部分搜索请求未成功，当前结果来自成功的请求；未命中不能作为完整的不存在结论。'] } : {}),
+    ...(requestAttempts > 1 ? { execution: { attempts: requestAttempts, recovered: !partial } } : {}),
   };
 }
 
@@ -372,7 +389,7 @@ async function requestKnowledgeBase(
   oaUserId: string,
   fetchImpl: KnowledgeBaseFetch,
   idempotencyKey?: string,
-): Promise<{ response: Response; payload: unknown }> {
+): Promise<{ response: Response; payload: unknown; attempts: number }> {
   const url = new URL(
     renderedPath.replace(/^\/+/, ""),
     ensureTrailingSlash(config.knowledgeBaseApiBaseUrl!),
@@ -391,15 +408,15 @@ async function requestKnowledgeBase(
   if (body !== undefined && !(body instanceof FormData)) {
     headers.set("content-type", "application/json");
   }
-  const response = await fetchImpl(url, {
+  const { response, text, attempts } = await fetchWithReadRetry(fetchImpl, url, {
     method: operation.method.toUpperCase(),
     headers,
     body,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  }, operation.catalog === 'knowledge_base_read' && ['get', 'head'].includes(operation.method), REQUEST_TIMEOUT_MS);
   return {
     response,
-    payload: parseResponseBody(await response.text()),
+    payload: parseResponseBody(text),
+    attempts,
   };
 }
 

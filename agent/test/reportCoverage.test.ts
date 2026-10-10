@@ -134,7 +134,7 @@ test('batch echoes optional IDs, handles neq, and identifies exact invalid field
     { ...evidence, select: [{ field: 'LEFT(e.body,200)', as: 'preview' }] },
   ] }, principal);
   assert.equal(rejected.ok, false);
-  assert.equal(rejected.error.issues[0].path, 'queries.1.select.0.field');
+  assert.equal(rejected.error.issues[0].path, 'queries.1.query.select.0.field');
   assert.match(rejected.error.message, /textLength/);
   assert.equal(rejected.error.recovery.action, 'correct_parameters');
   assert.equal(queries.length, before);
@@ -142,7 +142,7 @@ test('batch echoes optional IDs, handles neq, and identifies exact invalid field
     ...evidence, id: 'preview-1', select: [{ field: 'e.body', as: 'preview', textLength: 200 }],
   } }, principal);
   assert.equal(preview.ok, true); assert.equal(preview.id, 'preview-1');
-  assert.match(queries.at(-1)!.sql, /SUBSTRING\(CAST\(`e`\.`body` AS CHAR\), 1, 200\)/);
+  assert.match(queries.at(-1)!.sql, /SUBSTRING\(CAST\(`e`\.`body` AS CHAR\), 1, 201\)/);
 });
 
 test('validation errors return allowed operators, without echoing submitted values', async t => {

@@ -1,4 +1,5 @@
-import { toolBusinessError } from './toolBusinessError.js';
+import { toolBusinessError, toolWaitingForConfirmation } from './toolBusinessError.js';
+import { beginToolRecoveryTurn, finishToolRecoveryTurn } from '../infrastructure/tools/toolRecovery.js';
 import { confirmationToolToken, type ChatConfirmation, type ConfirmationResponse } from '../chat/confirmation.js';
 import { beginReportTurn, checkReportAnswer, finishReportTurn, hasReportForTurn } from '../infrastructure/oa-read/reportCoverage.js';
 import { completedTurnEvents, runCompletedTurn } from '../infrastructure/codex/completedTurn.js';
@@ -318,6 +319,7 @@ export class AgentService {
       input.message,
       runtimeContext,
     );
+    beginToolRecoveryTurn(input.sessionId);
     beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
     beginKnowledgeBaseSourceTurn(input.sessionId);
     beginReportTurn(input.sessionId, input.message, resolvedRun.reportPeriod);
@@ -329,6 +331,7 @@ export class AgentService {
         turn.finalResponse = redactSecrets(checkReportAnswer(input.sessionId, turn.finalResponse).answer, this.getSecrets(runtimeContext.sessionOaApiToken, input.sessionId));
         return turn;
       } finally {
+        finishToolRecoveryTurn(input.sessionId);
         finishReportTurn(input.sessionId);
         finishOaTurn(input.sessionId);
         finishOaChatAccessTurn(input.sessionId);
@@ -483,6 +486,7 @@ export class AgentService {
       return true;
     };
 
+    beginToolRecoveryTurn(input.sessionId);
     beginOaTurn(input.sessionId, resolvedRun.oaQueryPolicy);
     beginKnowledgeBaseSourceTurn(input.sessionId);
     beginReportTurn(input.sessionId, input.message, resolvedRun.reportPeriod);
@@ -545,6 +549,7 @@ export class AgentService {
         }
       }
     } finally {
+      finishToolRecoveryTurn(input.sessionId);
       if (state.finalResponse.trim()) reportCheck = checkReportAnswer(input.sessionId, state.finalResponse);
       finishReportTurn(input.sessionId);
       finishOaTurn(input.sessionId);
@@ -753,6 +758,7 @@ export class AgentService {
       const command = redactSecrets(item.command, secrets);
       const output = redactSecrets(item.aggregated_output || "", secrets);
       const businessError = toolBusinessError(command, output);
+      const waitingForConfirmation = toolWaitingForConfirmation(command, output);
       const previousOutput = state.commandOutputs.get(item.id) ?? "";
       const outputDelta = output.startsWith(previousOutput)
         ? output.slice(previousOutput.length)
@@ -781,6 +787,7 @@ export class AgentService {
           status: item.status,
           exitCode: item.exit_code,
           ...(businessError ? { status: "failed", error: businessError } : {}),
+          ...(waitingForConfirmation ? { status: 'info' } : {}),
           outputDelta: outputDelta || undefined,
           ...(durationMs === undefined ? {} : { durationMs }),
         });

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { querySchema } from './queryCompiler.js';
 import type { PublishedMetadata, Entity } from './metadata.js';
 import type { ReportPlan } from './reportCoverage.js';
+import { canonicalBatchEntry, normalizeQueryPlan } from './readProtocol.js';
 
 export const reportPeriodSchema = z.object({ start: z.string().date(), end: z.string().date() }).strict().refine(v => v.start < v.end);
 export type ReportPeriod = z.infer<typeof reportPeriodSchema>;
@@ -10,13 +11,8 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 // Normalize only equivalent protocol shapes, never business filters or dates.
 export function canonicalReadInput(raw: unknown): unknown {
   if (!record(raw)) return raw;
-  const normalizeQuery = (query: unknown) => {
-    if (!record(query) || !('join' in query) || 'joins' in query) return query;
-    const { join, ...rest } = query;
-    return { ...rest, joins: join };
-  };
-  if (raw.action === 'query') return { ...raw, query: normalizeQuery(raw.query) };
-  if (raw.action === 'batch' && Array.isArray(raw.queries)) return { ...raw, queries: raw.queries.map(normalizeQuery) };
+  if (raw.action === 'query') return { ...raw, query: normalizeQueryPlan(raw.query) };
+  if (raw.action === 'batch' && Array.isArray(raw.queries)) return { ...raw, queries: raw.queries.map(canonicalBatchEntry) };
   if (raw.action !== 'report' || !record(raw.report)) return raw;
   const spec = (value: unknown) => {
     if (!record(value)) return value;
@@ -28,7 +24,7 @@ export function canonicalReadInput(raw: unknown): unknown {
       }
       normalized.query = query;
     }
-    normalized.query = normalizeQuery(normalized.query);
+    normalized.query = normalizeQueryPlan(normalized.query);
     // A qualified key is an exact field reference, not a guessed join/identity.
     if (record(normalized.query) && Array.isArray(normalized.query.select)) {
       const query = { ...normalized.query, select: [...normalized.query.select] };

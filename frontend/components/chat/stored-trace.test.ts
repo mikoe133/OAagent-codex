@@ -15,6 +15,20 @@ test('business failure is visible with zero shell exit, and subsequent retry ret
   assert.equal(restored.toolSteps[1]?.status, 'completed')
 })
 
+test('confirmation pauses are informational in live and restored traces, including old failed journals', () => {
+  for (const script of ['callOaApi', 'callKnowledgeBaseApi']) {
+    const event = { type: 'tool.completed', toolType: 'command_execution', itemId: 'confirm', status: 'failed', exitCode: 1,
+      name: `node scripts/${script}.mjs --operationId write`,
+      outputDelta: JSON.stringify({ ok: false, error: { code: 'confirmation_required', message: 'not executed' } }),
+    }
+    const live = mergeToolTimelineEvent([], event)
+    assert.equal(live[0]?.status, 'info')
+    assert.equal(live[0]?.description, '操作尚未执行，等待用户确认')
+    assert.deepEqual(restoreStoredTrace([event])!.toolSteps, live)
+    assert.match(live[0]?.output ?? '', /confirmation_required/)
+  }
+})
+
 test('semantic attachment decision and failure remain readable after history restoration', () => {
   for (const status of ['completed', 'failed']) {
     const event = {

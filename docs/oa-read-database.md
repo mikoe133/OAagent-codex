@@ -87,13 +87,33 @@ Compose 只给 Agent 服务注入只读连接，状态目录位于持久卷 `/ap
 模型使用 `node scripts/queryOaDatabase.mjs --input '<JSON>'`：
 
 1. `catalog` 读取允许访问的实体目录（可用 search 筛选）。
-2. `describe` 批量读取本题相关实体、字段、枚举和关系。
-3. `query` 携带已发布 `version` 和结构化查询计划。
+2. `describe` 读取当前一批查询需要的实体定义；已知字段名时可用 `fields` 选择需要的字段说明。
+3. `query` 或 `batch` 携带已发布 `version` 和结构化查询计划。
+
+单条查询与批量中的每一项统一使用 `{id?, query}`。例如，查询内容为 `plan` 时，单条写为 `{action:"query", version, id:"records", query:plan}`，批量写为 `{action:"batch", version, queries:[{id:"records", query:plan}, ...]}`。`id` 仅用于把结果对应到请求，不进入 SQL。旧版批量的平铺计划以及计划内的 `query.id` 继续兼容；同时提供外层 `id` 与 `query.id` 时必须一致。未知参数仍会报错，不能通过包装转换丢掉条件、日期或权限限制。
+
+批量最多 5 条，先验证所有计划，再在同一个只读事务中顺序执行，按顺序返回并回显 `id`。当前回答模型在正常工具调用回合中决定哪些查询可以放在同一批，没有额外的 AI 规划请求。例如，已经确定对象 ID 后，相关明细、必要计数及存在性核验都可以一起提交；只有参数依赖尚未返回的值时才分到下一批。`batch` 减少模型往返，并不表示数据库 SQL 并发执行。
+
+字段定义选择示例（实际实体与字段由模型根据当前目录和问题选择）：
+
+```json
+{
+  "action": "describe",
+  "entities": ["projects"],
+  "fields": { "projects": ["id", "project_name", "status"] }
+}
+```
+
+未指定 `fields` 的实体仍返回完整定义；指定时只返回所选字段的完整语义、类型、枚举及筛选政策，同时保留实体筛选、关联和期间规则。`definitionCoverage:"partial"` 与 `availableFields` 标明定义范围和可以补读的字段名，不能自行推测未读取字段的含义。会话内已读取的字段定义按当前身份和版本合并；新增表或字段无需维护额外的业务选表规则。
 
 服务端将计划编译为白名单 SQL，支持关联、AND/OR 条件、范围筛选、分组、count/countDistinct/sum/avg/min/max、排序和分页。不接受自由 SQL、任意函数、任意表名或原始表达式。复杂的未支持表达式需扩展编译器及测试，不能让模型绕过工具直连。
 
 每个数据源先验证表权限并施加字段限制及固定业务筛选，再参与 JOIN，值使用 MySQL prepared statements。查询在 `START TRANSACTION READ ONLY` 中执行，并设置数据库执行时间上限；客户端超时销毁连接。连接凭据仅在服务端。模型工具使用按 session 签发的能力令牌，需活跃会话与重新验证的 OA 身份，不能指定 userId/isAdmin。
 
 返回最多配置行数、128 KiB，每个文本字段默认最多 6000 字符。`select` 可用 `textOffset`（从 0 开始）和 `textLength`（最多 6000）分块读取长文本。行分页使用稳定排序、`hasMore` 和 `nextOffset`，offset 最大 10000；更大范围使用 ID 条件继续查询。聚合应在数据库执行，避免将大量明细喂给模型。文本分块和行分页的完整性必须分别判断。
+
+正文预览在原 SQL 内多读取一个字符来检测截断，返回前移除检测字符，不增加查询或 AI 回合。`textCoverage.fields` 按输出字段报告 `textOffset`、`textLength` 和 `truncated`；`textCoverage.excerptsOnly` 表示返回了正文片段。到达长度边界但实际没有更多内容时不会误报截断，字符计数也适用于中文及 emoji。`hasMore:false` 只表示本次行范围结束，不能代替正文完整性判断。
+
+模型根据问题选择表、字段、行数和预览长度。近期概览可说明所取范围，缺少证据时继续补读相关记录；用户要求全量或完整历史时必须继续分页或在数据库聚合。部分结果中未出现的对象不能据此认定不存在。来源的周报覆盖期间、仅标题生成、待核实等限定必须保留，不能把整周内容当作某一天已核实的成果。
 
 业务查询只读取本地原子版本文件，不扫描 `information_schema`。审计输出查询实体、元数据版本、服务端用户 ID、耗时和行数，不记录连接串、SQL 参数或业务正文。

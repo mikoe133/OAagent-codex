@@ -21,6 +21,7 @@ import {
   type OaQueryPolicy,
 } from "../infrastructure/oa/oaQueryPolicy.js";
 import { resolveTaskReasoningEffort } from "./taskReasoningPolicy.js";
+import { beginToolRecoveryTurn, finishToolRecoveryTurn } from '../infrastructure/tools/toolRecovery.js';
 
 export type AgentRunResult = {
   finalResponse: string;
@@ -166,6 +167,7 @@ export function buildRuntimeContext(
     `- 模型: ${config.model}`,
     `- 工具命令的工作目录已设置为 ${config.projectRoot}；直接运行 scripts/ 下的指定工具，不需要 cd 或每轮探测环境。`,
     '- 工具依赖在运行镜像构建时检查。不要在对话中安装依赖、切换解析库试错或用失败命令反复检查环境；已有工具成功返回的数据与接口定义直接复用。',
+    '- 受控工具失败时遵循 error.recovery：correct_parameters 仅修正指出的参数，保留用户要求的对象、筛选和期间；refresh_metadata 仅更新所需定义和版本；authenticate 请用户重新登录；wait_for_confirmation 生成确认卡片后结束本轮等待；stop_for_turn 停止相关失败请求，不 sleep 轮询、重复相同参数或换接口绕过。可安全恢复的读取已在工具内按原时间预算有限重试，不另加 AI 规划或重试回合。',
     runtime.sessionId ? `- 当前 sessionId: ${runtime.sessionId}` : null,
     `- 当前路由接口域: ${selectedCatalogs.join(", ") || "无需外部接口"}`,
     rwkvKnowledgeGuidance,
@@ -259,6 +261,7 @@ export async function runCodexAgent(
     oaQueryPolicy: runtime.oaQueryPolicy ?? resolveOaQueryPolicy(userTask),
   };
   if (runtime.sessionId) {
+    beginToolRecoveryTurn(runtime.sessionId);
     beginOaTurn(runtime.sessionId, resolvedRuntime.oaQueryPolicy);
     beginReportTurn(runtime.sessionId, userTask, runtime.reportPeriod);
   }
@@ -269,6 +272,7 @@ export async function runCodexAgent(
       return turn;
     } finally {
       if (runtime.sessionId) {
+        finishToolRecoveryTurn(runtime.sessionId);
         finishOaTurn(runtime.sessionId);
         finishReportTurn(runtime.sessionId);
       }

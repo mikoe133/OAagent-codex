@@ -20,6 +20,43 @@ afterEach(async () => {
 });
 
 describe("controlled knowledge base API tool", () => {
+  it('recovers a transient read without changing its query, and never automatically retries a write', async () => {
+    const config = await createFixture(true);
+    const urls: string[] = [];
+    const read = await callKnowledgeBaseApiTool(config, {
+      operationId: 'getKnowledgeBasePage', pathParams: { id: 'page-7' }, query: { format: 'text' },
+    }, '19', async input => {
+      urls.push(String(input));
+      return Response.json({ data: 'page content' }, { status: urls.length === 1 ? 503 : 200 });
+    });
+    assert.equal(read.ok, true);
+    assert.equal(urls.length, 2);
+    assert.equal(urls[0], urls[1]);
+    assert.deepEqual(read.execution, { attempts: 2, recovered: true });
+    let writes = 0;
+    const write = await callKnowledgeBaseApiTool(config, {
+      operationId: 'createKnowledgeBaseNode', body: { title: 'requested title' }, confirmed: true,
+    }, '19', async () => { writes++; return Response.json({ error: 'unavailable' }, { status: 503 }); });
+    assert.equal(writes, 1);
+    assert.equal(write.ok, false);
+    assert.equal(write.error?.recovery?.action, 'stop_for_turn');
+    assert.match(write.error?.recovery?.instruction ?? '', /不得自动重发/);
+  });
+
+  it('reports partial search failures instead of treating a successful empty fallback as complete', async () => {
+    const config = await createFixture();
+    const result = await callKnowledgeBaseApiTool(config, {
+      operationId: 'searchKnowledgeBase', query: { q: '发票 抬头' },
+    }, '19', async input => {
+      const query = new URL(String(input)).searchParams.get('q');
+      return query === '发票 抬头'
+        ? Response.json({ error: 'not allowed' }, { status: 403 })
+        : Response.json({ data: [], nextCursor: null });
+    });
+    assert.equal(result.ok, true);
+    assert.match(result.warnings?.[0] ?? '', /未命中不能作为完整/);
+  });
+
   it("injects bearer authorization and the current OA user id for reads", async () => {
     const config = await createFixture();
     let requestUrl: URL | null = null;

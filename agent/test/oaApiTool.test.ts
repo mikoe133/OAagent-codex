@@ -11,6 +11,45 @@ import {
   resolveOaQueryPolicy,
 } from "../src/infrastructure/oa/oaQueryPolicy.js";
 
+test('OA read recovery preserves the request; authentication and writes never enter the read retry loop', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'oa-recovery-'));
+  const originalFetch = globalThis.fetch;
+  t.after(async () => { globalThis.fetch = originalFetch; await rm(directory, { recursive: true, force: true }); });
+  const contract = { ...createContract(), paths: { ...createContract().paths, '/projects': {
+    post: { operationId: 'recovery_create_project', requestBody: { required: true }, responses: { '200': { description: 'ok' } } },
+  } } };
+  const config = {
+    projectRoot: directory, openapiPath: path.join(directory, 'openapi.json'),
+    openapiUrl: 'https://oa-recovery.test/openapi', oaApiBaseUrl: 'https://oa-recovery.test',
+    oaApiTokenHeader: 'Cookie', oaApiTokenPrefix: 'sessionid=', oaAuthAlias: 'default',
+    oaApiToolToken: 'internal-tool-token',
+  } as AppConfig;
+  await writeFile(config.openapiPath, JSON.stringify(contract));
+  const urls: string[] = [];
+  globalThis.fetch = async input => {
+    if (String(input) === config.openapiUrl) return Response.json(contract);
+    urls.push(String(input));
+    return Response.json({ data: 'status' }, { status: urls.length === 1 ? 503 : 200 });
+  };
+  const read = await callOaApiTool(config, { operationId: 'status_get', query: { requested: 'unchanged' } }, 'user-token');
+  assert.equal(read.ok, true);
+  assert.deepEqual(read.execution, { attempts: 2, recovered: true });
+  assert.equal(urls[0], urls[1]);
+  const unauthenticated = await callOaApiTool(config, { operationId: 'status_get' });
+  assert.equal(unauthenticated.error?.recovery?.action, 'authenticate');
+  assert.equal(urls.length, 2);
+  let writes = 0;
+  globalThis.fetch = async input => {
+    if (String(input) === config.openapiUrl) return Response.json(contract);
+    writes++;
+    return Response.json({ error: 'unavailable' }, { status: 503 });
+  };
+  const write = await callOaApiTool(config, { operationId: 'recovery_create_project', confirmed: true, body: { name: 'requested project' } }, 'user-token');
+  assert.equal(write.ok, false);
+  assert.equal(writes, 1);
+  assert.equal(write.error?.recovery?.action, 'stop_for_turn');
+});
+
 test("uses the configured OA alias for operations that declare alias", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "oa-api-tool-alias-"));
   const originalFetch = globalThis.fetch;

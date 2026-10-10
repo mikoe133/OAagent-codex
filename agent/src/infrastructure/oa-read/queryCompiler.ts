@@ -25,6 +25,7 @@ export const querySchema = z.object({
   offset: z.number().int().min(0).max(10000).default(0),
 }).strict();
 export type QueryPlan = z.input<typeof querySchema>;
+export type TextSelection = { field: string; textOffset: number; textLength: number; previewRequested: boolean };
 
 export function compileQuery(raw: unknown, metadata: PublishedMetadata, principal: Principal, maxRows: number, timeoutMs: number, context?: { task?: string; population?: { field: string; keys: SqlValue[] } }) {
   const plan = querySchema.parse(raw);
@@ -33,7 +34,8 @@ export function compileQuery(raw: unknown, metadata: PublishedMetadata, principa
   for (const src of [plan.from, ...plan.joins]) {
     if (aliases.has(src.as)) throw new Error("重复数据源别名");
     const entity = metadata.semantic.entities.find(e => e.name === src.entity);
-    if (!entity || !accessible(entity, principal, metadata.schema)) throw new Error(`实体不可访问: ${src.entity}`);
+    if (!entity) throw new Error(`实体不可访问: ${src.entity}`);
+    if (!accessible(entity, principal, metadata.schema)) throw Object.assign(new Error(`实体不可访问: ${src.entity}`), { code: 'entity_forbidden' });
     aliases.set(src.as, entity);
   }
   const ref = (name: string) => {
@@ -48,6 +50,7 @@ export function compileQuery(raw: unknown, metadata: PublishedMetadata, principa
     return `(SELECT ${Object.keys(entity.columns).map(qi).join(", ")} FROM ${qi(entity.table)}${clauses.length ? ` WHERE ${clauses.join(" AND ")}` : ""}) AS ${qi(src.as)}`;
   };
   const selectionNames = new Set<string>();
+  const textSelections: TextSelection[] = [];
   const selection = plan.select.map(s => {
     if (selectionNames.has(s.as)) throw new Error("重复返回字段名");
     selectionNames.add(s.as);
@@ -65,7 +68,13 @@ export function compileQuery(raw: unknown, metadata: PublishedMetadata, principa
     if (s.field && (!s.aggregate || s.aggregate === "min" || s.aggregate === "max")) {
       const f = ref(s.field);
       const type = metadata.schema.tables.find(t => t.name === f.entity.table)?.columns.find(c => c.name === f.column)?.type;
-      if (type && /char|text|json|blob|binary/i.test(type)) expression = `SUBSTRING(CAST(${expression} AS CHAR), ${(s.textOffset ?? 0) + 1}, ${s.textLength ?? 6000})`;
+      if (type && /char|text|json|blob|binary/i.test(type)) {
+        const textOffset = s.textOffset ?? 0, textLength = s.textLength ?? 6000;
+        // One extra character detects clipping in this same read. It is removed
+        // before returning data, so choosing a preview never needs a probe call.
+        expression = `SUBSTRING(CAST(${expression} AS CHAR), ${textOffset + 1}, ${textLength + 1})`;
+        textSelections.push({ field: s.as, textOffset, textLength, previewRequested: s.textOffset !== undefined || s.textLength !== undefined });
+      }
     }
     return `${expression} AS ${qi(s.as)}`;
   });
@@ -143,5 +152,5 @@ export function compileQuery(raw: unknown, metadata: PublishedMetadata, principa
   if (plan.orderBy.length) sql += ` ORDER BY ${plan.orderBy.map(o => `${selectionNames.has(o.field) ? qi(o.field) : ref(o.field).sql} ${o.direction.toUpperCase()}`).join(", ")}`;
   else if (plan.offset) throw new Error("分页必须指定稳定排序（包含唯一 ID）");
   sql += ` LIMIT ${limit + 1} OFFSET ${plan.offset}`;
-  return { id: plan.id, sql, bindings, limit, offset: plan.offset, entities: [...aliases.values()].map(e => e.name) };
+  return { id: plan.id, sql, bindings, limit, offset: plan.offset, entities: [...aliases.values()].map(e => e.name), textSelections };
 }

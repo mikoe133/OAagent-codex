@@ -5,19 +5,26 @@ import { ReadDatabase } from "./database.js";
 import { accessible, type Principal, type PublishedMetadata } from "./metadata.js";
 import { reportSchema, buildCoverageReport, rememberReport, markReportReadFailure, reportTurnContext, cachedReportRows, cacheReportRows, reportForModel } from "./reportCoverage.js";
 import { canonicalReadInput, prepareReportPlan } from './reportPlan.js';
-import { compileQuery, querySchema } from "./queryCompiler.js";
+import { compileQuery } from "./queryCompiler.js";
 import { invalidQuery } from "./queryValidation.js";
 import { readCatalogState, synchronizeMetadata } from "./schemaSync.js";
 import { tableAccess } from "./accessPolicy.js";
+import { databaseErrorCode, isTransientDatabaseError } from './databaseErrors.js';
+import { runControlledTool } from '../tools/toolRecovery.js';
+import { MAX_BATCH_QUERIES, queryRequestSchema, queryPlanForRequest, validateQueryRequest } from './readProtocol.js';
+import { boundRows } from './queryResult.js';
 
 const inputSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("catalog"), sessionId: z.string().optional(), search: z.string().max(100).optional() }).strict(),
-  z.object({ action: z.literal("describe"), sessionId: z.string().optional(), entities: z.array(z.string()).min(1).max(10) }).strict(),
-  z.object({ action: z.literal("batch"), sessionId: z.string().optional(), version: z.string(), queries: z.array(querySchema).min(1).max(5) }).strict(),
+  z.object({ action: z.literal("describe"), sessionId: z.string().optional(), entities: z.array(z.string()).min(1).max(10), fields: z.record(z.array(z.string()).min(1).max(1000)).optional() }).strict(),
+  z.object({ action: z.literal("batch"), sessionId: z.string().optional(), version: z.string(), queries: z.array(queryRequestSchema).min(1).max(MAX_BATCH_QUERIES) }).strict(),
   z.object({ action: z.literal("report"), sessionId: z.string().optional(), version: z.string(), report: reportSchema }).strict(),
-  z.object({ action: z.literal("query"), sessionId: z.string().optional(), version: z.string(), query: querySchema }).strict(),
+  z.object({ action: z.literal("query"), sessionId: z.string().optional(), version: z.string(), ...queryRequestSchema.shape }).strict(),
   z.object({ action: z.literal("self"), sessionId: z.string().optional(), version: z.string() }).strict(),
-]);
+]).superRefine((input, context) => {
+  if (input.action === 'query') validateQueryRequest(input, context);
+  if (input.action === 'batch') input.queries.forEach((request, index) => validateQueryRequest(request, context, ['queries', index]));
+});
 // The legacy OA tool token is given to the model process. It must NOT be the
 // signing key for capabilities that authorize access to other sessions.
 const capabilitySecret = randomBytes(32);
@@ -93,14 +100,19 @@ export class OaReadService {
   }
 
   async call(raw: unknown, principal: Principal) {
-    const result = await this.execute(raw, principal);
+    const sessionId = raw && typeof raw === 'object' && 'sessionId' in raw ? raw.sessionId : undefined;
+    let attempts = 1;
+    const result = await runControlledTool('oa_database_read', sessionId, raw, async () => {
+      const result = await this.execute(raw, principal, () => { attempts++; });
+      return attempts > 1 ? { ...result, execution: { attempts, recovered: result.ok } } : result;
+    });
     if (!result.ok && raw && typeof raw === 'object' && 'sessionId' in raw && typeof raw.sessionId === 'string') {
       markReportReadFailure(raw.sessionId, result.error.code);
     }
     return result;
   }
 
-  private async execute(raw: unknown, principal: Principal) {
+  private async execute(raw: unknown, principal: Principal, onRetry: () => void) {
     const started = performance.now();
     try {
       let input = inputSchema.parse(canonicalReadInput(raw));
@@ -126,11 +138,24 @@ export class OaReadService {
       }
       if (input.action === "describe") {
         const requestedEntities = input.entities;
+        const requestedFields = input.fields;
+        const fieldsByEntity = new Map(Object.entries(requestedFields ?? {}));
         if (input.entities.some(name => !allowed.some(e => e.name === name))) return failure("entity_forbidden", "实体未发布或当前用户无权访问。");
-        const result = { ok: true as const, version: active.version, entities: allowed.filter(e => requestedEntities.includes(e.name)).map(e => ({
-          ...e, access: tableAccess(e.table, active.schema), ownerColumn: undefined, references: e.references.filter(r => allowed.some(a => a.name === r.entity)),
-          columns: Object.fromEntries(Object.entries(e.columns).map(([name, meaning]) => [name, { ...meaning, type: active.schema.tables.find(t => t.name === e.table)?.columns.find(c => c.name === name)?.type }])),
-        })) };
+        for (const [name, fields] of Object.entries(requestedFields ?? {})) {
+          if (!requestedEntities.includes(name)) throw new z.ZodError([{ code: 'custom', path: ['fields', name], message: 'fields 只能选择 entities 中的实体。' }]);
+          const entity = allowed.find(e => e.name === name)!;
+          const unknown = fields.findIndex(field => !Object.hasOwn(entity.columns, field));
+          if (unknown !== -1) throw new z.ZodError([{ code: 'custom', path: ['fields', name, unknown], message: '字段未发布或不可访问，不能读取其定义。' }]);
+        }
+        const result = { ok: true as const, version: active.version, entities: allowed.filter(e => requestedEntities.includes(e.name)).map(e => {
+          const fields = fieldsByEntity.get(e.name);
+          return {
+            ...e, access: tableAccess(e.table, active.schema), ownerColumn: undefined, references: e.references.filter(r => allowed.some(a => a.name === r.entity)),
+            columns: Object.fromEntries(Object.entries(e.columns).filter(([name]) => !fields || fields.includes(name)).map(([name, meaning]) => [name, { ...meaning, type: active.schema.tables.find(t => t.name === e.table)?.columns.find(c => c.name === name)?.type }])),
+            definitionCoverage: fields && new Set(fields).size < Object.keys(e.columns).length ? 'partial' : 'complete',
+            ...(fields ? { availableFields: Object.keys(e.columns) } : {}),
+          };
+        }) };
         if (input.sessionId) {
           const previous = this.descriptions.get(input.sessionId);
           const identity = JSON.stringify(principal);
@@ -138,7 +163,18 @@ export class OaReadService {
           if (previous?.version === active.version && previous.principal === identity && Date.now() - previous.at < 10 * 60 * 1000) {
             for (const entity of previous.entities) entities.set(String(entity.name), entity);
           }
-          for (const entity of result.entities) entities.set(entity.name, entity);
+          for (const entity of result.entities) {
+            const prior = entities.get(entity.name);
+            const priorColumns = prior?.columns;
+            if (entity.definitionCoverage === 'partial' && priorColumns && typeof priorColumns === 'object' && !Array.isArray(priorColumns)) {
+              const merged = { ...entity, columns: { ...priorColumns, ...entity.columns } };
+              if (Object.keys(merged.columns).length === entity.availableFields?.length) {
+                merged.definitionCoverage = 'complete';
+                delete merged.availableFields;
+              }
+              entities.set(entity.name, merged);
+            } else entities.set(entity.name, entity);
+          }
           this.descriptions.delete(input.sessionId);
           const bounded: Record<string, unknown>[] = [];
           let bytes = 0;
@@ -154,14 +190,14 @@ export class OaReadService {
       }
       if (input.version !== active.version) return failure("metadata_version_changed", "元数据已更新，请重新 describe 后生成查询。");
       if (input.action === "self") {
-        const result = await this.readCurrentUser(active, principal, started);
+        const result = await this.readCurrentUser(active, principal, started, onRetry);
         return result;
       }
       const turnContext = reportTurnContext(input.sessionId);
       if (input.action === 'report') input = { ...input, report: prepareReportPlan(input.report, active, turnContext?.period) };
       if (input.action === 'batch' || input.action === 'report') {
         const reportPlan = input.action === 'report' ? input.report : undefined;
-        const plans = input.action === 'batch' ? input.queries : [input.report.population.query, ...input.report.evidence.map(e => e.query)];
+        const plans = input.action === 'batch' ? input.queries.map(queryPlanForRequest) : [input.report.population.query, ...input.report.evidence.map(e => e.query)];
         // Validate the complete batch before reading any data, with one snapshot and principal.
         const compiledQueries = plans.map(plan => compileQuery(plan, active, principal, this.config.maxRows, Math.max(1, Math.floor(this.config.queryTimeoutMs / plans.length)), turnContext));
         if (input.action === 'report') {
@@ -193,7 +229,7 @@ export class OaReadService {
             values.push(result);
           }
           return values;
-        });
+        }, { retry: true, onRetry });
         const durationMs = Math.round(performance.now() - started);
         if (input.action === 'report') {
           if (!cached) cacheReportRows(input.sessionId, input.report, active.version, JSON.stringify(principal), results);
@@ -216,32 +252,32 @@ export class OaReadService {
         }
         return { ok: true as const, version: active.version, durationMs, results };
       }
-      const compiled = compileQuery(input.query, active, principal, this.config.maxRows, this.config.queryTimeoutMs, turnContext);
-      const rows = await this.db.read(q => q(compiled.sql, compiled.bindings));
-      let hasMore = rows.length > compiled.limit;
-      const result: unknown[] = [];
-      let bytes = 0;
-      for (const row of rows.slice(0, compiled.limit)) {
-        const size = Buffer.byteLength(JSON.stringify(row));
-        if (bytes + size > 128 * 1024) { hasMore = true; break; }
-        bytes += size; result.push(row);
-      }
-      if (!result.length && rows.length) return failure("result_too_wide", "单行结果过大，请减少返回字段。");
+      const compiled = compileQuery(queryPlanForRequest(input), active, principal, this.config.maxRows, this.config.queryTimeoutMs, turnContext);
+      const rows = await this.db.read(q => q(compiled.sql, compiled.bindings), { retry: true, onRetry });
+      const result = boundRows(rows, compiled, 128 * 1024);
       const durationMs = Math.round(performance.now() - started);
-      console.error(JSON.stringify({ event: "oa_read_query", userId: principal.userId, version: active.version, entities: compiled.entities, durationMs, returned: result.length, hasMore }));
-      return { ok: true as const, ...(compiled.id ? { id: compiled.id } : {}), version: active.version, durationMs, rows: result, returned: result.length, hasMore, nextOffset: hasMore ? compiled.offset + result.length : null, textLimit: 6000, coverage: hasMore ? "partial" : compiled.offset ? "last_page" : "complete" };
+      console.error(JSON.stringify({ event: "oa_read_query", userId: principal.userId, version: active.version, entities: compiled.entities, durationMs, returned: result.returned, hasMore: result.hasMore }));
+      return { ok: true as const, version: active.version, durationMs, ...result, textLimit: 6000 };
     } catch (e) {
       if (e instanceof z.ZodError) return invalidQuery(e);
-      const code = (e as NodeJS.ErrnoException).code;
+      if (e && typeof e === 'object' && 'code' in e && e.code === 'entity_forbidden') {
+        return failure('entity_forbidden', '当前用户无权访问查询中的实体，未执行数据库读取。');
+      }
+      if (e && typeof e === 'object' && 'code' in e && e.code === 'result_too_wide') return failure('result_too_wide', '单行结果过大，请减少返回字段或 textLength。');
+      const code = databaseErrorCode(e);
       if (code) {
         console.error(JSON.stringify({ event: "oa_read_query_failed", code, durationMs: Math.round(performance.now() - started) }));
-        return failure("database_query_failed", "只读查询失败或超时，请缩小查询范围；若表或字段刚有变化，后台会在下一次检查时自动同步。");
+        if (['ER_QUERY_TIMEOUT', 'PROTOCOL_SEQUENCE_TIMEOUT'].includes(code)) {
+          return failure('database_query_timeout', '只读查询达到时间限制。保留原查询对象、筛选和期间，说明未取得的数据；不要直接缩小业务范围或重复相同请求。');
+        }
+        if (isTransientDatabaseError(e)) return failure('database_temporarily_unavailable', '数据库连接暂不可用，工具已处理可安全重试的读取。保留业务条件，说明已有结果与缺口。');
+        return failure("database_query_failed", "数据库读取未成功。保留业务条件，说明已有结果与缺口；若表或字段刚有变化，后台会自动检查同步，不要反复重试或自行删减条件。");
       }
       return failure("query_rejected", e instanceof Error ? e.message : "查询被拒绝");
     }
   }
 
-  private async readCurrentUser(active: PublishedMetadata, principal: Principal, started: number) {
+  private async readCurrentUser(active: PublishedMetadata, principal: Principal, started: number, onRetry: () => void) {
     if (!/^[1-9]\d*$/.test(principal.userId)) {
       return failure("self_identity_unmappable", "当前 OA 用户 ID 不是成员表支持的数字 ID，未查询其他成员；请检查 OA 用户 ID 与成员主键的映射。");
     }
@@ -293,32 +329,20 @@ export class OaReadService {
       where: [{ field: "m.id", op: "eq", value: principal.userId }],
       limit: 2,
     }, active, principal, this.config.maxRows, this.config.queryTimeoutMs);
-    const rows = await this.db.read(query => query(compiled.sql, compiled.bindings));
+    const rows = await this.db.read(query => query(compiled.sql, compiled.bindings), { retry: true, onRetry });
     if (!rows.length) return failure("self_profile_not_found", "已验证当前登录身份，但成员目录中没有匹配的成员记录。");
     if (rows.length > 1) return failure("self_profile_ambiguous", "成员主键匹配到多条本人资料记录，为避免返回错误资料，查询已停止。");
 
+    const result = boundRows(rows, compiled, 128 * 1024);
     return {
       ok: true as const,
       version: active.version,
       durationMs: Math.round(performance.now() - started),
       identitySource: "verified_current_session",
-      profile: rows[0],
+      profile: result.rows[0],
+      ...(result.textCoverage ? { textCoverage: result.textCoverage } : {}),
     };
   }
-}
-
-function boundRows(rows: Record<string, unknown>[], compiled: { id?: string; limit: number; offset: number }, maxBytes: number) {
-  const result: Record<string, unknown>[] = [];
-  let bytes = 0;
-  let hasMore = rows.length > compiled.limit;
-  for (const row of rows.slice(0, compiled.limit)) {
-    const size = Buffer.byteLength(JSON.stringify(row));
-    if (bytes + size > maxBytes) { hasMore = true; break; }
-    result.push(row); bytes += size;
-  }
-  if (!result.length && rows.length) throw new Error('单行结果过大，请减少字段或 textLength。');
-  return { ...(compiled.id ? { id: compiled.id } : {}), rows: result, returned: result.length, hasMore, nextOffset: hasMore ? compiled.offset + result.length : null,
-    coverage: hasMore ? 'partial' : compiled.offset ? 'last_page' : 'complete' };
 }
 
 function failure(code: string, message: string) { return { ok: false as const, error: { code, message } }; }

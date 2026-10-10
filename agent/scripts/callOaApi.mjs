@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { stringifyJsonLineSafe } from "./jsonLineSafe.mjs";
+import { postControlledTool, toolResultExitCode } from './controlledToolRequest.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const url = process.env.CALL_OA_API_URL;
@@ -32,25 +33,9 @@ const payload = {
   limit: parseIntegerArg(args.limit, "limit"),
 };
 
-const response = await fetch(url, {
-  method: "POST",
-  headers: {
-    authorization: `Bearer ${token}`,
-    "content-type": "application/json",
-    accept: "application/json",
-  },
-  body: JSON.stringify(payload),
-});
-
-const text = await response.text();
-let data;
-try {
-  data = text ? JSON.parse(text) : null;
-} catch {
-  data = text;
-}
-
+const data = await postControlledTool(url, token, payload);
 console.log(stringifyJsonLineSafe(data, 2));
+process.exitCode = toolResultExitCode(data);
 
 function parseArgs(values) {
   const result = {};

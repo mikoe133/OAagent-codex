@@ -221,8 +221,10 @@ function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | 
     : stringValue(event.toolType) || previousRawToolType || (eventType === "progress" ? "progress" : "tool")
   const name = stringValue(event.name)
   const toolType = resolveToolStepType(rawToolType, name, previous)
-  const error = stringValue(event.error) || readBusinessError(name || previous?.input, appendDelta(previous?.output || "", typeof event.outputDelta === "string" ? event.outputDelta : ""))
-  const status = normalizeToolStatus(event.status, eventType, Boolean(error))
+  const failure = readControlledFailure(name || previous?.input, appendDelta(previous?.output || "", typeof event.outputDelta === "string" ? event.outputDelta : ""))
+  const waitingForConfirmation = failure?.error?.code === 'confirmation_required'
+  const error = waitingForConfirmation ? null : stringValue(event.error) || readBusinessError(failure)
+  const status = waitingForConfirmation ? 'info' : normalizeToolStatus(event.status, eventType, Boolean(error))
   const input = resolveToolInput(rawToolType, event, name, previous)
   const output = resolveToolOutput(rawToolType, event, error, previous)
   const durationMs = normalizeStepDuration(event.durationMs) ?? previous?.durationMs
@@ -232,7 +234,7 @@ function buildToolStep(event: ChatStreamEvent, id: string, previous: ToolStep | 
     type: toolType,
     status,
     title: resolveToolTitle(toolType, name, previous),
-    description: resolveToolDescription(toolType, error ? { ...event, error } : event, name, status, previous),
+    description: waitingForConfirmation ? '操作尚未执行，等待用户确认' : resolveToolDescription(toolType, error ? { ...event, error } : event, name, status, previous),
     ...(input ? { input } : {}),
     ...(output ? { output } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
@@ -515,12 +517,17 @@ function toRecord(value: unknown): Record<string, unknown> | null {
 }
 
 // Restore older journals whose shell exit code hid a controlled API failure.
-function readBusinessError(command: string | null | undefined, output: string): string | null {
+function readControlledFailure(command: string | null | undefined, output: string) {
   if (!command || !/(?:callKnowledgeBaseApi|queryOaDatabase|callOaApi)\.mjs\b/.test(command)) return null
   try {
     const result = JSON.parse(output)
     if (result?.ok !== false) return null
-    const message = result.error?.message ?? result.data?.error?.message
-    return typeof message === 'string' ? message.slice(0, 500) : '业务请求未成功'
+    return result
   } catch { return null }
+}
+
+function readBusinessError(result: ReturnType<typeof readControlledFailure>): string | null {
+  if (!result) return null
+  const message = result.error?.message ?? result.data?.error?.message
+  return typeof message === 'string' ? message.slice(0, 500) : '业务请求未成功'
 }

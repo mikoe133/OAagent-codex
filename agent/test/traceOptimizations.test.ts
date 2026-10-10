@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { Codex, type ThreadEvent } from '@openai/codex-sdk';
 import { completedTurnEvents, runCompletedTurn } from '../src/infrastructure/codex/completedTurn.js';
-import { toolBusinessError } from '../src/application/toolBusinessError.js';
+import { toolBusinessError, toolWaitingForConfirmation } from '../src/application/toolBusinessError.js';
 import { buildOpenApiIndex } from '../src/infrastructure/oa/openApiIndex.js';
 
 const answer: ThreadEvent = { type: 'item.completed', item: { id: 'a', type: 'agent_message', text: 'answer' } };
@@ -57,8 +57,8 @@ test('controlled scripts preserve business error JSON and exit nonzero; successf
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const env = { ...process.env, CALL_OA_READ_URL: url, CALL_OA_READ_TOKEN: 'fixture', CALL_OA_API_SESSION_ID: 'fixture', CALL_KNOWLEDGE_BASE_API_URL: url, CALL_KNOWLEDGE_BASE_API_TOKEN: 'fixture' };
-  for (const script of ['queryOaDatabase.mjs', 'callKnowledgeBaseApi.mjs']) {
+  const env = { ...process.env, CALL_OA_READ_URL: url, CALL_OA_READ_TOKEN: 'fixture', CALL_OA_API_SESSION_ID: 'fixture', CALL_OA_API_URL: url, CALL_OA_API_TOKEN: 'fixture', CALL_KNOWLEDGE_BASE_API_URL: url, CALL_KNOWLEDGE_BASE_API_TOKEN: 'fixture' };
+  for (const script of ['queryOaDatabase.mjs', 'callKnowledgeBaseApi.mjs', 'callOaApi.mjs']) {
     const execute = () => new Promise<{ code: number; stdout: string }>(resolve => execFile(process.execPath,
       [fileURLToPath(new URL(`../scripts/${script}`, import.meta.url)), '--input', '{"action":"catalog"}', '--operationId', 'read'], { env }, (error, stdout) => resolve({ code: Number(error?.code ?? 0), stdout })));
     ok = false;
@@ -66,6 +66,15 @@ test('controlled scripts preserve business error JSON and exit nonzero; successf
     ok = true;
     const succeeded = await execute(); assert.equal(succeeded.code, 0); assert.equal(JSON.parse(succeeded.stdout).ok, true);
   }
+});
+
+test('waiting for confirmation is distinguishable from a business failure without claiming execution', () => {
+  const command = 'node scripts/callOaApi.mjs --operationId write';
+  const output = JSON.stringify({ ok: false, error: { code: 'confirmation_required', message: 'not executed' } });
+  assert.equal(toolBusinessError(command, output), undefined);
+  assert.equal(toolWaitingForConfirmation(command, output), true);
+  assert.equal(toolWaitingForConfirmation('echo data', output), false);
+  assert.equal(toolWaitingForConfirmation(command, JSON.stringify({ ok: true, rows: [{ error: { code: 'confirmation_required' } }] })), false);
 });
 
 test('controlled envelopes fail on business errors, not on arbitrary text or nested row fields', () => {

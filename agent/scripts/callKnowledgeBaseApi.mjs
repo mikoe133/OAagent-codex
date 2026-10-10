@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { stringifyJsonLineSafe } from "./jsonLineSafe.mjs";
+import { postControlledTool, toolResultExitCode } from './controlledToolRequest.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const url = process.env.CALL_KNOWLEDGE_BASE_API_URL;
@@ -13,14 +14,7 @@ if (!url || !token) {
   process.exit(2);
 }
 
-const response = await fetch(url, {
-  method: "POST",
-  headers: {
-    authorization: `Bearer ${token}`,
-    "content-type": "application/json",
-    accept: "application/json",
-  },
-  body: JSON.stringify({
+const data = await postControlledTool(url, token, {
     sessionId: args.sessionId || process.env.CALL_KNOWLEDGE_BASE_API_SESSION_ID,
     operationId: args.operationId,
     attachmentId: args.attachmentId,
@@ -28,18 +22,9 @@ const response = await fetch(url, {
     query: parseJsonArg(args.query, "query"),
     body: parseJsonArg(args.body, "body"),
     confirmed: parseBooleanArg(args.confirmed),
-  }),
 });
-
-const text = await response.text();
-let data;
-try {
-  data = text ? JSON.parse(text) : null;
-} catch {
-  data = text;
-}
 console.log(stringifyJsonLineSafe(data, 2));
-if (!response.ok || data?.ok === false) process.exitCode = 1;
+process.exitCode = toolResultExitCode(data);
 
 function parseArgs(values) {
   const result = {};

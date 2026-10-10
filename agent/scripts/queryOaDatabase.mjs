@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Credentials remain in the server; this process only receives a session-scoped capability.
 import { stringifyJsonLineSafe } from "./jsonLineSafe.mjs";
+import { postControlledTool, toolResultExitCode } from './controlledToolRequest.mjs';
 const args = process.argv.slice(2);
 const payloadIndex = args.indexOf("--input");
 if (payloadIndex < 0 || !args[payloadIndex + 1]) {
@@ -13,14 +14,9 @@ try {
   const token = process.env.CALL_OA_READ_TOKEN;
   const sessionId = process.env.CALL_OA_API_SESSION_ID;
   if (!url || !token || !sessionId) throw new Error("只读数据库查询工具未配置");
-  const response = await fetch(url, {
-    method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ ...input, sessionId }), signal: AbortSignal.timeout(45000),
-  });
-  if (!response.ok) throw new Error(`只读工具请求失败 (${response.status})`);
-  const result = await response.json();
+  const result = await postControlledTool(url, token, { ...input, sessionId });
   console.log(stringifyJsonLineSafe(result, 2));
-  if (result?.ok === false) process.exitCode = 1;
+  process.exitCode = toolResultExitCode(result);
 } catch (e) {
   console.error(e instanceof SyntaxError ? "--input 必须是合法 JSON" : e.message);
   process.exitCode = 1;

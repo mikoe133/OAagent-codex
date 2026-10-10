@@ -102,6 +102,43 @@ async function fixture() {
   return { dir, config: { databaseUrl: "mysql://read:unused@localhost/oa", metadataPath, stateDirectory: dir, syncIntervalSeconds: 300, queryTimeoutMs: 1000, maxRows: 100, concurrency: 2 } };
 }
 
+test('read failures distinguish connection, execution timeout and permissions without recommending narrower business scope', async t => {
+  const { dir, config } = await fixture();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const backing = fakeDatabase(() => schema);
+  let failureCode: string | undefined;
+  let reads = 0;
+  const db = { ...backing, read: async (operation: any) => {
+    reads++;
+    if (failureCode) throw Object.assign(new Error('SQL password=secret'), { code: failureCode });
+    return backing.read(operation);
+  } } as ReadDatabase;
+  const service = new OaReadService(config, db);
+  t.after(() => service.close());
+  await service.sync('test');
+  const version = (await readCatalogState(dir))!.active!.version;
+  for (const [code, expected, category] of [
+    ['ECONNRESET', 'database_temporarily_unavailable', 'transient'],
+    ['ER_QUERY_TIMEOUT', 'database_query_timeout', 'execution'],
+    ['ER_BAD_FIELD_ERROR', 'database_query_failed', 'execution'],
+  ]) {
+    failureCode = code;
+    const result: any = await service.call({ action: 'query', version, query: basic }, principal);
+    assert.equal(result.error.code, expected);
+    assert.equal(result.error.recovery.category, category);
+    assert.equal(result.error.recovery.action, 'stop_for_turn');
+    assert.doesNotMatch(result.error.message, /请缩小/);
+    assert.doesNotMatch(JSON.stringify(result), /password|secret/);
+  }
+  reads = 0;
+  const forbidden: any = await service.call({ action: 'query', version, query: {
+    from: { entity: 'salaries', as: 's' }, select: [{ field: 's.id', as: 'id' }],
+  } }, principal);
+  assert.equal(forbidden.error.code, 'entity_forbidden');
+  assert.equal(forbidden.error.recovery.category, 'permission');
+  assert.equal(reads, 0);
+});
+
 test("sync atomically publishes, rejects breaking changes, preserves old version and recovers", async t => {
   const { dir, config } = await fixture(); t.after(() => rm(dir, { recursive: true, force: true }));
   let current = structuredClone(schema); const db = fakeDatabase(() => current);
@@ -258,7 +295,7 @@ test("read API calls are stopped server-side while confirmed writes retain the A
 
 test("text chunks are bounded and metadata publication timestamps do not change on periodic checks", async t => {
   const query = compileQuery({from:{entity:'members',as:'m'},select:[{field:'m.name',as:'content',textOffset:6000,textLength:2000}]},published,principal,100,1000);
-  assert.match(query.sql,/SUBSTRING\(CAST\(`m`.`name` AS CHAR\), 6001, 2000\)/);
+  assert.match(query.sql,/SUBSTRING\(CAST\(`m`.`name` AS CHAR\), 6001, 2001\)/);
   const {dir,config}=await fixture();t.after(()=>rm(dir,{recursive:true,force:true}));
   const db=fakeDatabase(()=>schema);
   await synchronizeMetadata(config,db,'startup');
