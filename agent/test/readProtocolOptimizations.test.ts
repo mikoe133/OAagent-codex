@@ -145,6 +145,71 @@ test('field projection trims definitions but preserves types, enumerations, rela
   t.diagnostic(`Selected definitions: ${selectedBytes} bytes; full definitions: ${fullBytes} bytes`);
 });
 
+test('runtime and searched catalogs expose current published field names without reading SQL or full definitions', async t => {
+  const { service, save, transactions } = await fixture(t);
+  const context: any = await service.context('dynamic-fields', principal);
+  const item = context.catalog.entities.find((entity: any) => entity.name === 'work_items');
+  assert.deepEqual(item.availableFields, Object.keys(semantic.entities[0]!.columns));
+  assert.equal(item.columns, undefined); // Names do not duplicate long field descriptions.
+  assert.equal(context.catalog.entities.some((entity: any) => entity.name === 'restricted'), false);
+  const admin: any = await service.call({ action: 'catalog' }, { ...principal, isAdmin: true });
+  assert.deepEqual(admin.entities.find((entity: any) => entity.name === 'restricted').availableFields, ['id']);
+
+  const next = structuredClone(published);
+  next.version = 'v2';
+  delete next.semantic.entities[0]!.columns.extra_0;
+  next.semantic.entities[0]!.columns.display_label = { description: 'new published label' };
+  await save(next);
+  const updated: any = await service.context('dynamic-fields', principal);
+  assert.equal(updated.catalog.version, 'v2');
+  const fields = updated.catalog.entities.find((entity: any) => entity.name === 'work_items').availableFields;
+  assert.ok(fields.includes('display_label')); assert.ok(!fields.includes('extra_0'));
+  const searched: any = await service.call({ action: 'catalog', search: 'activity' }, principal);
+  assert.deepEqual(searched.entities.map((entity: any) => entity.name), ['activity']);
+  assert.deepEqual(searched.entities[0].availableFields, Object.keys(semantic.entities[1]!.columns));
+  assert.equal(transactions(), 0);
+});
+
+test('one definition failure reports every invalid field position and real names for all affected entities', async t => {
+  const { service, transactions } = await fixture(t);
+  const input = { action: 'describe', entities: ['work_items', 'activity'], fields: {
+    work_items: ['id', 'name', 'start_date', 'end_date'], activity: ['id', 'content', 'source'],
+  } };
+  const failed: any = await service.call(input, principal);
+  assert.equal(failed.ok, false); assert.equal(failed.version, 'v1');
+  assert.deepEqual(failed.error.issues.map((issue: any) => issue.path), ['fields.work_items', 'fields.activity']);
+  assert.match(failed.error.issues[0].message, /1, 2, 3/);
+  assert.match(failed.error.issues[1].message, /1, 2/);
+  assert.deepEqual(failed.error.availableFields.work_items, Object.keys(semantic.entities[0]!.columns));
+  assert.deepEqual(failed.error.availableFields.activity, Object.keys(semantic.entities[1]!.columns));
+  assert.equal(failed.entities, undefined); assert.equal(transactions(), 0);
+
+  // A single correction uses the returned catalog, rather than guessing again.
+  const corrected: any = await service.call({ ...input, fields: failed.error.availableFields }, principal);
+  assert.equal(corrected.ok, true); assert.equal(transactions(), 0);
+  assert.deepEqual(Object.keys(corrected.entities[0].columns), failed.error.availableFields.work_items);
+  const forbidden: any = await service.call({ action: 'describe', entities: ['work_items', 'restricted'],
+    fields: { work_items: ['missing'], restricted: ['missing'] },
+  }, principal);
+  assert.equal(forbidden.error.code, 'entity_forbidden');
+  assert.equal(forbidden.error.availableFields, undefined); assert.equal(transactions(), 0);
+});
+
+test('definition recovery covers ten entities together without truncating to the first eight errors', async t => {
+  const { service, save, transactions } = await fixture(t);
+  const next = structuredClone(published);
+  next.semantic.entities = Array.from({ length: 10 }, (_, index) => ({ ...semantic.entities[0]!, name: `dynamic_${index}` }));
+  await save(next);
+  const entities = next.semantic.entities.map(entity => entity.name);
+  const result: any = await service.call({ action: 'describe', entities,
+    fields: Object.fromEntries(entities.map(name => [name, Array.from({ length: 12 }, (_, index) => `unknown_${index}`)])),
+  }, principal);
+  assert.equal(result.ok, false); assert.equal(result.error.issues.length, 10);
+  assert.deepEqual(Object.keys(result.error.availableFields), entities);
+  for (const issue of result.error.issues) assert.match(issue.message, /0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11/);
+  assert.equal(transactions(), 0);
+});
+
 test('invalid or forbidden definition projections never leak hidden fields or query the database', async t => {
   const { service, transactions } = await fixture(t);
   for (const input of [
@@ -156,6 +221,37 @@ test('invalid or forbidden definition projections never leak hidden fields or qu
     const result: any = await service.call({ action: 'describe', ...input }, principal);
     assert.equal(result.ok, false); assert.ok(!result.entities); assert.equal(transactions(), 0);
   }
+});
+
+test('extra projection entities reveal no field names outside the requested accessible entities', async t => {
+  const { service, transactions } = await fixture(t);
+  const result: any = await service.call({ action: 'describe', entities: ['work_items'],
+    fields: { work_items: ['unknown'], activity: ['body'], restricted: ['id'] },
+  }, principal);
+  assert.equal(result.ok, false);
+  assert.deepEqual(Object.keys(result.error.availableFields), ['work_items']);
+  assert.ok(result.error.issues.some((issue: any) => issue.path === 'fields'));
+  assert.equal(transactions(), 0);
+});
+
+test('model-chosen periods, projections and limits survive batching, and missing evidence can expand to full history', async t => {
+  const { service, queries, transactions } = await fixture(t);
+  const recent = { ...activity, limit: 7, select: [activity.select[0], activity.select[1], activity.select[2], activity.select[3]] };
+  const result: any = await service.call({ action: 'batch', version: 'v1', queries: [
+    { id: 'items', query: { ...items, limit: 4 } }, { id: 'recent', query: recent },
+  ] }, principal);
+  assert.equal(result.ok, true); assert.equal(transactions(), 1); assert.equal(queries.length, 2);
+  assert.deepEqual(queries[1]!.bindings, [1, 2, '2026-11-01', '2026-10-01']);
+  assert.match(queries[1]!.sql, /LIMIT 8/);
+  assert.match(queries[1]!.sql, /SUBSTRING\(CAST\(`a`\.`note` AS CHAR\), 1, 6001\) AS `note`/);
+  assert.match(queries[1]!.sql, /`a`\.`happened_on` AS `date`/);
+  assert.match(result.results[1].rows[0].note, /待核实/);
+
+  // Broader evidence remains available; the server never injects a recent-only cutoff.
+  const { period: _recentPeriod, ...history } = recent;
+  const expanded: any = await service.call({ action: 'query', version: 'v1', query: { ...history, limit: 80 } }, principal);
+  assert.equal(expanded.ok, true); assert.equal(transactions(), 2);
+  assert.deepEqual(queries[2]!.bindings, [1, 2]); assert.match(queries[2]!.sql, /LIMIT 81/);
 });
 
 test('projection of one entity keeps another dynamically named entity complete', async t => {

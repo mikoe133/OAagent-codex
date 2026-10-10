@@ -229,8 +229,10 @@ test("sync publishes all eligible tables; catalog, describe and query enforce th
 
 test("type drift requires semantic review; new non-credential fields publish automatically", async t => {
   const { dir, config } = await fixture(); t.after(() => rm(dir, { recursive: true, force: true }));
-  const current = structuredClone(schema); const db = fakeDatabase(() => current);
+  const current = structuredClone(schema); const queries: string[] = []; const db = fakeDatabase(() => current, queries);
+  const service = new OaReadService(config, db); t.after(() => service.close());
   await synchronizeMetadata(config, db, "startup");
+  const initial: any = await service.context('sync-fields', principal);
   current.tables[0]!.columns[1]!.type = "text";
   assert.equal((await synchronizeMetadata(config, db, "scheduled")).status, "rejected");
   const revised = structuredClone(semantic); revised.entities[0]!.columns.name!.description = "Reviewed text field";
@@ -240,6 +242,20 @@ test("type drift requires semantic review; new non-credential fields publish aut
   assert.equal((await synchronizeMetadata(config, db, "scheduled")).status, "published");
   const state = (await readCatalogState(dir))!;
   assert.ok(state.active!.semantic.entities[0]!.columns.new_sensitive_field);
+  const future = structuredClone(current.tables[0]!);
+  future.name = 'future_events';
+  future.columns = [future.columns[0]!, { ...future.columns[0]!, name: 'event_label', ordinal: 2 },
+    { ...future.columns[0]!, name: 'secret_token', ordinal: 3 }];
+  current.tables.push(future);
+  assert.equal((await synchronizeMetadata(config, db, "scheduled")).status, "published");
+  queries.length = 0;
+  const updated: any = await service.context('sync-fields', principal);
+  assert.notEqual(updated.catalog.version, initial.catalog.version);
+  assert.ok(updated.catalog.entities.find((entity: any) => entity.name === 'members').availableFields.includes('new_sensitive_field'));
+  assert.deepEqual(updated.catalog.entities.find((entity: any) => entity.name === 'future_events').availableFields, ['id', 'event_label']);
+  const manifest = JSON.parse(await readFile(config.metadataPath, 'utf8'));
+  assert.equal(manifest.entities.some((entity: any) => entity.name === 'future_events'), false);
+  assert.equal(queries.length, 0); // Chat uses the synchronized version, with no live introspection.
 });
 
 test("malformed semantic updates fail closed without replacing the last good catalog", async t => {

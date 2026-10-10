@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 // Return schema expectations, never submitted values or SQL/driver messages.
-export function invalidQuery(error: z.ZodError) {
-  const issues = error.issues.slice(0, 8).map(issue => ({
+export function invalidQuery(error: z.ZodError, issueLimit = 8) {
+  const issues = error.issues.slice(0, issueLimit).map(issue => ({
     path: issue.path.join('.') || '$',
     code: issue.code,
     message: issue.code === 'invalid_enum_value' ? `允许值：${issue.options.join(', ')}`

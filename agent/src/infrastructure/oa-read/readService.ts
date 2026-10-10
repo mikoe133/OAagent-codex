@@ -134,18 +134,39 @@ export class OaReadService {
       const allowed = active.semantic.entities.filter(e => accessible(e, principal, active.schema));
       if (input.action === "catalog") {
         const terms = input.search?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
-        return { ok: true as const, version: active.version, publishedAt: active.publishedAt, rules: active.semantic.rules, entities: allowed.filter(e => !terms.length || terms.some(t => `${e.name} ${e.description}`.toLowerCase().includes(t))).map(e => ({ name: e.name, description: e.description, scope: tableAccess(e.table, active.schema) })) };
+        // Names only: expose the current published action space without another
+        // model/tool round trip or duplicating full definitions in every prompt.
+        return { ok: true as const, version: active.version, publishedAt: active.publishedAt, rules: active.semantic.rules, entities: allowed.filter(e => !terms.length || terms.some(t => `${e.name} ${e.description}`.toLowerCase().includes(t))).map(e => ({ name: e.name, description: e.description, scope: tableAccess(e.table, active.schema), availableFields: Object.keys(e.columns) })) };
       }
       if (input.action === "describe") {
         const requestedEntities = input.entities;
         const requestedFields = input.fields;
         const fieldsByEntity = new Map(Object.entries(requestedFields ?? {}));
         if (input.entities.some(name => !allowed.some(e => e.name === name))) return failure("entity_forbidden", "实体未发布或当前用户无权访问。");
+        const issues: z.ZodIssue[] = [];
+        const availableFields = new Map<string, string[]>();
+        if ([...fieldsByEntity.keys()].some(name => !requestedEntities.includes(name))) {
+          issues.push({ code: 'custom', path: ['fields'], message: 'fields 中的实体必须全部包含在 entities 中。' });
+        }
         for (const [name, fields] of Object.entries(requestedFields ?? {})) {
-          if (!requestedEntities.includes(name)) throw new z.ZodError([{ code: 'custom', path: ['fields', name], message: 'fields 只能选择 entities 中的实体。' }]);
+          if (!requestedEntities.includes(name)) continue;
           const entity = allowed.find(e => e.name === name)!;
-          const unknown = fields.findIndex(field => !Object.hasOwn(entity.columns, field));
-          if (unknown !== -1) throw new z.ZodError([{ code: 'custom', path: ['fields', name, unknown], message: '字段未发布或不可访问，不能读取其定义。' }]);
+          const unknown = fields.flatMap((field, index) => Object.hasOwn(entity.columns, field) ? [] : [index]);
+          if (unknown.length) {
+            // Group every invalid position by entity so ten projected entities
+            // can be corrected together, with bounded errors and no guessed values.
+            issues.push({ code: 'custom', path: ['fields', name], message: `字段位置 ${unknown.join(', ')}（从 0 开始）未发布或不可访问，不能读取其定义。` });
+            availableFields.set(name, Object.keys(entity.columns));
+          }
+        }
+        if (issues.length) {
+          const result = invalidQuery(new z.ZodError(issues), issues.length);
+          return { ...result, version: active.version, error: {
+            ...result.error, availableFields: Object.fromEntries(availableFields),
+            recovery: { ...result.error.recovery,
+              instruction: '依据当前 version 和 error.availableFields 一次修正全部 fields 错处，不继续猜字段名。字段含义不确定时，对所需实体省略 fields 读取完整定义；不要删减业务查询的对象、筛选或期间，也不要扫描源码。',
+            },
+          } };
         }
         const result = { ok: true as const, version: active.version, entities: allowed.filter(e => requestedEntities.includes(e.name)).map(e => {
           const fields = fieldsByEntity.get(e.name);
