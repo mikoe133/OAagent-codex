@@ -63,3 +63,19 @@ test("keeps an empty local cache when that session still has unsynced work", () 
 
   assert.equal(resolveLoadedSessionMessages(cachedMessages, persistedMessages, true), cachedMessages)
 })
+
+test("server history corrects a device's cached duration even without trace data", () => {
+  const cached = [{ id: "same:assistant", content: "answer", durationMs: 210_000 }]
+  const persisted = [{ id: "same:assistant", content: "answer", durationMs: 193_992 }]
+  const result = resolveLoadedSessionMessages(cached, persisted, false)
+  assert.equal(result[0]?.durationMs, 193_992)
+  assert.equal(cached[0]?.durationMs, 210_000)
+  assert.equal(result[0]?.content, "answer")
+})
+
+test("server zero or missing duration is not replaced by a device's cached timing", () => {
+  const cached: Array<{ id: string; durationMs?: number }> = [{ id: "same:assistant", durationMs: 12_000 }]
+  assert.equal(resolveLoadedSessionMessages(cached, [{ id: "same:assistant", durationMs: 0 }], false)[0]?.durationMs, 0)
+  assert.equal(resolveLoadedSessionMessages(cached, [{ id: "same:assistant" }], false)[0]?.durationMs, undefined)
+  assert.equal(resolveLoadedSessionMessages(cached, [{ id: "same:assistant", durationMs: 0 }], true), cached)
+})

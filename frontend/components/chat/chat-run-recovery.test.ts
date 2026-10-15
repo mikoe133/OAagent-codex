@@ -9,3 +9,10 @@ test('recovers the committed original result, trace and confirmation without res
 test('does not report another request or a noncompleted execution as success', () => {
   for (const value of [null, {}, { ...completed, recordId: '42' }, { ...completed, requestId: 'other' }, ...['queued', 'running', 'failed', 'cancelled', 'unknown'].map(state => ({ ...completed, state })), { ...completed, result: null }, { ...completed, result: { finalResponse: null } }]) assert.equal(completedRequestEvent(value, '41', 'original'), null)
 })
+
+test('recovery preserves server duration and derives legacy durations only from server timestamps', () => {
+  const request = { ...completed, createdAt: '2026-10-15T06:05:08.893Z', updatedAt: '2026-10-15T06:08:22.885Z' }
+  assert.equal((completedRequestEvent({ ...request, durationMs: 47_525 }, '41', 'original')?.result as any)?.durationMs, 47_525)
+  assert.equal((completedRequestEvent(request, '41', 'original')?.result as any)?.durationMs, 193_992)
+  assert.equal((completedRequestEvent({ ...request, result: { ...request.result, durationMs: 0 } }, '41', 'original')?.result as any)?.durationMs, 0)
+})
