@@ -3,6 +3,29 @@ import test from "node:test"
 
 import { DELETE, GET, PATCH, POST } from "./[...segments]/route"
 
+test("normalizes quoted session cookies and rejects malformed cookies before proxying", async () => {
+  const restore = configureEnvironment()
+  const originalFetch = globalThis.fetch
+  const forwarded: (string | null)[] = []
+  globalThis.fetch = async (_input, init) => {
+    forwarded.push(new Headers(init?.headers).get("cookie"))
+    return Response.json({ code: 200, data: { items: [] } })
+  }
+  try {
+    const token = "literal%3D-token+/=="
+    const call = (cookie: string) => GET(new Request("http://localhost/api/automation/tags", {
+      headers: { cookie },
+    }), context("tags"))
+    assert.equal((await call(`sessionid="${encodeURIComponent(token)}"`)).status, 200)
+    assert.deepEqual(forwarded, [`sessionid=${token}`])
+    assert.equal((await call("sessionid=broken%ZZ")).status, 401)
+    assert.equal(forwarded.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
 test("proxies the task list to the OA management API with the HttpOnly session", async () => {
   const restore = configureEnvironment()
   const originalFetch = globalThis.fetch

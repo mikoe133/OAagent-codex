@@ -3,6 +3,30 @@ import test from "node:test"
 
 import { POST } from "./route"
 
+test("POST normalizes quoted cookies and rejects malformed cookies before forwarding", async () => {
+  const originalFetch = globalThis.fetch
+  const forwarded: (string | null)[] = []
+  globalThis.fetch = async (_input, init) => {
+    forwarded.push(new Headers(init?.headers).get("authorization"))
+    return new Response('event: run.completed\ndata: {"type":"run.completed","result":{"finalResponse":"ok"}}\n\n')
+  }
+  const call = (cookie: string) => POST(new Request("http://localhost/api/chat", {
+    method: "POST", headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ recordId: "1", requestId: "cookie-test", messages: [{ role: "user", content: "hello" }] }),
+  }))
+  try {
+    const token = "literal%3D-token+/=="
+    const response = await call(`sessionid="${encodeURIComponent(token)}"`)
+    assert.equal(response.status, 200)
+    await response.text()
+    assert.deepEqual(forwarded, [`Bearer ${token}`])
+    assert.equal((await call("sessionid=broken%ZZ")).status, 401)
+    assert.equal(forwarded.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test("POST forwards the selected DeepSeek V4.1 Flash model to the agent service", async () => {
   const originalFetch = globalThis.fetch
   let forwardedBody: unknown = null
