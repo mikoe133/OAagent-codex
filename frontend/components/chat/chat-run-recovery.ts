@@ -1,4 +1,5 @@
 import type { ChatStreamEvent } from './chat-stream'
+import { serverResponseDurationMs } from '@/lib/response-duration'
 
 // A browser stream can fail after the server has committed its result. Recover
 // only that same request; never submit a new business operation to check it.
@@ -8,5 +9,7 @@ export function completedRequestEvent(value: unknown, recordId: string, requestI
   if (request.recordId !== recordId || request.requestId !== requestId || request.state !== 'completed' || !request.result || typeof request.result !== 'object') return null
   const result = request.result as Record<string, unknown>
   if (typeof result.finalResponse !== 'string') return null
-  return { type: 'run.completed', result: { ...result, traceEvents: request.traceEvents } }
+  const durationMs = serverResponseDurationMs(request)
+  return { type: 'run.completed', result: { ...result,
+    ...(durationMs !== undefined ? { durationMs } : {}), traceEvents: request.traceEvents } }
 }

@@ -11,7 +11,7 @@ import type { SessionStore } from '../infrastructure/persistence/sessionStore.js
 import { getDefaultModel, resolveRequestedModel, resolveRequestedProvider, resolveRequestedRouterModel, resolveRequestedRouterModels } from '../config/modelCatalog.js';
 import { ChatError, ChatScheduler } from './chatScheduler.js';
 import { CopilotClient, type CopilotRecord } from './copilotClient.js';
-import { RequestStore, fingerprint, type RequestRecord } from './requestStore.js';
+import { RequestStore, fingerprint, requestDurationMs, type RequestRecord } from './requestStore.js';
 import { ChatTraceRecorder } from './chatTrace.js';
 import { confirmationResponseSchema } from './confirmation.js';
 
@@ -214,10 +214,12 @@ export class PublicChatApi {
                 if (event.type === 'run.failed') throw new Error('agent_failed');
                 await trace.record(event);
                 if (event.type === 'run.completed') {
+                  value.state = 'completed'; value.updatedAt = new Date().toISOString();
+                  value.durationMs = requestDurationMs(value);
                   value.result = { recordId, requestId: messageKey, finalResponse: event.result.finalResponse,
                     provider: event.result.provider, model: event.result.model, knowledgeSources: event.result.knowledgeSources,
+                    durationMs: value.durationMs,
                     ...(event.result.confirmation ? { confirmation: event.result.confirmation } : {}) };
-                  value.state = 'completed'; value.updatedAt = new Date().toISOString();
                   await this.records.save(key, value); // Commit before attempting OA history sync.
                 } else {
                   const { sessionId: _sid, ...publicEvent } = event;
@@ -266,12 +268,15 @@ export class PublicChatApi {
     if (value && ['running','queued'].includes(value.state) && !this.active.has(key)) value.state = 'unknown';
     if (!value) return null;
     const traceEvents = await this.records.readTrace(key);
-    return { ...value, traceEvents };
+    const durationMs = requestDurationMs(value);
+    return { ...value, durationMs,
+      ...(value.result ? { result: { ...value.result, durationMs } } : {}), traceEvents };
   }
   private async fail(key: string, value: RequestRecord, trace: ChatTraceRecorder, error: unknown) {
     value.state = error instanceof ChatError && error.code === 'cancelled' ? 'cancelled' : 'failed';
     value.errorCode = error instanceof ChatError ? error.code : 'agent_failed';
     value.updatedAt = new Date().toISOString();
+    value.durationMs = requestDurationMs(value);
     await trace.record({ type: 'run.failed', status: value.state, error: value.errorCode });
     await this.records.save(key, value);
   }
@@ -287,7 +292,7 @@ export class PublicChatApi {
       { id: `${value.requestId}:user`, requestId: value.requestId, role: 'user', content: value.message, ...(value.confirmationResponse ? { confirmationResponse: value.confirmationResponse } : {}), ...(value.attachments ? { attachments: value.attachments, attachmentOptions: value.attachmentOptions } : {}), createdAt: value.createdAt },
       { id: `${value.requestId}:assistant`, requestId: value.requestId, role: 'assistant', content: value.result?.finalResponse ?? '',
         createdAt: value.updatedAt, status: value.state === 'cancelled' ? 'stopped' : value.state,
-        durationMs: Math.max(0, Date.parse(value.updatedAt) - Date.parse(value.createdAt)),
+        durationMs: requestDurationMs(value),
         ...(value.errorCode ? { error: value.errorCode } : {}),
         ...(value.result ? { model: value.result.model, provider: value.result.provider } : {}),
         ...(value.result?.confirmation ? { confirmation: value.result.confirmation } : {}),
@@ -327,7 +332,7 @@ export class PublicChatApi {
       latency?.finish({ status: value?.state === 'completed' ? 'completed' : 'failed', provider: value?.result?.provider, model: value?.result?.model });
       emit(value?.state === 'completed'
         ? { type: 'run.completed', recordId, requestId, result: { ...value.result, traceEvents: value.traceEvents }, historySync: value.historySync }
-        : { type: 'run.failed', recordId, requestId, error: value?.errorCode ?? 'outcome_unknown', state: value?.state, traceEvents: value?.traceEvents });
+        : { type: 'run.failed', recordId, requestId, error: value?.errorCode ?? 'outcome_unknown', state: value?.state, durationMs: value?.durationMs, traceEvents: value?.traceEvents });
     } catch { emit({ type: 'run.failed', recordId, requestId, error: 'result_unavailable' }); }
     finally { cleanup(); if (!res.destroyed) res.end(); }
   }

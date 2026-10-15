@@ -28,7 +28,7 @@ import {
   type ModelProvider,
   type RouterModel,
 } from "@/lib/model-catalog"
-import { calculateResponseDurationMs, normalizeResponseDuration } from "@/lib/response-duration"
+import { normalizeResponseDuration, serverResponseDurationMs } from "@/lib/response-duration"
 import {
   createRequestRoutingTraceGate,
   drainChatSseBuffer,
@@ -500,12 +500,14 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
   // Load messages from localStorage on mount
   useEffect(() => {
+    let disposed = false
     try {
       let storedMessages: Message[] = []
       const stored = localStorage.getItem(STORAGE_KEY)
       if (stored) {
         const parsed = JSON.parse(stored)
-        storedMessages = normalizeStoredMessages(parsed)
+        // Older devices cached browser elapsed time. Revalidate timing from OA.
+        storedMessages = normalizeStoredMessages(parsed).map(message => ({ ...message, durationMs: undefined }))
         messagesRef.current = storedMessages
         setMessages(storedMessages)
       }
@@ -528,11 +530,28 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       activeSessionIdRef.current = currentSessionId
       sessionMessagesRef.current.set(currentSessionId, storedMessages)
       setAgentSessionId(currentSessionId)
+      if (/^[1-9]\d*$/.test(currentSessionId)) {
+        void loadChatSession({ sessionId: currentSessionId, recordId: currentSessionId }).then(session => {
+          if (disposed || activeSessionIdRef.current !== currentSessionId || !session) return
+          const nextMessages = resolveLoadedSessionMessages(
+            sessionMessagesRef.current.get(currentSessionId),
+            normalizeStoredMessages(session.messages),
+            activeSessionRunsRef.current.has(currentSessionId) || sessionSaveQueuesRef.current.has(currentSessionId),
+          )
+          sessionMessagesRef.current.set(currentSessionId, nextMessages)
+          messagesRef.current = nextMessages
+          setMessages(nextMessages)
+          setActiveRecordId(session.recordId ?? currentSessionId)
+        }).catch(() => {
+          if (!disposed) console.warn("Failed to refresh cached chat timing: See [oa-chat] diagnostics.")
+        })
+      }
     } catch (e) {
       console.error("Failed to load from localStorage:", e)
     } finally {
       setIsLoaded(true)
     }
+    return () => { disposed = true }
   }, [])
 
   useEffect(() => {
@@ -952,6 +971,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       let currentKnowledgeSources: KnowledgeSource[] = []
       let responseModel: string | undefined
       let responseProvider: string | undefined
+      let responseDurationMs: number | undefined
       let currentConfirmation: ChatConfirmation | undefined
       let completedResult: Record<string, unknown> | null = null
 
@@ -1196,6 +1216,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             completedRunReceived = true
             const result = toRecord(event.result)
             completedResult = result
+            responseDurationMs = serverResponseDurationMs(result)
             currentConfirmation = validConfirmation(result?.confirmation)
             responseModel = stringValue(result?.model) || undefined
             responseProvider = stringValue(result?.provider) || undefined
@@ -1214,6 +1235,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
           if (event.type === "run.failed") {
             routingTraceGate.dismiss()
+            responseDurationMs = serverResponseDurationMs(event)
             const storedTrace = restoreStoredTrace(event.traceEvents, event.state === 'cancelled' ? 'stopped' : 'failed')
             if (storedTrace) {
               updateAssistantToolSteps(storedTrace.toolSteps)
@@ -1261,7 +1283,6 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
           completedRunReceived = true
         }
 
-        const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
         await waitForTypewriterFlush()
         cancelTypewriter()
         currentToolSteps = finalizeToolSteps(currentToolSteps, "completed")
@@ -1276,7 +1297,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
               status: "completed",
               model: responseModel,
               provider: responseProvider,
-              durationMs,
+              durationMs: responseDurationMs,
               ...(currentConfirmation ? { confirmation: currentConfirmation } : {}),
               ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
               ...(currentKnowledgeSources.length > 0 ? { knowledgeSources: currentKnowledgeSources } : {}),
@@ -1309,7 +1330,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             const trace = restoreStoredTrace(recovered.traceEvents)
             publishSessionMessages([...conversationMessages, userMessage, {
               ...assistantMessage, content: typeof recovered.finalResponse === 'string' ? recovered.finalResponse : accumulatedContent,
-              status: 'completed', durationMs: calculateResponseDurationMs(responseStartedAt, performance.now()),
+              status: 'completed', durationMs: serverResponseDurationMs(recovered),
               model: stringValue(recovered.model) ?? undefined, provider: stringValue(recovered.provider) ?? undefined,
               confirmation: validConfirmation(recovered.confirmation), knowledgeSources: normalizeKnowledgeSources(recovered.knowledgeSources),
               ...(trace ?? { toolSteps: finalizeToolSteps(currentToolSteps, 'completed'), traceMessages: currentTraceMessages }),
@@ -1322,7 +1343,6 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
         const wasStopped = e instanceof Error && e.name === "AbortError"
         const errorMessage = e instanceof Error ? e.message : "An error occurred"
-        const durationMs = calculateResponseDurationMs(responseStartedAt, performance.now())
         currentToolSteps = finalizeToolSteps(
           currentToolSteps,
           wasStopped ? "stopped" : "failed",
@@ -1336,7 +1356,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
               ...assistantMessage,
               content: accumulatedContent || visibleContent,
               status: wasStopped ? "stopped" : "failed",
-              durationMs,
+              durationMs: responseDurationMs,
               ...(!wasStopped ? { error: errorMessage } : {}),
               ...(currentToolSteps.length > 0 ? { toolSteps: currentToolSteps } : {}),
             },
