@@ -1,5 +1,6 @@
 import { SESSION_COOKIE_NAME } from "@/lib/auth"
 import { readServerEnvValue } from "@/lib/server/server-env"
+import { readSessionToken } from "@/lib/server/session-cookie"
 
 const MAX_REQUEST_BODY_BYTES = 256 * 1024
 const AUTOMATION_REQUEST_TIMEOUT_MS = 20_000
@@ -34,7 +35,7 @@ async function proxyAutomationRequest(
   context: RouteContext,
   method: HttpMethod,
 ): Promise<Response> {
-  const sessionToken = readCookie(request.headers.get("cookie"), SESSION_COOKIE_NAME)
+  const sessionToken = readSessionToken(request)
   if (!sessionToken) {
     return jsonResponse({ error: "Authentication required" }, 401)
   }
@@ -172,25 +173,6 @@ function getOaAuthAlias(): string {
   return readServerEnvValue("OA_AUTH_ALIAS") ||
     readServerEnvValue("AUTH_API_ALIAS") ||
     "default"
-}
-
-function readCookie(cookieHeader: string | null, name: string): string | null {
-  if (!cookieHeader) {
-    return null
-  }
-  for (const part of cookieHeader.split(";")) {
-    const separator = part.indexOf("=")
-    if (separator < 0 || part.slice(0, separator).trim() !== name) {
-      continue
-    }
-    const value = part.slice(separator + 1).trim()
-    try {
-      return decodeURIComponent(value)
-    } catch {
-      return value
-    }
-  }
-  return null
 }
 
 function ensureTrailingSlash(value: string): string {

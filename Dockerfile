@@ -52,6 +52,7 @@ FROM manifests AS web-build
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --workspace=frontend --include-workspace-root
 COPY frontend ./frontend
+COPY agent/src/api/cookies.ts ./agent/src/api/cookies.ts
 RUN npm run build --workspace=frontend
 
 FROM ${NODE_IMAGE} AS web-runtime

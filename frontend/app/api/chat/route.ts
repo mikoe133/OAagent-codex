@@ -1,7 +1,7 @@
 import { observeChatRoute, type ChatRequestDiagnostics } from "@/lib/server/chat-diagnostics"
 import { getAgentApiBaseUrl } from "@/lib/server/agent-api"
 
-import { SESSION_COOKIE_NAME } from "@/lib/auth"
+import { readSessionToken } from "@/lib/server/session-cookie"
 import { validConfirmationResponse } from '@/lib/chat-confirmation'
 import {
   DEFAULT_MODEL_PROVIDER,
@@ -59,7 +59,7 @@ async function handleChat(req: Request, diagnostics: ChatRequestDiagnostics) {
       return jsonResponse({ error: "Invalid request: messages array required" }, 400)
     }
 
-    const sessionToken = readCookie(req.headers.get("cookie"), SESSION_COOKIE_NAME)
+    const sessionToken = readSessionToken(req)
     if (!sessionToken) {
       return jsonResponse({ error: "Authentication required" }, 401)
     }
@@ -347,32 +347,6 @@ function jsonResponse(payload: { error: string }, status: number): Response {
       "Cache-Control": "no-store",
     },
   })
-}
-
-function readCookie(cookieHeader: string | null, name: string): string | null {
-  if (!cookieHeader) {
-    return null
-  }
-
-  for (const cookie of cookieHeader.split(";")) {
-    const [rawName, ...valueParts] = cookie.trim().split("=")
-    if (rawName !== name) {
-      continue
-    }
-
-    const rawValue = valueParts.join("=")
-    if (!rawValue) {
-      return null
-    }
-
-    try {
-      return decodeURIComponent(rawValue)
-    } catch {
-      return rawValue
-    }
-  }
-
-  return null
 }
 
 function toBearerToken(token: string): string {

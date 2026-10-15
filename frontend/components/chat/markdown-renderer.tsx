@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -62,7 +63,7 @@ const markdownComponents: Components = {
   td: ({ children }) => <td className="border-b border-stone-100 px-3 py-2 align-top last:border-b-0 theme-dark:border-zinc-800">{children}</td>,
 }
 
-export function MarkdownRenderer({ content, className, isStreaming = false }: MarkdownRendererProps) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className, isStreaming = false }: MarkdownRendererProps) {
   return (
     <div className={cn("min-w-0 max-w-full [overflow-wrap:anywhere] text-[0.9375rem] leading-7 text-stone-800 theme-dark:text-zinc-200", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents} skipHtml>
@@ -77,4 +78,4 @@ export function MarkdownRenderer({ content, className, isStreaming = false }: Ma
       )}
     </div>
   )
-}
+})

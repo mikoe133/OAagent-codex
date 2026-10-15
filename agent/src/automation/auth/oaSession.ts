@@ -3,6 +3,9 @@ import {
   createHmac,
   timingSafeEqual,
 } from "node:crypto";
+import { inflateSync } from "node:zlib";
+
+const MAX_SESSION_PAYLOAD_BYTES = 1024 * 1024;
 
 export type VerifiedOaSession = {
   userId: number;
@@ -26,13 +29,14 @@ export class OaSessionError extends Error {
   }
 }
 
-/** Verifies the default itsdangerous.TimestampSigner format used by the old OA. */
+/** Verifies an extracted OA session token, including itsdangerous zlib payloads. */
 export function verifyOaSession(
   signedSession: string,
   options: VerifyOaSessionOptions,
 ): VerifiedOaSession {
-  const normalized = decodeSessionValue(signedSession);
-  const parts = normalized.split(".");
+  const normalized = signedSession.trim();
+  const compressed = normalized.startsWith(".");
+  const parts = (compressed ? normalized.slice(1) : normalized).split(".");
   if (parts.length !== 3) {
     throw invalidSession();
   }
@@ -41,7 +45,8 @@ export function verifyOaSession(
     throw invalidSession();
   }
 
-  const value = `${payloadBase64}.${timestampBase64}`;
+  // The compression marker is part of the signed value, not just a payload hint.
+  const value = `${compressed ? "." : ""}${payloadBase64}.${timestampBase64}`;
   const derivedKey = createHash("sha1")
     .update("itsdangerous.Signersigner", "utf8")
     .update(options.secret, "utf8")
@@ -64,7 +69,11 @@ export function verifyOaSession(
 
   let payload: unknown;
   try {
-    payload = JSON.parse(Buffer.from(payloadBase64, "base64").toString("utf8"));
+    const bytes = Buffer.from(fromBase64Url(payloadBase64), "base64");
+    const decoded = compressed
+      ? inflateSync(bytes, { maxOutputLength: MAX_SESSION_PAYLOAD_BYTES })
+      : bytes;
+    payload = JSON.parse(decoded.toString("utf8"));
   } catch {
     throw invalidSession();
   }
@@ -82,14 +91,6 @@ export function verifyOaSession(
     payload: record,
     signedAtSeconds,
   };
-}
-
-function decodeSessionValue(value: string): string {
-  try {
-    return decodeURIComponent(value.trim());
-  } catch {
-    throw invalidSession();
-  }
 }
 
 function decodeTimestamp(value: string): number {

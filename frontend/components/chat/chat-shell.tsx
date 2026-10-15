@@ -550,7 +550,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     [],
   )
 
-  // Persist messages to localStorage whenever they change
+  // Keep live messages in memory; persist once the active response stops streaming.
   useEffect(() => {
     messagesRef.current = messages
 
@@ -559,7 +559,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       sessionMessagesRef.current.set(currentSessionId, messages)
     }
 
-    if (!isLoaded) {
+    if (!isLoaded || isStreaming) {
       return
     }
 
@@ -568,7 +568,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
     } catch (e) {
       console.error("Failed to save messages to localStorage:", e)
     }
-  }, [isLoaded, messages])
+  }, [isLoaded, isStreaming, messages])
 
   const animateSiderLayout = useCallback(
     (animate: boolean) => {

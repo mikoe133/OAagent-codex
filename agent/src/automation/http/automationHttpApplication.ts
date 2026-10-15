@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { ZodError } from "zod";
 
 import { verifyOaSession } from "../auth/oaSession.js";
+import { parseCookie } from "../../api/cookies.js";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -327,11 +328,9 @@ export class AutomationHttpApplication {
 function readSessionToken(request: IncomingMessage): string | null {
   const cookie = headerValue(request, "cookie");
   if (cookie) {
-    for (const part of cookie.split(";")) {
-      const [name, ...values] = part.trim().split("=");
-      if (name === "sessionid") {
-        return values.join("=").trim() || null;
-      }
+    const token = parseCookie(cookie, "sessionid");
+    if (token) {
+      return token;
     }
   }
   const direct = headerValue(request, "sessionid");

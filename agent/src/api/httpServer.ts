@@ -32,6 +32,7 @@ import { getOaReadService, readToolToken } from "../infrastructure/oa-read/readS
 import { readOaAdminPermission } from "../infrastructure/oa/oaChatAccess.js";
 import { getActiveOaQueryPolicy } from "../infrastructure/oa/oaQueryPolicy.js";
 import { confirmationToolToken, createChatConfirmation, confirmationRequestSchema } from '../chat/confirmation.js';
+import { parseCookie } from "./cookies.js";
 
 const MAX_BODY_BYTES = 128 * 1024;
 
@@ -497,7 +498,7 @@ function parseIncomingOaToken(
 
   if (headerName.toLowerCase() === "cookie") {
     return prefix.endsWith("=")
-      ? parseCookieValue(value, prefix.slice(0, -1))
+      ? parseCookie(value, prefix.slice(0, -1))
       : null;
   }
 
@@ -523,21 +524,6 @@ function parseIncomingOaToken(
   }
 
   return value;
-}
-
-function parseCookieValue(cookieHeader: string, cookieName: string): string | null {
-  if (!cookieName) {
-    return null;
-  }
-
-  for (const part of cookieHeader.split(";")) {
-    const [name, ...valueParts] = part.trim().split("=");
-    if (name === cookieName) {
-      const cookieValue = valueParts.join("=").trim();
-      return cookieValue || null;
-    }
-  }
-  return null;
 }
 
 function isLoopbackRequest(request: IncomingMessage): boolean {

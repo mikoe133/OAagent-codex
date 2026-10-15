@@ -2,7 +2,7 @@
 
 import { MessageAttachments } from "./message-attachments"
 import * as AccordionPrimitive from "@radix-ui/react-accordion"
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import {
   BadgeInfo,
@@ -59,7 +59,7 @@ const MESSAGE_ACTION_CONTROLS_CLASS =
   "flex items-center transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none pointer-fine:pointer-events-none pointer-fine:translate-y-0.5 pointer-fine:opacity-0 pointer-fine:group-hover/message:pointer-events-auto pointer-fine:group-hover/message:translate-y-0 pointer-fine:group-hover/message:opacity-100 pointer-fine:group-focus-within/message:pointer-events-auto pointer-fine:group-focus-within/message:translate-y-0 pointer-fine:group-focus-within/message:opacity-100"
 const TRACE_SUMMARY_MAX_CHARS = 48
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming = false,
   showActions = true,
@@ -174,7 +174,7 @@ export function MessageBubble({
       </div>
     </article>
   )
-}
+})
 
 function UserActions({ message }: { message: Message }) {
   const showCopy = message.content.trim().length > 0
