@@ -3,29 +3,23 @@ export function resolveLoadedSessionMessages<T extends { id?: unknown; durationM
   persistedMessages: T[],
   hasUnsyncedWork: boolean,
 ): T[] {
-  if (cachedMessages && (hasUnsyncedWork || cachedMessages.length > 0)) {
-    if (!hasUnsyncedWork) {
-      const persisted = new Map(persistedMessages
-        .filter(message => message.id)
-        .map(message => [message.id, message]))
-      let changed = false
-      const reconciled = cachedMessages.map(message => {
-        const stored = persisted.get(message.id)
-        if (!stored) return message
-        if (Array.isArray(stored.toolSteps) || Array.isArray(stored.traceMessages)) {
-          changed = true
-          return stored
-        }
-        if (message.durationMs !== stored.durationMs) {
-          changed = true
-          return { ...message, durationMs: stored.durationMs }
-        }
-        return message
-      })
-      if (changed) return reconciled
-    }
-    return cachedMessages
-  }
+  if (cachedMessages && hasUnsyncedWork) return cachedMessages
+  if (!cachedMessages?.length) return persistedMessages
+  if (!persistedMessages.length) return cachedMessages
 
-  return persistedMessages
+  const cached = new Map(cachedMessages.filter(message => message.id).map(message => [message.id, message]))
+  const persistedIds = new Set(persistedMessages.filter(message => message.id).map(message => message.id))
+
+  // Include messages sent on other devices in server order, while retaining local-only work.
+  const reconciled = persistedMessages.map(stored => {
+    const message = stored.id ? cached.get(stored.id) : undefined
+    if (!message || Array.isArray(stored.toolSteps) || Array.isArray(stored.traceMessages)) return stored
+    if (message.durationMs !== stored.durationMs) return { ...message, durationMs: stored.durationMs }
+    return message
+  })
+  reconciled.push(...cachedMessages.filter(message => !message.id || !persistedIds.has(message.id)))
+
+  return reconciled.length === cachedMessages.length && reconciled.every((message, index) => message === cachedMessages[index])
+    ? cachedMessages
+    : reconciled
 }
