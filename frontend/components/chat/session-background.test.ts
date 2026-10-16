@@ -104,7 +104,9 @@ test("a device with older cached history loads new server messages in server ord
 })
 
 test("reselecting an active session preserves live messages until its request is synced", () => {
-  const cached = [{ id: "live:assistant", content: "streaming", durationMs: undefined }]
+  const cached: Array<{ id: string; content: string; durationMs?: number }> = [
+    { id: "live:assistant", content: "streaming" },
+  ]
   const persisted = [{ id: "old:assistant", content: "old answer", durationMs: 1_000 }]
   assert.equal(resolveLoadedSessionMessages(cached, persisted, true), cached)
 })
@@ -117,7 +119,7 @@ test("missing server history preserves local-only messages without mutating the 
 test("matching cached messages retain richer local trace when server history has no trace", () => {
   const cached = [{ id: "same:assistant", content: "answer", durationMs: 9_000, toolSteps: [{ id: "lookup" }] }]
   const persisted = [{ id: "same:assistant", content: "answer", durationMs: 1_000 }]
-  const result = resolveLoadedSessionMessages(cached, persisted, false)
+  const result = resolveLoadedSessionMessages<{ id: string; content: string; durationMs: number; toolSteps?: { id: string }[] }>(cached, persisted, false)
   assert.equal(result[0]?.durationMs, 1_000)
   assert.equal(result[0]?.toolSteps, cached[0]?.toolSteps)
 })
