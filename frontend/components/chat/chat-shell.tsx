@@ -2,7 +2,7 @@
 
 import { validAttachments, validAttachmentOptions, type AttachmentSendOptions, type ChatAttachment } from "@/lib/chat-attachments"
 import { pendingChatConfirmation, validConfirmation, validConfirmationResponse, type ChatConfirmation, type ConfirmationResponse } from '@/lib/chat-confirmation'
-import { completedRequestEvent } from './chat-run-recovery'
+import { loadTerminalRequestEvent } from './chat-run-recovery'
 import { fetchChatWithDiagnostics, redirectToChatLogin, logChatDiagnostic, traceId, TRACE_HEADER } from "@/lib/chat-diagnostics"
 
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react"
@@ -972,6 +972,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
       let responseModel: string | undefined
       let responseProvider: string | undefined
       let responseDurationMs: number | undefined
+      let terminalState: "failed" | "cancelled" | undefined
       let currentConfirmation: ChatConfirmation | undefined
       let completedResult: Record<string, unknown> | null = null
 
@@ -1235,6 +1236,7 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
 
           if (event.type === "run.failed") {
             routingTraceGate.dismiss()
+            terminalState = event.state === 'cancelled' ? 'cancelled' : 'failed'
             responseDurationMs = serverResponseDurationMs(event)
             const storedTrace = restoreStoredTrace(event.traceEvents, event.state === 'cancelled' ? 'stopped' : 'failed')
             if (storedTrace) {
@@ -1315,18 +1317,26 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         cancelPendingTypewriter()
 
         // A connection may break after the server has committed its answer.
-        // Query this original request once; never repeat its business operation.
-        if (!controller.signal.aborted) {
-          let recovered: Record<string, unknown> | null = completedResult
-          if (!recovered) {
+        // Read only the original request, including after an acknowledged stop.
+        // A stop aborts the stream before its terminal timing can arrive.
+        let wasStopped = controller.signal.aborted || terminalState === 'cancelled' || (e instanceof Error && e.name === "AbortError")
+        let errorMessage = e instanceof Error ? e.message : "An error occurred"
+        let recoveredEvent: ChatStreamEvent | null = completedResult ? { type: 'run.completed', result: completedResult } : null
+        if (!recoveredEvent && responseDurationMs === undefined) {
             try {
-              const status = await fetchChatWithDiagnostics(`/api/chat/requests?recordId=${encodeURIComponent(currentAgentSessionId)}&requestId=${encodeURIComponent(requestId)}`, {
-                credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
-              })
-              if (status.ok) recovered = toRecord(completedRequestEvent(await status.json(), currentAgentSessionId, requestId)?.result)
+              const timeout = AbortSignal.timeout(8000)
+              const recoverySignal = controller.signal.aborted ? timeout : AbortSignal.any([controller.signal, timeout])
+              recoveredEvent = await loadTerminalRequestEvent(async () => {
+                const status = await fetchChatWithDiagnostics(`/api/chat/requests?recordId=${encodeURIComponent(currentAgentSessionId)}&requestId=${encodeURIComponent(requestId)}`, {
+                  credentials: 'same-origin', cache: 'no-store', signal: recoverySignal,
+                })
+                return status.ok ? status.json() : null
+              }, currentAgentSessionId, requestId)
             } catch { /* Preserve the original error if status is unavailable. */ }
-          }
-          if (recovered && !controller.signal.aborted) {
+        }
+        if (recoveredEvent?.type === 'run.completed') {
+          const recovered = toRecord(recoveredEvent.result)
+          if (recovered) {
             const trace = restoreStoredTrace(recovered.traceEvents)
             publishSessionMessages([...conversationMessages, userMessage, {
               ...assistantMessage, content: typeof recovered.finalResponse === 'string' ? recovered.finalResponse : accumulatedContent,
@@ -1340,9 +1350,16 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
             return
           }
         }
-
-        const wasStopped = e instanceof Error && e.name === "AbortError"
-        const errorMessage = e instanceof Error ? e.message : "An error occurred"
+        if (recoveredEvent?.type === 'run.failed') {
+          wasStopped = recoveredEvent.state === 'cancelled'
+          responseDurationMs = serverResponseDurationMs(recoveredEvent)
+          errorMessage = stringValue(recoveredEvent.error) || errorMessage
+          const trace = restoreStoredTrace(recoveredEvent.traceEvents, wasStopped ? 'stopped' : 'failed')
+          if (trace) {
+            currentToolSteps = trace.toolSteps
+            currentTraceMessages = trace.traceMessages
+          }
+        }
         currentToolSteps = finalizeToolSteps(
           currentToolSteps,
           wasStopped ? "stopped" : "failed",
