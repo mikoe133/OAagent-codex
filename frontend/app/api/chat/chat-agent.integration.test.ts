@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { restoreStoredTrace } from '../../../components/chat/stored-trace'
-import { completedRequestEvent } from '../../../components/chat/chat-run-recovery'
+import { completedRequestEvent, loadTerminalRequestEvent } from '../../../components/chat/chat-run-recovery'
 import { createChatConfirmation } from '../../../../agent/src/chat/confirmation'
 import { createAgentHttpServer } from '../../../../agent/src/api/httpServer'
 import { SessionStore } from '../../../../agent/src/infrastructure/persistence/sessionStore'
@@ -30,6 +30,8 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
   const saved = new Map(names.map(name => [name, process.env[name]]))
   const records = new Map<string, any>()
   let count = 0, modelCalls = 0
+  let enteredCancellation!: () => void
+  const cancellationStarted = new Promise<void>(resolve => { enteredCancellation = resolve })
   let clicked: unknown
   const confirmation = createChatConfirmation({ title: '创建目录并上传文件', description: '在指定知识库创建测试目录并上传附件', actions: ['创建目录', '上传文件'] })
   const oa = createServer(async (req, res) => {
@@ -49,8 +51,14 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
   const oaBase = await listen(oa)
   const storePath = path.join(directory, 'sessions.json')
   const config = { sessionStorePath: storePath, oaApiBaseUrl: oaBase, oaAuthAlias: 'default', oaUserTokenHeader: 'Authorization', oaUserTokenPrefix: 'Bearer', modelProvider: 'nexttoken', model: 'gpt-5.6-terra' } as AppConfig
-  const service = { async streamMessage(input: any, emit: any) {
+  const service = { async streamMessage(input: any, emit: any, signal?: AbortSignal) {
     modelCalls++
+    if (input.message === 'failed recovery') throw new Error('fixture failure')
+    if (input.message === 'cancel recovery') {
+      enteredCancellation()
+      signal!.throwIfAborted()
+      await new Promise<void>((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }))
+    }
     clicked = input.confirmationResponse
     await emit({ type: 'tool.started', sessionId: input.sessionId, itemId: 'lookup', toolType: 'mcp_tool_call', name: 'oa.lookup', input: { query: 'reports' } })
     await emit({ type: 'tool.completed', sessionId: input.sessionId, itemId: 'lookup', toolType: 'mcp_tool_call', name: 'oa.lookup', result: { count: 1 }, durationMs: 15 })
@@ -138,6 +146,34 @@ test('Web proxies resolve root .env and exercise a real HTTP Agent through OA cr
     const conflictingClick = await chat(request('/api/chat', 'POST', { ...clickPayload, confirmationResponse: { ...confirmationResponse, decision: 'decline' } }))
     assert.equal(conflictingClick.status, 409)
     assert.equal(modelCalls, 5)
+
+    const readStatus = async (requestId: string) => {
+      const response = await requests.GET(request(`/api/chat/requests?recordId=${recordId}&requestId=${requestId}`))
+      assert.equal(response.status, 200)
+      return response.json()
+    }
+    const failedStream = await chat(request('/api/chat', 'POST', {
+      recordId, requestId: 'failed-recovery', messages: [{ role: 'user', content: 'failed recovery' }],
+    }))
+    await failedStream.text()
+    const failedEvent = await loadTerminalRequestEvent(() => readStatus('failed-recovery'), recordId, 'failed-recovery')
+    assert.equal(failedEvent?.type, 'run.failed')
+    assert.equal(failedEvent?.state, 'failed')
+    assert.equal(typeof failedEvent?.durationMs, 'number')
+    assert.equal(failedEvent?.durationMs, records.get(recordId).record.messages.at(-1).durationMs)
+
+    const cancelStream = await chat(request('/api/chat', 'POST', {
+      recordId, requestId: 'cancel-recovery', messages: [{ role: 'user', content: 'cancel recovery' }],
+    }))
+    await cancellationStarted
+    const cancelled = await requests.POST(request(`/api/chat/requests?recordId=${recordId}&requestId=cancel-recovery&action=cancel`, 'POST'))
+    assert.equal(cancelled.status, 202)
+    const cancelledEvent = await loadTerminalRequestEvent(() => readStatus('cancel-recovery'), recordId, 'cancel-recovery')
+    await cancelStream.text()
+    assert.equal(cancelledEvent?.state, 'cancelled')
+    assert.equal(typeof cancelledEvent?.durationMs, 'number')
+    assert.equal(cancelledEvent?.durationMs, records.get(recordId).record.messages.at(-1).durationMs)
+    assert.equal(modelCalls, 7, 'status recovery must not execute the original business operation again')
 
   } finally {
     process.chdir(oldCwd)
