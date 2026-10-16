@@ -1323,16 +1323,16 @@ export function ChatShell({ oaNavigationUrl }: { oaNavigationUrl: string }) {
         let errorMessage = e instanceof Error ? e.message : "An error occurred"
         let recoveredEvent: ChatStreamEvent | null = completedResult ? { type: 'run.completed', result: completedResult } : null
         if (!recoveredEvent && responseDurationMs === undefined) {
-            try {
-              const timeout = AbortSignal.timeout(8000)
-              const recoverySignal = controller.signal.aborted ? timeout : AbortSignal.any([controller.signal, timeout])
-              recoveredEvent = await loadTerminalRequestEvent(async () => {
-                const status = await fetchChatWithDiagnostics(`/api/chat/requests?recordId=${encodeURIComponent(currentAgentSessionId)}&requestId=${encodeURIComponent(requestId)}`, {
-                  credentials: 'same-origin', cache: 'no-store', signal: recoverySignal,
-                })
-                return status.ok ? status.json() : null
-              }, currentAgentSessionId, requestId)
-            } catch { /* Preserve the original error if status is unavailable. */ }
+          try {
+            const timeout = AbortSignal.timeout(8000)
+            const recoverySignal = controller.signal.aborted ? timeout : AbortSignal.any([controller.signal, timeout])
+            recoveredEvent = await loadTerminalRequestEvent(async () => {
+              const status = await fetchChatWithDiagnostics(`/api/chat/requests?recordId=${encodeURIComponent(currentAgentSessionId)}&requestId=${encodeURIComponent(requestId)}`, {
+                credentials: 'same-origin', cache: 'no-store', signal: recoverySignal,
+              })
+              return status.ok ? status.json() : null
+            }, currentAgentSessionId, requestId)
+          } catch { /* Preserve the original error if status is unavailable. */ }
         }
         if (recoveredEvent?.type === 'run.completed') {
           const recovered = toRecord(recoveredEvent.result)
