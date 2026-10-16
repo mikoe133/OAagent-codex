@@ -54,7 +54,7 @@ test("keeps non-empty local messages while a session continues in the background
   const cachedMessages = [{ id: "local-message" }]
   const persistedMessages = [{ id: "oa-message" }]
 
-  assert.equal(resolveLoadedSessionMessages(cachedMessages, persistedMessages, false), cachedMessages)
+  assert.equal(resolveLoadedSessionMessages(cachedMessages, persistedMessages, true), cachedMessages)
 })
 
 test("keeps an empty local cache when that session still has unsynced work", () => {
@@ -78,4 +78,46 @@ test("server zero or missing duration is not replaced by a device's cached timin
   assert.equal(resolveLoadedSessionMessages(cached, [{ id: "same:assistant", durationMs: 0 }], false)[0]?.durationMs, 0)
   assert.equal(resolveLoadedSessionMessages(cached, [{ id: "same:assistant" }], false)[0]?.durationMs, undefined)
   assert.equal(resolveLoadedSessionMessages(cached, [{ id: "same:assistant", durationMs: 0 }], true), cached)
+})
+
+test("a device with older cached history loads new server messages in server order", () => {
+  const cached = [
+    { id: "first:user", content: "first" },
+    { id: "first:assistant", content: "first answer", durationMs: 210_000 },
+    { id: "local:user", content: "not yet committed" },
+  ]
+  const persisted = [
+    { id: "first:user", content: "first" },
+    { id: "first:assistant", content: "first answer", durationMs: 193_992 },
+    { id: "second:user", content: "sent from another device" },
+    { id: "second:assistant", content: "second answer", durationMs: 47_525 },
+  ]
+
+  const result = resolveLoadedSessionMessages(cached, persisted, false)
+  assert.deepEqual(result.map(message => message.id), [
+    "first:user", "first:assistant", "second:user", "second:assistant", "local:user",
+  ])
+  assert.equal(result[1]?.durationMs, 193_992)
+  assert.equal(result[3]?.durationMs, 47_525)
+  assert.equal(cached[1]?.durationMs, 210_000)
+  assert.equal(cached.length, 3)
+})
+
+test("reselecting an active session preserves live messages until its request is synced", () => {
+  const cached = [{ id: "live:assistant", content: "streaming", durationMs: undefined }]
+  const persisted = [{ id: "old:assistant", content: "old answer", durationMs: 1_000 }]
+  assert.equal(resolveLoadedSessionMessages(cached, persisted, true), cached)
+})
+
+test("missing server history preserves local-only messages without mutating the cache", () => {
+  const cached = [{ id: "local:assistant", content: "unsynced answer", durationMs: 1_000 }]
+  assert.equal(resolveLoadedSessionMessages(cached, [], false), cached)
+})
+
+test("matching cached messages retain richer local trace when server history has no trace", () => {
+  const cached = [{ id: "same:assistant", content: "answer", durationMs: 9_000, toolSteps: [{ id: "lookup" }] }]
+  const persisted = [{ id: "same:assistant", content: "answer", durationMs: 1_000 }]
+  const result = resolveLoadedSessionMessages(cached, persisted, false)
+  assert.equal(result[0]?.durationMs, 1_000)
+  assert.equal(result[0]?.toolSteps, cached[0]?.toolSteps)
 })
