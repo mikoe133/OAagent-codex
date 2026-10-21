@@ -4,6 +4,7 @@ import { confirmationToolToken, type ChatConfirmation, type ConfirmationResponse
 import { beginReportTurn, checkReportAnswer, finishReportTurn, hasReportForTurn } from '../infrastructure/oa-read/reportCoverage.js';
 import { completedTurnEvents, runCompletedTurn } from '../infrastructure/codex/completedTurn.js';
 import { applyAttachmentRoute } from '../attachments/attachmentRouting.js';
+import { ModelCreditsError, isModelCreditsFailure } from '../chat/modelCreditsError.js';
 import { prepareAttachmentInput, attachmentTurn, supportsImages } from '../attachments/attachmentContext.js';
 import type { ThreadEvent, ThreadItem, Usage } from "@openai/codex-sdk";
 import { withDatabaseReadRouting } from "../infrastructure/oa-read/routing.js";
@@ -1109,6 +1110,9 @@ async function resolveRunConfig(
     formatSemanticRouteTraceMessage,
   );
   signal?.throwIfAborted();
+  if (attachments && route.diagnostics.strategy === 'fallback' && route.diagnostics.failureCode === 'model_credits_exhausted') {
+    throw new ModelCreditsError();
+  }
   const execution = sessionId && route.attachment
     ? applyAttachmentRoute(sessionId, modelProvider, model, route.attachment, route.diagnostics.strategy === 'fallback') : undefined;
   return {
@@ -1313,6 +1317,7 @@ export function resolveStreamFailure(
   const caughtMessage =
     caughtError instanceof Error ? caughtError.message : String(caughtError);
   const message = turnFailure?.trim() || caughtMessage;
+  if (isModelCreditsFailure(message)) return new ModelCreditsError();
   if (message.startsWith("Failed to parse item:")) {
     return new Error(
       "Codex SDK 无法解析 JSONL 事件流。工具输出可能包含被 Node 24 误判为换行的 Unicode 分隔符，请重试；若持续发生，请改用 Node 22 运行服务。",

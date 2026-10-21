@@ -23,8 +23,8 @@ export const ATTACHMENT_DECISION_SCHEMA = {
     reason: { type: 'string', minLength: 1, maxLength: 200 },
   },
 } as const;
-export function unavailableAttachmentDecision(): AttachmentDecision {
-  return { intent: 'clarify', requiresVision: false, visionModel: 'moonshotai/kimi-k3', reason: '附件语义路由暂不可用，请明确需求后重试。' };
+export function unavailableAttachmentDecision(reason = '附件语义路由暂不可用，请明确需求后重试。'): AttachmentDecision {
+  return { intent: 'clarify', requiresVision: false, visionModel: 'moonshotai/kimi-k3', reason };
 }
 // Validate the model's structured decision, never infer intent from keywords.
 export function decodeAttachmentDecision(value: unknown, input: AttachmentRoutingInput): AttachmentDecision {

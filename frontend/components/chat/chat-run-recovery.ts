@@ -28,7 +28,7 @@ export async function loadTerminalRequestEvent(
     if (request.recordId !== recordId || request.requestId !== requestId) return null
     if (request.state === 'completed') return completedRequestEvent(request, recordId, requestId)
     if (request.state === 'failed' || request.state === 'cancelled') {
-      return { type: 'run.failed', state: request.state, error: request.errorCode,
+      return { type: 'run.failed', state: request.state, error: request.errorMessage ?? request.errorCode,
         durationMs: serverResponseDurationMs(request), traceEvents: request.traceEvents }
     }
     if (request.state !== 'queued' && request.state !== 'running') return null

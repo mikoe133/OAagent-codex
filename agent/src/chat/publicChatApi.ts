@@ -10,6 +10,7 @@ import type { AgentService, SendMessageInput } from '../application/agentService
 import type { SessionStore } from '../infrastructure/persistence/sessionStore.js';
 import { getDefaultModel, resolveRequestedModel, resolveRequestedProvider, resolveRequestedRouterModel, resolveRequestedRouterModels } from '../config/modelCatalog.js';
 import { ChatError, ChatScheduler } from './chatScheduler.js';
+import { publicChatFailureMessage } from './modelCreditsError.js';
 import { CopilotClient, type CopilotRecord } from './copilotClient.js';
 import { RequestStore, fingerprint, requestDurationMs, type RequestRecord } from './requestStore.js';
 import { ChatTraceRecorder } from './chatTrace.js';
@@ -277,7 +278,7 @@ export class PublicChatApi {
     value.errorCode = error instanceof ChatError ? error.code : 'agent_failed';
     value.updatedAt = new Date().toISOString();
     value.durationMs = requestDurationMs(value);
-    await trace.record({ type: 'run.failed', status: value.state, error: value.errorCode });
+    await trace.record({ type: 'run.failed', status: value.state, error: publicChatFailureMessage(value.errorCode) });
     await this.records.save(key, value);
   }
   private async exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -293,7 +294,7 @@ export class PublicChatApi {
       { id: `${value.requestId}:assistant`, requestId: value.requestId, role: 'assistant', content: value.result?.finalResponse ?? '',
         createdAt: value.updatedAt, status: value.state === 'cancelled' ? 'stopped' : value.state,
         durationMs: requestDurationMs(value),
-        ...(value.errorCode ? { error: value.errorCode } : {}),
+        ...(value.errorCode ? { error: publicChatFailureMessage(value.errorCode) } : {}),
         ...(value.result ? { model: value.result.model, provider: value.result.provider } : {}),
         ...(value.result?.confirmation ? { confirmation: value.result.confirmation } : {}),
         knowledgeSources: value.result?.knowledgeSources ?? [], traceEvents },
@@ -332,7 +333,7 @@ export class PublicChatApi {
       latency?.finish({ status: value?.state === 'completed' ? 'completed' : 'failed', provider: value?.result?.provider, model: value?.result?.model });
       emit(value?.state === 'completed'
         ? { type: 'run.completed', recordId, requestId, result: { ...value.result, traceEvents: value.traceEvents }, historySync: value.historySync }
-        : { type: 'run.failed', recordId, requestId, error: value?.errorCode ?? 'outcome_unknown', state: value?.state, durationMs: value?.durationMs, traceEvents: value?.traceEvents });
+        : { type: 'run.failed', recordId, requestId, error: publicChatFailureMessage(value?.errorCode ?? 'outcome_unknown'), state: value?.state, durationMs: value?.durationMs, traceEvents: value?.traceEvents });
     } catch { emit({ type: 'run.failed', recordId, requestId, error: 'result_unavailable' }); }
     finally { cleanup(); if (!res.destroyed) res.end(); }
   }
@@ -340,7 +341,7 @@ export class PublicChatApi {
 function publicRequest(value: RequestRecord | null) {
   if (!value) return { code: 'request_not_found' };
   const { fingerprint: _digest, ...result } = value;
-  return result;
+  return { ...result, ...(value.errorCode ? { errorMessage: publicChatFailureMessage(value.errorCode) } : {}) };
 }
 async function readBody(req: IncomingMessage): Promise<Record<string, any>> {
   const buffers: Buffer[] = []; let length = 0;

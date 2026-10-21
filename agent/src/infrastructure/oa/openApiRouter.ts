@@ -1,5 +1,6 @@
 import { ATTACHMENT_DECISION_SCHEMA, decodeAttachmentDecision, unavailableAttachmentDecision, type AttachmentDecision, type AttachmentRoutingInput } from '../../attachments/attachmentIntent.js';
 import { reportPeriodSchema, type ReportPeriod } from '../oa-read/reportPlan.js';
+import { ModelCreditsError, MODEL_CREDITS_MESSAGE, isModelCreditsFailure } from '../../chat/modelCreditsError.js';
 import type { AppConfig } from "../../config/config.js";
 import { ROUTER_MODEL_CATALOG } from "../../config/modelCatalog.js";
 import { isChatOpenApiOperationAllowed } from "./openApiChatPolicy.js";
@@ -74,7 +75,7 @@ export type OpenApiRouteDiagnostics =
       winningModel?: string;
       racedModelCount?: number;
     }
-  | { strategy: "fallback"; failureReason: string };
+  | { strategy: "fallback"; failureReason: string; failureCode?: 'model_credits_exhausted' };
 
 const SEMANTIC_ROUTE_SCHEMA = {
   type: "object",
@@ -164,6 +165,7 @@ export function createOpenApiSemanticRouter(
     });
 
     if (!response.ok) {
+      if (response.status === 402) throw new ModelCreditsError();
       throw new Error(`semantic router request failed with status ${response.status}`);
     }
 
@@ -245,7 +247,7 @@ export async function routeOpenApiRequest(
   const safeIndex = filterSafeOperations(index, input.allowAdmin === true);
   const fallbackCatalogs = getFallbackCatalogs(safeIndex);
   const fallback = (error: unknown): OpenApiRouteResult => ({
-    ...(input.attachments ? { attachment: unavailableAttachmentDecision() } : {}),
+    ...(input.attachments ? { attachment: unavailableAttachmentDecision(isModelCreditsFailure(error) ? MODEL_CREDITS_MESSAGE : undefined) } : {}),
     catalogs: input.attachments ? [] : prioritizeRwkvKnowledgeCatalog(input.task, fallbackCatalogs),
     candidates: input.attachments ? [] : selectFallbackCandidates(
       safeIndex,
@@ -255,6 +257,7 @@ export async function routeOpenApiRequest(
     diagnostics: {
       strategy: "fallback",
       failureReason: describeSemanticRouteFailure(error),
+      ...(isModelCreditsFailure(error) ? { failureCode: 'model_credits_exhausted' as const } : {}),
     },
   });
 
@@ -343,7 +346,7 @@ export async function routeOpenApiRequestRace(
     };
   } catch {
     // Every contender has already produced a safe fallback. Never start another request.
-    return failures[0]!;
+    return failures.find(result => result?.diagnostics.strategy === 'fallback' && result.diagnostics.failureCode === 'model_credits_exhausted') ?? failures[0]!;
   } finally {
     for (const controller of controllers) controller.abort();
   }
@@ -405,6 +408,7 @@ async function requestSemanticRoute(
       return decodeSemanticRoute(response, candidateIndex, input.attachments);
     } catch (error) {
       lastError = error;
+      if (error instanceof ModelCreditsError) break;
       if (
         input.signal?.aborted ||
         timeoutSignal.aborted ||
@@ -869,6 +873,7 @@ function getFallbackCatalogs(index: OpenApiOperationIndex): OpenApiCatalog[] {
 }
 
 function describeSemanticRouteFailure(error: unknown): string {
+  if (isModelCreditsFailure(error)) return MODEL_CREDITS_MESSAGE;
   const name = error instanceof Error ? error.name.toLowerCase() : "";
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   const details = `${name} ${message}`;
