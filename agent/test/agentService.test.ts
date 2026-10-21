@@ -89,6 +89,7 @@ describe("model provider selection", () => {
       "moonshotai/kimi-k3",
       "qwen/qwen3.8-max-0902",
       "deepseek/deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash-1017",
       "openai/gpt-5.5",
       "openai/gpt-5.4",
     ]);
@@ -111,6 +112,14 @@ describe("model provider selection", () => {
         "z-ai/glm-5.3",
       ),
       "deepseek/deepseek-v4.1-flash",
+    );
+    assert.equal(
+      resolveRequestedModel(
+        "openrouter",
+        "deepseek/deepseek-v4.1-flash-1017",
+        "deepseek/deepseek-v4.1-flash",
+      ),
+      "deepseek/deepseek-v4.1-flash-1017",
     );
     assert.throws(
       () => resolveRequestedModel("openrouter", "z-ai/glm-5.2", "z-ai/glm-5.3"),
@@ -518,6 +527,12 @@ describe("request routing progress", () => {
 });
 
 describe("resolveStreamFailure", () => {
+  it("recognizes OpenRouter insufficient credits without exposing upstream details", () => {
+    const failure = resolveStreamFailure(new Error("Codex exited"), "402 Insufficient credits secret-provider-key", []);
+    assert.match(failure.message, /余额不足.*402/);
+    assert.match(failure.message, /充值/);
+    assert.doesNotMatch(failure.message, /secret-provider-key/);
+  });
   it("prefers the structured Codex turn failure over the process exit error", () => {
     const failure = resolveStreamFailure(
       new Error(

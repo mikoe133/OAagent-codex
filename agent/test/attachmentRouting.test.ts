@@ -33,6 +33,20 @@ const response = (attachment: AttachmentDecision) => JSON.stringify({
   catalogs: [], tags: [], operationIds: [], searchTerms: [], accessMode: 'read', attachment,
 });
 
+test('reports exhausted router credits and avoids retrying an unchanged billing failure', async () => {
+  let calls = 0;
+  const router = createOpenApiSemanticRouter(config, async () => {
+    calls++;
+    return Response.json({ error: { message: 'Insufficient credits secret-provider-key' } }, { status: 402 });
+  }, true);
+  const route = await routeOpenApiRequest(config, index, { task: '看看截图', attachments: metadata(true) }, router);
+  assert.equal(route.diagnostics.strategy, 'fallback');
+  assert.match(route.attachment!.reason, /余额不足.*402/);
+  assert.match(route.attachment!.reason, /充值/);
+  assert.doesNotMatch(JSON.stringify(route), /secret-provider-key/);
+  assert.equal(calls, 1);
+});
+
 test('one structured router request classifies contextual document analysis and supplies actual text without switching', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'semantic-attachment-'));
   const file: StoredAttachment = { ...metadata().files[0]!, path: path.join(directory, 'bytes'), recordId: '1', createdAt: new Date().toISOString() };

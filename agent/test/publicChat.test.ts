@@ -10,6 +10,7 @@ import { SessionStore } from '../src/infrastructure/persistence/sessionStore.js'
 import { ChatScheduler } from '../src/chat/chatScheduler.js';
 import { ChatLatencyMetricsRecorder } from '../src/infrastructure/observability/chatLatency.js';
 import type { AgentService } from '../src/application/agentService.js';
+import { resolveStreamFailure } from '../src/application/agentService.js';
 import type { AppConfig } from '../src/config/config.js';
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
@@ -65,6 +66,7 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     await emit({ type: 'tool.started', sessionId: input.sessionId, itemId: 'lookup', toolType: 'command_execution', name: 'node scripts/callOaApi.mjs --operationId list_reports' });
     if (input.message === 'wait') { entered.resolve(); await release.promise; }
     if (input.message === 'fail') throw new Error('private secret');
+    if (input.message === 'credits') throw resolveStreamFailure(new Error('Codex exited'), '402 Insufficient credits private secret', []);
     if (input.message === 'cancel') {
       cancelEntered.resolve();
       await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
@@ -173,6 +175,15 @@ test('OA IDs, persistent idempotency, result/history queries, disconnection, fai
     assert.equal(cancelledHistory.traceEvents.at(-1).status, 'cancelled');
     assert.equal((await request('/1/messages', 'POST', { message: 'cancel' }, 'cancel')).status, 409);
     assert.equal(calls, 4);
+    const creditStream = await request('/1/messages/stream', 'POST', { message: 'credits' }, 'credits');
+    const creditEvents = (await creditStream.text()).split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
+    assert.match(creditEvents.at(-1).error, /余额不足.*402/);
+    assert.doesNotMatch(JSON.stringify(creditEvents), /private secret/);
+    const creditHistory = records.get('1').record.messages.find((message: any) => message.id === 'credits:assistant');
+    assert.match(creditHistory.error, /余额不足.*402/);
+    const creditStatus = await (await request('/1/requests/credits')).json();
+    assert.equal(creditStatus.errorCode, 'model_credits_exhausted');
+    assert.match(creditStatus.errorMessage, /余额不足.*402/);
     assert.equal((await request('/1/messages', 'POST', { message: 'x'.repeat(140000) }, 'large')).status, 413);
     const upload = await originalFetch(`${base}/v1/sessions/1/attachments`, {
       method: 'POST', headers: { Authorization: 'Bearer valid', 'x-file-name': 'notes.txt' }, body: 'attachment text',
