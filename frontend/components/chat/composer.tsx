@@ -1,6 +1,6 @@
 "use client"
 
-import { ATTACHMENT_ACCEPT, modelSupportsImages, validateAttachmentFiles } from "@/lib/chat-attachments"
+import { ATTACHMENT_ACCEPT, modelSupportsImages, pastedImageFiles, validateAttachmentFiles } from "@/lib/chat-attachments"
 import type React from "react"
 
 import { useState, useRef, useCallback, type KeyboardEvent, useEffect } from "react"
@@ -381,6 +381,18 @@ export function Composer({
     if (!error) setFiles(next)
   }, [files])
 
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (isStreaming || disabled || sendingRef.current) return
+    const images = pastedImageFiles(event.clipboardData, selectedProvider, selectedModel)
+    if (!images.length) return
+    // Keep the browser's normal text paste when the clipboard includes both text and images.
+    if (!event.clipboardData.getData("text/plain")) event.preventDefault()
+    const next = [...files, ...images]
+    const error = validateAttachmentFiles(next)
+    setAttachmentError(error)
+    if (!error) setFiles(next)
+  }, [disabled, files, isStreaming, selectedProvider, selectedModel])
+
   const availableModels = getModelsForProvider(selectedProvider)
   const currentModel = availableModels.find((model) => model.id === selectedModel) || availableModels[0]
   const placeholderText = isRecording ? "Listening..." : "Type a message... (Shift+Enter for new line)"
@@ -452,6 +464,7 @@ export function Composer({
                   handleInput()
                 }}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 placeholder=""
                 disabled={isStreaming || disabled || isSending}
                 rows={1}
@@ -609,7 +622,7 @@ export function Composer({
                           className="h-4 w-4 shrink-0 rounded-sm object-contain"
                         />
                         <span className="min-w-0 flex-1 truncate whitespace-nowrap text-sm" title={model.name}>{model.name}</span>
-                        {selectedProvider === "openrouter" && !modelDisabled && <span className="ml-auto shrink-0 text-[0.625rem] text-stone-500">{modelSupportsImages(selectedProvider, model.id) ? "图片 · 文字" : "文字"}</span>}
+                        {selectedProvider === "openrouter" && !modelDisabled && <span className="ml-auto shrink-0 text-[0.625rem] text-stone-500">{modelSupportsImages(selectedProvider, model.id) ? "文字/图片" : "文字"}</span>}
                       </DropdownMenuItem>
                     )
                   })}

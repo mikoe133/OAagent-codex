@@ -1,7 +1,22 @@
 export type ChatAttachment = { id: string; recordId: string; name: string; mime: string; size: number; createdAt: string }
 export const ATTACHMENT_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.pdf,.docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.md,.csv,.json,.log,.zip'
 export function modelSupportsImages(provider: string, model: string) {
-  return provider === 'openrouter' && ['moonshotai/kimi-k3', 'qwen/qwen3.8-max-0902'].includes(model)
+  return provider === 'openrouter' && ['moonshotai/kimi-k3', 'qwen/qwen3.8-max-0902', 'deepseek/deepseek-v4.1-flash-1017'].includes(model)
+}
+export function pastedImageFiles(clipboard: Pick<DataTransfer, 'items' | 'files'>, provider: string, model: string): File[] {
+  if (!modelSupportsImages(provider, model)) return []
+  const images = Array.from(clipboard.items)
+    .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+    .map(item => item.getAsFile())
+    .filter((file): file is File => file !== null)
+  const files = images.length ? images : Array.from(clipboard.files).filter(file => file.type.startsWith('image/'))
+  const extensions: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
+  return files.map((file, index) => {
+    const extension = extensions[file.type]
+    return extension && !/\.(png|jpe?g|gif|webp)$/i.test(file.name)
+      ? new File([file], `pasted-image-${index + 1}.${extension}`, { type: file.type, lastModified: file.lastModified })
+      : file
+  })
 }
 export function attachmentUrl(file: ChatAttachment) {
   return `/api/chat/attachments?recordId=${encodeURIComponent(file.recordId)}&id=${encodeURIComponent(file.id)}`
