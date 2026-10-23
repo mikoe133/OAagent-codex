@@ -27,53 +27,55 @@ test("POST normalizes quoted cookies and rejects malformed cookies before forwar
   }
 })
 
-test("POST forwards the selected DeepSeek V4.1 Flash model to the agent service", async () => {
-  const originalFetch = globalThis.fetch
-  let forwardedBody: unknown = null
-  let forwardedAuthorization: string | null = null
+for (const model of ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash-1017"]) {
+  test(`POST forwards the selected ${model} model to the agent service`, async () => {
+    const originalFetch = globalThis.fetch
+    let forwardedBody: unknown = null
+    let forwardedAuthorization: string | null = null
 
-  globalThis.fetch = async (_input, init) => {
-    forwardedBody = JSON.parse(String(init?.body || "{}"))
-    forwardedAuthorization = new Headers(init?.headers).get("authorization")
-    return new Response(
-      'event: run.completed\ndata: {"type":"run.completed","result":{"finalResponse":"ok","knowledgeSources":[{"title":"生产部署手册","description":"部署要求","sourceUrl":"https://oa-kb.example.test/wiki/page-1"}]}}\n\n',
-      {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      },
-    )
-  }
-
-  try {
-    const response = await POST(
-      new Request("http://localhost/api/chat", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          cookie: "sessionid=test-session-token",
+    globalThis.fetch = async (_input, init) => {
+      forwardedBody = JSON.parse(String(init?.body || "{}"))
+      forwardedAuthorization = new Headers(init?.headers).get("authorization")
+      return new Response(
+        'event: run.completed\ndata: {"type":"run.completed","result":{"finalResponse":"ok","knowledgeSources":[{"title":"生产部署手册","description":"部署要求","sourceUrl":"https://oa-kb.example.test/wiki/page-1"}]}}\n\n',
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
         },
-        body: JSON.stringify({
-          recordId: "1", requestId: "request-1",
-          provider: "openrouter",
-          model: "deepseek/deepseek-v4.1-flash",
-          messages: [{ role: "user", content: "hello" }],
-        }),
-      }),
-    )
-    const responseText = await response.text()
+      )
+    }
 
-    assert.deepEqual(forwardedBody, {
-      message: "hello",
-      provider: "openrouter",
-      model: "deepseek/deepseek-v4.1-flash",
-    })
-    assert.equal(forwardedAuthorization, "Bearer test-session-token")
-    assert.match(responseText, /"knowledgeSources"/)
-    assert.match(responseText, /https:\/\/oa-kb\.example\.test\/wiki\/page-1/)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})
+    try {
+      const response = await POST(
+        new Request("http://localhost/api/chat", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: "sessionid=test-session-token",
+          },
+          body: JSON.stringify({
+            recordId: "1", requestId: "request-1",
+            provider: "openrouter",
+            model,
+            messages: [{ role: "user", content: "hello" }],
+          }),
+        }),
+      )
+      const responseText = await response.text()
+
+      assert.deepEqual(forwardedBody, {
+        message: "hello",
+        provider: "openrouter",
+        model,
+      })
+      assert.equal(forwardedAuthorization, "Bearer test-session-token")
+      assert.match(responseText, /"knowledgeSources"/)
+      assert.match(responseText, /https:\/\/oa-kb\.example\.test\/wiki\/page-1/)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+}
 
 test("POST forwards enabled developer mode and its dedicated router model", async () => {
   const originalFetch = globalThis.fetch

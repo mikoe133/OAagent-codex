@@ -30,6 +30,7 @@ test("loads custom Codex metadata for answer and lightweight router models", () 
   assert.equal(kimiCatalogPath, terraCatalogPath);
   assert.equal(resolveCodexModelCatalogPath("deepseek/deepseek-v4-pro"), undefined);
   assert.equal(deepSeekFlashCatalogPath, glmCatalogPath);
+  assert.equal(resolveCodexModelCatalogPath("deepseek/deepseek-v4.1-flash-1017"), glmCatalogPath);
   assert.equal(glmRouterCatalogPath, glmCatalogPath);
   assert.equal(qwenRouterCatalogPath, glmCatalogPath);
   assert.equal(deepSeekRouterCatalogPath, glmCatalogPath);
@@ -57,6 +58,7 @@ test("loads custom Codex metadata for answer and lightweight router models", () 
   assert.deepEqual(catalog.models.map((model) => model.slug).sort(), [
     "deepseek/deepseek-v4-flash",
     "deepseek/deepseek-v4.1-flash",
+    "deepseek/deepseek-v4.1-flash-1017",
     "gpt-5.6-terra",
     "moonshotai/kimi-k3",
     "qwen/qwen3.5-flash-02-23",
@@ -78,6 +80,9 @@ test("loads custom Codex metadata for answer and lightweight router models", () 
   assert.equal(metadata["deepseek/deepseek-v4.1-flash"]?.context_window, 1_048_576);
   assert.equal(metadata["deepseek/deepseek-v4.1-flash"]?.auto_compact_token_limit, 996_147);
   assert.equal(metadata["deepseek/deepseek-v4.1-flash"]?.supports_parallel_tool_calls, false);
+  assert.equal(metadata["deepseek/deepseek-v4.1-flash-1017"]?.display_name, "DeepSeek v4.1 1017");
+  assert.equal(metadata["deepseek/deepseek-v4.1-flash-1017"]?.context_window, 1_048_576);
+  assert.equal(metadata["deepseek/deepseek-v4.1-flash-1017"]?.auto_compact_token_limit, 996_147);
   assert.equal(metadata["z-ai/glm-4.7-flash"]?.display_name, "GLM 4.7 Flash");
   assert.equal(
     metadata["qwen/qwen3.5-flash-02-23"]?.display_name,

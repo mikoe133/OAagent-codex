@@ -14,18 +14,19 @@ import type { AppConfig } from '../src/config/config.js';
 import { decodeAttachmentDecision, type AttachmentDecision } from '../src/attachments/attachmentIntent.js';
 import { attachmentExecutionModel } from '../src/attachments/attachmentModel.js';
 
-test('attachment analysis routes to Kimi or retains Kimi/Qwen, without changing upload or ordinary chat', () => {
+test('attachment analysis routes to Kimi or retains vision models, without changing upload or ordinary chat', () => {
   const selections = [
     ['openrouter', 'z-ai/glm-5.3'],
     ['openrouter', 'deepseek/deepseek-v4.1-flash'], ['nexttoken', 'gpt-5.6-terra'],
     ['openrouter', 'moonshotai/kimi-k3'], ['openrouter', 'qwen/qwen3.8-max-0902'],
+    ['openrouter', 'deepseek/deepseek-v4.1-flash-1017'],
   ] as const;
   for (const [provider, model] of selections) {
     for (const intent of ['analyze', 'both', 'upload', 'clarify'] as const) {
       for (const requiresVision of [false, true]) {
         const result = attachmentExecutionModel(provider, model, { intent, requiresVision, visionModel: 'moonshotai/kimi-k3', reason: 'test' });
         const shouldSwitch = requiresVision && ['analyze', 'both'].includes(intent) &&
-          !['moonshotai/kimi-k3', 'qwen/qwen3.8-max-0902'].includes(model);
+          !['moonshotai/kimi-k3', 'qwen/qwen3.8-max-0902', 'deepseek/deepseek-v4.1-flash-1017'].includes(model);
         assert.deepEqual(result, shouldSwitch
           ? { provider: 'openrouter', model: 'moonshotai/kimi-k3', switched: true }
           : { provider, model, switched: false });
@@ -70,7 +71,7 @@ test('vision inputs only reach verified models; raw uploads skip parsing and cla
   try {
     bindAttachmentTurn('vision', [file]);
     applyAttachmentDecision('vision', decision('analyze', true));
-    for (const model of ['moonshotai/kimi-k3', 'qwen/qwen3.8-max-0902']) {
+    for (const model of ['moonshotai/kimi-k3', 'qwen/qwen3.8-max-0902', 'deepseek/deepseek-v4.1-flash-1017']) {
       const input = await prepareAttachmentInput('task', 'vision', 'openrouter', model);
       assert.ok(Array.isArray(input)); assert.deepEqual(input[1], { type: 'local_image', path: file.path });
     }

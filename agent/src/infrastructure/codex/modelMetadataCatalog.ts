@@ -87,6 +87,15 @@ const CUSTOM_MODEL_DEFINITIONS = {
     supportsParallelToolCalls: false,
     supportVerbosity: false,
   },
+  "deepseek/deepseek-v4.1-flash-1017": {
+    baseSlug: "gpt-5.5",
+    displayName: "DeepSeek v4.1 1017",
+    description: "DeepSeek V4.1 Flash October 17 snapshot served through OpenRouter.",
+    contextWindow: 1_048_576,
+    autoCompactTokenLimit: 996_147,
+    supportsParallelToolCalls: false,
+    supportVerbosity: false,
+  },
 } as const satisfies Record<string, CustomModelDefinition>;
 
 type CustomModelId = keyof typeof CUSTOM_MODEL_DEFINITIONS;

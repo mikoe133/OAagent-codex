@@ -46,6 +46,11 @@ export const MODELS_BY_PROVIDER = {
       name: "DeepSeek V4.1 Flash",
       icon: "/images/deepseek-color.png",
     },
+    {
+      id: "deepseek/deepseek-v4.1-flash-1017",
+      name: "DeepSeek v4.1 1017",
+      icon: "/images/deepseek-color.png",
+    },
   ],
 } as const satisfies Record<ModelProvider, readonly ModelOption[]>
 

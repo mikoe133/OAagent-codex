@@ -56,6 +56,7 @@ test("keeps provider model lists isolated", () => {
       "moonshotai/kimi-k3",
       "qwen/qwen3.8-max-0902",
       "deepseek/deepseek-v4.1-flash",
+      "deepseek/deepseek-v4.1-flash-1017",
     ],
   )
   assert.equal(isModelForProvider("openrouter", "z-ai/glm-5.3"), true)

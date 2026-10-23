@@ -82,6 +82,7 @@ test("protects public agent routes with a validated OA token", async () => {
           "moonshotai/kimi-k3",
           "qwen/qwen3.8-max-0902",
           "deepseek/deepseek-v4.1-flash",
+          "deepseek/deepseek-v4.1-flash-1017",
           "openai/gpt-5.5",
           "openai/gpt-5.4",
         ],

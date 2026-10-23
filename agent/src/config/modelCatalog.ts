@@ -33,6 +33,7 @@ export const MODEL_CATALOG = {
     "moonshotai/kimi-k3",
     "qwen/qwen3.8-max-0902",
     "deepseek/deepseek-v4.1-flash",
+    "deepseek/deepseek-v4.1-flash-1017",
     "openai/gpt-5.5",
     "openai/gpt-5.4",
   ],
@@ -73,6 +74,9 @@ export function getDefaultModel(provider: ModelProviderId): string {
 }
 
 export function getModelDisplayName(model: string): string {
+  if (model === "deepseek/deepseek-v4.1-flash-1017") {
+    return "DeepSeek v4.1 1017";
+  }
   const modelName = model.split("/").at(-1) ?? model;
   return modelName
     .split("-")
