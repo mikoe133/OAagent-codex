@@ -275,7 +275,7 @@ test("uses the validated page login userid for knowledge-base headers", async ()
   }
 });
 
-test("registers controlled knowledge API sources for the active session turn", async () => {
+test("registers document sources without citing folders or removing them from tool results", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "oa-agent-kb-source-"));
   const originalFetch = globalThis.fetch;
   const projectRoot = path.resolve(
@@ -307,12 +307,20 @@ test("registers controlled knowledge API sources for the active session turn", a
 
   beginKnowledgeBaseSourceTurn("kb-source-session");
   let knowledgeRequestHeaders: Headers | null = null;
+  const folder = {
+    id: "folder-1",
+    title: "部署资料目录",
+    kind: "folder",
+    sourceUrl: "https://oa-kb.example.test/wiki/folder-1",
+  };
   globalThis.fetch = async (_input, init) => {
     knowledgeRequestHeaders = new Headers(init?.headers);
     return Response.json({
       data: [
+        folder,
         {
           title: "生产部署手册",
+          kind: "page",
           excerpt: "发布前请确认数据库迁移。",
           sourceUrl: "https://oa-kb.example.test/wiki/page-1",
         },
@@ -342,6 +350,10 @@ test("registers controlled knowledge API sources for the active session turn", a
     );
     assert.equal(knowledgeRequestHeaders?.get("x-oa-user-id"), "19");
     assert.equal(knowledgeRequestHeaders?.get("agent_api_token"), null);
+    assert.deepEqual(
+      (response.body as { data: { data: unknown[] } }).data.data[0],
+      folder,
+    );
     assert.deepEqual(finishKnowledgeBaseSourceTurn("kb-source-session"), [
       {
         title: "生产部署手册",

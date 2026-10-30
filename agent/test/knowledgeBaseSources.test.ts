@@ -7,6 +7,86 @@ import {
 } from "../src/infrastructure/knowledgebase/knowledgeBaseSources.js";
 
 describe("knowledge base response sources", () => {
+  it("excludes folder links from directory listings while preserving document links", () => {
+    beginKnowledgeBaseSourceTurn("directory-source-session");
+    recordKnowledgeBaseSourceResult("directory-source-session", {
+      ok: true,
+      operationId: "listKnowledgeBasePages",
+      data: {
+        data: [
+          {
+            id: "folder-1",
+            title: "01 公司全景",
+            kind: "folder",
+            sourceUrl: "https://oa-kb.example.test/wiki/folder-1",
+          },
+          {
+            id: "page-1",
+            title: "00 公司全景",
+            kind: "page",
+            sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+          },
+        ],
+      },
+    });
+
+    assert.deepEqual(finishKnowledgeBaseSourceTurn("directory-source-session"), [
+      {
+        title: "00 公司全景",
+        description: "打开知识库查看完整内容。",
+        originalContent: "打开知识库查看完整内容。",
+        sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+      },
+    ]);
+  });
+
+  it("does not cite a folder even when a page lookup returns content for it", () => {
+    beginKnowledgeBaseSourceTurn("folder-lookup-session");
+    recordKnowledgeBaseSourceResult("folder-lookup-session", {
+      ok: true,
+      operationId: "getKnowledgeBasePage",
+      data: {
+        data: {
+          title: "01 公司全景",
+          kind: "folder",
+          content: "目录说明。",
+          sourceUrl: "https://oa-kb.example.test/wiki/folder-1",
+        },
+      },
+    });
+
+    assert.deepEqual(finishKnowledgeBaseSourceTurn("folder-lookup-session"), []);
+  });
+
+  it("keeps document sources nested inside a folder response", () => {
+    beginKnowledgeBaseSourceTurn("nested-directory-session");
+    recordKnowledgeBaseSourceResult("nested-directory-session", {
+      ok: true,
+      data: {
+        title: "01 公司全景",
+        kind: "folder",
+        sourceUrl: "https://oa-kb.example.test/wiki/folder-1",
+        children: [
+          {
+            title: "00 公司全景",
+            kind: "page",
+            excerpt: "公司介绍正文。",
+            sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+          },
+        ],
+      },
+    });
+
+    assert.deepEqual(finishKnowledgeBaseSourceTurn("nested-directory-session"), [
+      {
+        title: "00 公司全景",
+        description: "公司介绍正文。",
+        originalContent: "公司介绍正文。",
+        sourceUrl: "https://oa-kb.example.test/wiki/page-1",
+      },
+    ]);
+  });
+
   it("deduplicates sources and prefers page content over a search excerpt", () => {
     beginKnowledgeBaseSourceTurn("source-session");
     recordKnowledgeBaseSourceResult("source-session", {
