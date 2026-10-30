@@ -165,7 +165,7 @@ Cookie: foo=1; sessionid=<OA_USER_TOKEN>; bar=2
 | `model` | `string` | 本轮实际使用的模型 ID |
 | `finalResponse` | `string` | agent 的最终中文回答。已对已知密钥做脱敏 |
 | `executedCommands` | `string[]` | agent 运行过程中执行过的命令记录。已对已知密钥做脱敏 |
-| `knowledgeSources` | `{title,description,sourceUrl}[]` | 本轮知识库调用返回的去重来源。正文优先作为截断后的 `description`;没有正文时使用搜索摘要 |
+| `knowledgeSources` | `{title,description,sourceUrl}[]` | 本轮知识库调用返回的去重文档来源，排除 `kind: "folder"` 的目录。正文优先作为截断后的 `description`;没有正文时使用搜索摘要 |
 | `summary` | `string` | 写回 session 的紧凑摘要,用于后续续聊 |
 
 ### AgentStreamEvent

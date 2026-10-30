@@ -87,7 +87,8 @@ function visitSourceValues(
 
   const title = stringValue(record.title);
   const sourceUrl = safeHttpUrl(record.sourceUrl);
-  if (title && sourceUrl) {
+  // /wiki/:id opens documents; folder links render a missing-document state.
+  if (title && sourceUrl && record.kind !== "folder") {
     const content = extractContentText(record.content);
     const excerpt = stringValue(record.excerpt);
     const rawDescription = content || excerpt || "打开知识库查看完整内容。";
